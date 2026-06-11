@@ -1,0 +1,84 @@
+solis_storm_reserve_apply:
+  alias: "Solis - Pritaikyti audros/ESO rezervo režimą"
+  description: >
+    Audros/ESO REZERVO režimas: visa saulė kraunama į bateriją, namus maitina
+    TINKLAS, baterija namams NEiškraunama, į tinklą nieko neeksportuojama.
+    Mechanizmas — forsuoto krovimo (charge) slotas 1 visai parai, tik iš saulės
+    (grid-charge išjungtas). Cut-off SOC 100% → kraunama kol baterija pilna.
+  sequence:
+    # Į bateriją tik saulė — iš tinklo NEkrauti
+    - service: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh3p_allow_grid_to_charge_the_battery
+    # Eksportas: leidžiamas tik kai baterija beveik pilna (SOC ≥ 95%), kitaip OFF.
+    # Gyvai SOC kintant — valdo automatizacija "solis_storm_export_at_high_soc".
+    - choose:
+        - conditions:
+            - condition: numeric_state
+              entity_id: sensor.solis_s6_eh3p_battery_soc
+              above: 94
+          sequence:
+            - service: switch.turn_on
+              target:
+                entity_id: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
+      default:
+        - service: switch.turn_off
+          target:
+            entity_id: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
+    # Charge slotas 1: visa para
+    - service: time.set_value
+      target:
+        entity_id: time.solis_s6_eh3p_grid_time_of_use_charge_start_slot_1
+      data:
+        time: "00:00:00"
+    - service: time.set_value
+      target:
+        entity_id: time.solis_s6_eh3p_grid_time_of_use_charge_end_slot_1
+      data:
+        time: "23:59:00"
+    # Krovimo srovė didelė (BMS apriboja saugiai) — kad visa saulė eitų į bateriją
+    - service: number.set_value
+      target:
+        entity_id: number.solis_s6_eh3p_grid_time_of_use_charge_battery_current_slot_1
+      data:
+        value: 150
+    # Krauti kol pilna
+    - service: number.set_value
+      target:
+        entity_id: number.solis_s6_eh3p_grid_time_of_use_charge_cut_off_soc_slot_1
+      data:
+        value: 100
+    # Darbo režimas su TOU, kad charge slotas galiotų
+    - service: select.select_option
+      target:
+        entity_id: select.solis_s6_eh3p_work_mode
+      data:
+        option: "Self-Use + TOU"
+    # Įjungti krovimo slotą, išjungti iškrovimo slotą (jokio iškrovimo į tinklą/namus)
+    - service: switch.turn_on
+      target:
+        entity_id: switch.solis_s6_eh3p_grid_time_of_use_charging_period_1
+    - service: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+  mode: single
+
+solis_storm_reserve_clear:
+  alias: "Solis - Išjungti audros/ESO rezervo režimą"
+  description: >
+    Panaikina rezervo režimą: išjungia krovimo slotą ir grąžina Self-Use.
+    Normali dienos/nakties logika atsinaujins kitą 06:00 / 20:00.
+  sequence:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh3p_grid_time_of_use_charging_period_1
+    # Grąžinti eksportą į tinklą (normaliai leidžiamas)
+    - service: switch.turn_on
+      target:
+        entity_id: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
+    - service: select.select_option
+      target:
+        entity_id: select.solis_s6_eh3p_work_mode
+      data:
+        option: "Self-Use"
+  mode: single

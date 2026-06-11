@@ -1,0 +1,12 @@
+{
+  "domain": "solis_cloud_control",
+  "name": "Solis Cloud Control Integration",
+  "codeowners": [
+    "@mkuthan"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/mkuthan/solis-cloud-control",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/mkuthan/solis-cloud-control/issues",
+  "version": "2.18.0"
+}

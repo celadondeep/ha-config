@@ -1,0 +1,864 @@
+"""
+Access to the Soliscloud API for PV monitoring.
+Works for all Ginlong brands using the Soliscloud API
+
+For more information: https://github.com/hultenvp/solis-sensor/
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import hashlib
+
+# from hashlib import sha1
+import hmac
+import json
+import logging
+import math
+from datetime import datetime, timezone
+from http import HTTPStatus
+from typing import Any
+
+import aiofiles
+import async_timeout
+import yaml
+from aiohttp import ClientError, ClientSession
+
+from .ginlong_base import BaseAPI, GinlongData, PortalConfig
+from .soliscloud_const import *
+
+_LOGGER = logging.getLogger(__name__)
+
+# VERSION
+VERSION = "0.6.2"
+
+# API NAME
+API_NAME = "SolisCloud"
+
+# Response constants
+SUCCESS = "Success"
+CONTENT = "Content"
+STATUS_CODE = "StatusCode"
+MESSAGE = "Message"
+
+CONTROL_DELAY = 0.1
+CONTROL_RETRIES = 3
+
+# VALUE_RECORD = '_from_record'
+# VALUE_ELEMENT = ''
+
+VERB = "POST"
+
+INVERTER_DETAIL = "/v1/api/inverterDetail"
+PLANT_DETAIL = "/v1/api/stationDetail"
+PLANT_LIST = "/v1/api/userStationList"
+AUTHENTICATE = "/v2/api/login"
+CONTROL = "/v2/api/control"
+AT_READ = "/v2/api/atRead"
+
+from .control_const import ALL_CONTROLS
+
+InverterDataType = dict[str, dict[str, list]]
+
+"""{endpoint: [payload type, {key type, decimal precision}]}"""
+INVERTER_DATA: InverterDataType = {
+    INVERTER_DETAIL: {
+        INVERTER_SERIAL: ["sn", str, None],
+        INVERTER_PLANT_ID: ["stationId", str, None],
+        INVERTER_DEVICE_ID: ["id", str, None],
+        INVERTER_DATALOGGER_SERIAL: ["collectorId", str, None],
+        # Timestamp of measurement
+        INVERTER_TIMESTAMP_UPDATE: ["dataTimestamp", int, None],
+        INVERTER_STATE: ["state", int, None],
+        INVERTER_TEMPERATURE: ["inverterTemperature", float, 1],
+        INVERTER_POWER_STATE: ["currentState", int, None],
+        INVERTER_ACPOWER: ["pac", float, 3],
+        INVERTER_ACPOWER_STR: ["pacStr", str, None],
+        INVERTER_ACFREQUENCY: ["fac", float, 2],
+        INVERTER_ENERGY_TODAY: ["eToday", float, 3],  # Default
+        INVERTER_ENERGY_THIS_MONTH: ["eMonth", float, 3],
+        INVERTER_ENERGY_THIS_MONTH_STR: ["eMonthStr", str, None],
+        INVERTER_ENERGY_THIS_YEAR: ["eYear", float, 3],
+        INVERTER_ENERGY_THIS_YEAR_STR: ["eYearStr", str, None],
+        INVERTER_ENERGY_TOTAL_LIFE: ["eTotal", float, 3],
+        INVERTER_ENERGY_TOTAL_LIFE_STR: ["eTotalStr", str, None],
+        STRING_COUNT: ["dcInputtype", int, None],
+        STRING1_VOLTAGE: ["uPv1", float, 2],
+        STRING2_VOLTAGE: ["uPv2", float, 2],
+        STRING3_VOLTAGE: ["uPv3", float, 2],
+        STRING4_VOLTAGE: ["uPv4", float, 2],
+        STRING5_VOLTAGE: ["uPv5", float, 2],
+        STRING6_VOLTAGE: ["uPv6", float, 2],
+        STRING7_VOLTAGE: ["uPv7", float, 2],
+        STRING8_VOLTAGE: ["uPv8", float, 2],
+        STRING9_VOLTAGE: ["uPv9", float, 2],
+        STRING10_VOLTAGE: ["uPv10", float, 2],
+        STRING11_VOLTAGE: ["uPv11", float, 2],
+        STRING12_VOLTAGE: ["uPv12", float, 2],
+        STRING13_VOLTAGE: ["uPv13", float, 2],
+        STRING14_VOLTAGE: ["uPv14", float, 2],
+        STRING15_VOLTAGE: ["uPv15", float, 2],
+        STRING16_VOLTAGE: ["uPv16", float, 2],
+        STRING17_VOLTAGE: ["uPv17", float, 2],
+        STRING18_VOLTAGE: ["uPv18", float, 2],
+        STRING19_VOLTAGE: ["uPv19", float, 2],
+        STRING20_VOLTAGE: ["uPv20", float, 2],
+        STRING21_VOLTAGE: ["uPv21", float, 2],
+        STRING22_VOLTAGE: ["uPv22", float, 2],
+        STRING23_VOLTAGE: ["uPv23", float, 2],
+        STRING24_VOLTAGE: ["uPv24", float, 2],
+        STRING1_CURRENT: ["iPv1", float, 2],
+        STRING2_CURRENT: ["iPv2", float, 2],
+        STRING3_CURRENT: ["iPv3", float, 2],
+        STRING4_CURRENT: ["iPv4", float, 2],
+        STRING5_CURRENT: ["iPv5", float, 2],
+        STRING6_CURRENT: ["iPv6", float, 2],
+        STRING7_CURRENT: ["iPv7", float, 2],
+        STRING8_CURRENT: ["iPv8", float, 2],
+        STRING9_CURRENT: ["iPv9", float, 2],
+        STRING10_CURRENT: ["iPv10", float, 2],
+        STRING11_CURRENT: ["iPv11", float, 2],
+        STRING12_CURRENT: ["iPv12", float, 2],
+        STRING13_CURRENT: ["iPv13", float, 2],
+        STRING14_CURRENT: ["iPv14", float, 2],
+        STRING15_CURRENT: ["iPv15", float, 2],
+        STRING16_CURRENT: ["iPv16", float, 2],
+        STRING17_CURRENT: ["iPv17", float, 2],
+        STRING18_CURRENT: ["iPv18", float, 2],
+        STRING19_CURRENT: ["iPv19", float, 2],
+        STRING20_CURRENT: ["iPv20", float, 2],
+        STRING21_CURRENT: ["iPv21", float, 2],
+        STRING22_CURRENT: ["iPv22", float, 2],
+        STRING23_CURRENT: ["iPv23", float, 2],
+        STRING24_CURRENT: ["iPv24", float, 2],
+        STRING1_POWER: ["pow1", float, 2],
+        STRING2_POWER: ["pow2", float, 2],
+        STRING3_POWER: ["pow3", float, 2],
+        STRING4_POWER: ["pow4", float, 2],
+        STRING5_POWER: ["pow5", float, 2],
+        STRING6_POWER: ["pow6", float, 2],
+        STRING7_POWER: ["pow7", float, 2],
+        STRING8_POWER: ["pow8", float, 2],
+        STRING9_POWER: ["pow9", float, 2],
+        STRING10_POWER: ["pow10", float, 2],
+        STRING11_POWER: ["pow11", float, 2],
+        STRING12_POWER: ["pow12", float, 2],
+        STRING13_POWER: ["pow13", float, 2],
+        STRING14_POWER: ["pow14", float, 2],
+        STRING15_POWER: ["pow15", float, 2],
+        STRING16_POWER: ["pow16", float, 2],
+        STRING17_POWER: ["pow17", float, 2],
+        STRING18_POWER: ["pow18", float, 2],
+        STRING19_POWER: ["pow19", float, 2],
+        STRING20_POWER: ["pow20", float, 2],
+        STRING21_POWER: ["pow21", float, 2],
+        STRING22_POWER: ["pow22", float, 2],
+        STRING23_POWER: ["pow23", float, 2],
+        STRING24_POWER: ["pow24", float, 2],
+        PHASE1_VOLTAGE: ["uAc1", float, 2],
+        PHASE2_VOLTAGE: ["uAc2", float, 2],
+        PHASE3_VOLTAGE: ["uAc3", float, 2],
+        PHASE1_CURRENT: ["iAc1", float, 2],
+        PHASE2_CURRENT: ["iAc2", float, 2],
+        PHASE3_CURRENT: ["iAc3", float, 2],
+        BAT_POWER: ["batteryPower", float, 3],
+        BAT_POWER_STR: ["batteryPowerStr", str, None],
+        BAT_REMAINING_CAPACITY: ["batteryCapacitySoc", float, 2],
+        BAT_STATE_OF_HEALTH: ["batteryHealthSoh", float, 2],
+        BAT_CURRENT: ["storageBatteryCurrent", float, 2],
+        BAT_CURRENT_STR: ["storageBatteryCurrentStr", str, None],
+        BAT_VOLTAGE: ["storageBatteryVoltage", float, 2],
+        BAT_VOLTAGE_STR: ["storageBatteryVoltageStr", str, None],
+        BAT_DAILY_ENERGY_CHARGED: ["batteryTodayChargeEnergy", float, 3],
+        BAT_DAILY_ENERGY_CHARGED_STR: ["batteryTodayChargeEnergyStr", str, None],
+        BAT_DAILY_ENERGY_DISCHARGED: ["batteryTodayDischargeEnergy", float, 3],
+        BAT_DAILY_ENERGY_DISCHARGED_STR: ["batteryTodayDischargeEnergyStr", str, None],
+        BAT_MONTHLY_ENERGY_CHARGED: ["batteryMonthChargeEnergy", float, 3],
+        BAT_MONTHLY_ENERGY_CHARGED_STR: ["batteryMonthChargeEnergyStr", str, None],
+        BAT_MONTHLY_ENERGY_DISCHARGED: ["batteryMonthDischargeEnergy", float, 3],
+        BAT_MONTHLY_ENERGY_DISCHARGED_STR: [
+            "batteryMonthDischargeEnergyStr",
+            str,
+            None,
+        ],
+        BAT_YEARLY_ENERGY_CHARGED: ["batteryYearChargeEnergy", float, 3],
+        BAT_YEARLY_ENERGY_CHARGED_STR: ["batteryYearChargeEnergyStr", str, None],
+        BAT_YEARLY_ENERGY_DISCHARGED: ["batteryYearDischargeEnergy", float, 3],
+        BAT_YEARLY_ENERGY_DISCHARGED_STR: ["batteryYearDischargeEnergyStr", str, None],
+        BAT_TOTAL_ENERGY_CHARGED: ["batteryTotalChargeEnergy", float, 3],
+        BAT_TOTAL_ENERGY_CHARGED_STR: ["batteryTotalChargeEnergyStr", str, None],
+        BAT_TOTAL_ENERGY_DISCHARGED: ["batteryTotalDischargeEnergy", float, 3],
+        BAT_TOTAL_ENERGY_DISCHARGED_STR: ["batteryTotalDischargeEnergyStr", str, None],
+        # GRID_DAILY_ON_GRID_ENERGY:        ['gridSellTodayEnergy', float, 2], #On Plant detail
+        # GRID_DAILY_ON_GRID_ENERGY_STR:    ['gridSellTodayEnergyStr', str, None], #On Plant detail
+        # GRID_DAILY_ENERGY_PURCHASED:      ['gridPurchasedTodayEnergy', float, 2], #On Plant detail
+        # GRID_DAILY_ENERGY_USED:           ['homeLoadTodayEnergy', float, 2], #On Plant detail
+        # GRID_MONTHLY_ENERGY_PURCHASED:    ['gridPurchasedMonthEnergy', float, 2], #On Plant detail
+        # GRID_YEARLY_ENERGY_PURCHASED:     ['gridPurchasedYearEnergy', float, 2], #On Plant detail
+        GRID_TOTAL_ENERGY_PURCHASED: ["gridPurchasedTotalEnergy", float, 3],
+        GRID_TOTAL_ENERGY_PURCHASED_STR: ["gridPurchasedTotalEnergyStr", str, None],
+        GRID_TOTAL_ON_GRID_ENERGY: ["gridSellTotalEnergy", float, 3],
+        GRID_TOTAL_ON_GRID_ENERGY_STR: ["gridSellTotalEnergyStr", str, None],
+        GRID_TOTAL_POWER: ["psum", float, 3],
+        GRID_TOTAL_POWER_STR: ["psumStr", str, None],
+        GRID_TOTAL_ENERGY_USED: ["homeLoadTotalEnergy", float, 3],
+        GRID_TOTAL_ENERGY_USED_STR: ["homeLoadTotalEnergyStr", str, None],
+        GRID_PHASE1_POWER: ["pA", float, 3],
+        GRID_PHASE2_POWER: ["pB", float, 3],
+        GRID_PHASE3_POWER: ["pC", float, 3],
+        GRID_APPARENT_PHASE1_POWER: ["aLookedPower", float, 3],
+        GRID_APPARENT_PHASE2_POWER: ["bLookedPower", float, 3],
+        GRID_APPARENT_PHASE3_POWER: ["cLookedPower", float, 3],
+        GRID_REACTIVE_PHASE1_POWER: ["aReactivePower", float, 3],
+        GRID_REACTIVE_PHASE2_POWER: ["bReactivePower", float, 3],
+        GRID_REACTIVE_PHASE3_POWER: ["cReactivePower", float, 3],
+        GRID_TOTAL_CONSUMPTION_POWER: ["familyLoadPower", float, 3],
+        GRID_TOTAL_CONSUMPTION_POWER_STR: ["familyLoadPowerStr", str, None],
+        SOC_CHARGING_SET: ["socChargingSet", float, 0],
+        SOC_DISCHARGE_SET: ["socDischargeSet", float, 0],
+        BYPASS_LOAD_POWER: ["bypassLoadPower", float, 3],
+        BYPASS_LOAD_POWER_STR: ["bypassLoadPowerStr", str, None],
+        METER_ITEM_A_CURRENT: ["iA", float, 3],
+        METER_ITEM_A_VOLTAGE: ["uA", float, 3],
+        METER_ITEM_B_CURRENT: ["iB", float, 3],
+        METER_ITEM_B_VOLTAGE: ["uB", float, 3],
+        METER_ITEM_C_CURRENT: ["iC", float, 3],
+        METER_ITEM_C_VOLTAGE: ["uC", float, 3],
+        HMI_VERSION_ALL: ["hmiVersionAll", str, None],
+    },
+    PLANT_DETAIL: {
+        INVERTER_PLANT_NAME: ["sno", str, None],  # stationName no longer available?
+        INVERTER_LAT: ["latitude", float, 7],
+        INVERTER_LON: ["longitude", float, 7],
+        INVERTER_ADDRESS: ["cityStr", str, None],
+        INVERTER_ENERGY_TODAY: ["dayEnergy", float, 3],  # If override set
+        GRID_DAILY_ENERGY_PURCHASED: ["gridPurchasedDayEnergy", float, 3],
+        GRID_DAILY_ENERGY_PURCHASED_STR: ["gridPurchasedDayEnergyStr", str, None],
+        GRID_MONTHLY_ENERGY_PURCHASED: ["gridPurchasedMonthEnergy", float, 3],
+        GRID_MONTHLY_ENERGY_PURCHASED_STR: ["gridPurchasedMonthEnergyStr", str, None],
+        GRID_MONTHLY_ON_GRID_ENERGY: ["gridSellMonthEnergy", float, 3],
+        GRID_MONTHLY_ON_GRID_ENERGY_STR: ["gridSellMonthEnergyStr", str, None],
+        GRID_YEARLY_ENERGY_PURCHASED: ["gridPurchasedYearEnergy", float, 3],
+        GRID_YEARLY_ENERGY_PURCHASED_STR: ["gridPurchasedYearEnergyStr", str, None],
+        GRID_YEARLY_ON_GRID_ENERGY: ["gridSellYearEnergy", float, 3],
+        GRID_YEARLY_ON_GRID_ENERGY_STR: ["gridSellYearEnergyStr", str, None],
+        GRID_DAILY_ON_GRID_ENERGY: ["gridSellDayEnergy", float, 3],
+        GRID_DAILY_ON_GRID_ENERGY_STR: ["gridSellDayEnergyStr", str, None],
+        GRID_DAILY_ENERGY_USED: ["homeLoadEnergy", float, 3],
+        GRID_DAILY_ENERGY_USED_STR: ["homeLoadEnergyStr", str, None],
+        PLANT_TOTAL_CONSUMPTION_POWER: ["familyLoadPower", float, 3],
+        PLANT_TOTAL_CONSUMPTION_POWER_STR: ["familyLoadPowerStr", str, None],
+    },
+}
+
+
+class SoliscloudConfig(PortalConfig):
+    """Portal configuration data"""
+
+    def __init__(
+        self,
+        portal_domain: str,
+        portal_username: str,
+        portal_key_id: str,
+        portal_secret: bytes,
+        portal_plantid: str,
+        portal_password: str,
+    ) -> None:
+        super().__init__(
+            portal_domain,
+            portal_username,
+            portal_plantid,
+        )
+        self._key_id: str = portal_key_id
+        self._secret: bytes = portal_secret
+        self._workarounds = {}
+        self._password: str = portal_password
+
+    async def load_workarounds(self):
+        try:
+            async with aiofiles.open("/config/custom_components/solis/workarounds.yaml", "r") as file:
+                content = await file.read()
+                self._workarounds = yaml.safe_load(content)
+                _LOGGER.debug("workarounds: %s", self._workarounds)
+        except FileNotFoundError:
+            pass
+
+    @property
+    def key_id(self) -> str:
+        """Key ID."""
+        return self._key_id
+
+    @property
+    def secret(self) -> bytes:
+        """API Key."""
+        return self._secret
+
+    @property
+    def workarounds(self) -> dict[str, Any]:
+        """Return all workaround settings"""
+        return self._workarounds
+
+
+class SoliscloudAPI(BaseAPI):
+    """Class with functions for reading data from the Soliscloud Portal."""
+
+    def __init__(self, config: SoliscloudConfig) -> None:
+        self._config: SoliscloudConfig = config
+        self._session: ClientSession | None = None
+        self._is_online: bool = False
+        self._data: dict[str, str | int | float] = {}
+        self._inverter_list: dict[str, str] | None = None
+        self._token = ""
+        self._hmi_fb00 = {}
+
+    @property
+    def api_name(self) -> str:
+        """Return name of the API."""
+        return API_NAME
+
+    @property
+    def config(self) -> SoliscloudConfig:
+        """Config this for this API instance."""
+        return self._config
+
+    def hmi_fb00(self, inverter_sn):
+        return self._hmi_fb00.get(inverter_sn, None)
+
+    @property
+    def is_online(self) -> bool:
+        """Returns if we are logged in."""
+        return self._is_online
+
+    async def login(self, session: ClientSession) -> bool:
+        """See if we can build a list of inverters"""
+        self._session = session
+        self._inverter_list = None
+
+        # Load workarounds
+        await self._config.load_workarounds()
+
+        # Request inverter list
+        self._inverter_list = await self.fetch_inverter_list(self.config.plant_id)
+        if len(self._inverter_list) == 0:
+            _LOGGER.warning("No inverters found")
+            self._is_online = False
+        else:
+            _LOGGER.info("Login successful")
+            _LOGGER.debug("Found inverters: %s", list(self._inverter_list.keys()))
+            self._is_online = True
+            for inv in list(self._inverter_list):
+                data = await self.fetch_inverter_data(inv)
+                try:
+                    self._plant_name = getattr(data, INVERTER_PLANT_NAME)
+                except AttributeError:
+                    _LOGGER.info("No access to inverter %s, removing", inv)
+                    del self._inverter_list[inv]
+            if len(self._inverter_list) == 0:
+                _LOGGER.warning("No valid inverters found, login failed")
+                self._is_online = False
+                return self._is_online
+            else:
+                _LOGGER.debug("Valid inverters: %s", list(self._inverter_list.keys()))
+            try:
+                if not self.config._password:
+                    _LOGGER.info("No control password set; control mode disabled")
+                    self._token = ""
+                else:
+                    token = await self._fetch_token(self.config.username, self.config._password)
+                    self._token = token
+                    if token == "":
+                        _LOGGER.info("Failed to acquire CSRF token")
+                    else:
+                        _LOGGER.debug("CSRF token acquired")
+            except:
+                _LOGGER.info("Failed to acquire CSRF token")
+
+        return self.is_online
+
+    async def logout(self) -> None:
+        """Hand back session"""
+        self._session = None
+        self._is_online = False
+        self._inverter_list = None
+
+    async def fetch_inverter_list(self, plant_id: str) -> dict[str, str]:
+        """
+        Fetch return list of inverters { inverter serial : device_id }
+        """
+
+        device_ids = {}
+
+        params = {"stationId": plant_id}
+        result = await self._post_data_json("/v1/api/inverterList", params)
+
+        if result[SUCCESS] is True:
+            result_json: dict = result[CONTENT]
+            if result_json["code"] != "0":
+                _LOGGER.info(
+                    "%s responded with error: %s:%s",
+                    INVERTER_DETAIL,
+                    result_json["code"],
+                    result_json["msg"],
+                )
+                return device_ids
+            try:
+                for record in result_json["data"]["page"]["records"]:
+                    serial = record.get("sn")
+                    device_id = record.get("id")
+                    device_ids[serial] = device_id
+            except TypeError:
+                _LOGGER.debug("Response contains unexpected data: %s", result_json)
+        elif result[STATUS_CODE] == 408:
+            now = datetime.now().strftime("%d-%m-%Y %H:%M GMT")
+            _LOGGER.warning(
+                "Your system time must be set correctly for this integration \
+            to work, your time is %s",
+                now,
+            )
+        return device_ids
+
+    async def fetch_inverter_data(self, inverter_serial: str, controls=True) -> GinlongData | None:
+        """
+        Fetch data for given inverter.
+        Collect available data from payload and store as GinlongData object
+        """
+        _LOGGER.debug("Fetching data for serial: %s", inverter_serial)
+        self._data = {}
+        control_data = {}
+        if self.is_online:
+            if self._inverter_list is not None and inverter_serial in self._inverter_list:
+                device_id = self._inverter_list[inverter_serial]
+                # Throttle http calls to avoid 502 error
+                await asyncio.sleep(1)
+                payload = await self._get_inverter_details(device_id, inverter_serial)
+                await asyncio.sleep(1)
+                payload_detail = await self._get_station_details(self.config.plant_id)
+                if payload is not None:
+                    self._collect_inverter_data(payload)
+                    if inverter_serial not in self._hmi_fb00:
+                        hmi_flag = self._data[HMI_VERSION_ALL]
+                        self._hmi_fb00[inverter_serial] = int(hmi_flag, 16) >= int("4b00", 16)
+                        if self._hmi_fb00[inverter_serial]:
+                            _LOGGER.debug(
+                                f"HMI firmware version ({hmi_flag}) >=4B00 for Inverter SN {inverter_serial} "
+                            )
+                        else:
+                            _LOGGER.debug(
+                                f"HMI firmware version ({hmi_flag}) <4B00 for Inverter SN {inverter_serial} "
+                            )
+
+                if (self._token != "") and controls:
+                    _LOGGER.debug(f"Fetching control data for SN:{inverter_serial}")
+                    control_data = await self.get_control_data(inverter_serial)
+
+                if payload_detail is not None:
+                    self._collect_plant_data(payload_detail)
+
+                if self._data is not None and INVERTER_SERIAL in self._data:
+                    self._post_process()
+                    return GinlongData(self._data | control_data)
+
+                _LOGGER.debug("Unexpected response from server: %s", payload)
+        return None
+
+    async def _get_inverter_details(self, device_id: str, device_serial: str) -> dict[str, Any] | None:
+        """
+        Update inverter details
+        """
+
+        # Get inverter details
+        params = {"id": device_id, "sn": device_serial}
+
+        result = await self._post_data_json(INVERTER_DETAIL, params)
+
+        jsondata = None
+        if result[SUCCESS] is True:
+            jsondata = result[CONTENT]
+            if jsondata["code"] != "0":
+                _LOGGER.info(
+                    "%s responded with error: %s:%s",
+                    INVERTER_DETAIL,
+                    jsondata["code"],
+                    jsondata["msg"],
+                )
+                return None
+        else:
+            _LOGGER.info("Unable to fetch details for device with ID: %s", device_id)
+        return jsondata
+
+    def _collect_inverter_data(self, payload: dict[str, Any]) -> None:
+        """Fetch dynamic properties"""
+        jsondata = payload["data"]
+        attributes = INVERTER_DATA[INVERTER_DETAIL]
+        collect_energy_today = True
+        try:
+            collect_energy_today = not self.config.workarounds["use_energy_today_from_plant"]
+        except KeyError:
+            pass
+        if collect_energy_today:
+            _LOGGER.debug("Using inverterDetail for energy_today")
+
+        for dictkey in attributes:
+            key = attributes[dictkey][0]
+            type_ = attributes[dictkey][1]
+            precision = attributes[dictkey][2]
+            if key is not None:
+                value = None
+                if dictkey != INVERTER_ENERGY_TODAY or collect_energy_today:
+                    value = self._get_value(jsondata, key, type_, precision)
+                if value is not None:
+                    self._data[dictkey] = value
+
+    async def get_control_data(self, device_serial: str, cid="") -> dict[str, Any] | None:
+        control_data = {}
+
+        if device_serial in self._hmi_fb00:
+            if cid == "":
+                controls = ALL_CONTROLS[self._hmi_fb00[device_serial]]
+            else:
+                controls = [cid]
+            for cid in controls:
+                params = {"inverterSn": str(device_serial), "cid": str(cid)}
+                attempts = 0
+                valid = False
+                while (attempts < CONTROL_RETRIES) and not valid:
+                    attempts += 1
+                    result = await self._post_data_json(AT_READ, params, csrf=True)
+                    if result[SUCCESS] is True:
+                        jsondata = result[CONTENT]
+                        if jsondata["code"] == "0":
+                            _LOGGER.debug(f"    cid: {str(cid):5s} - {jsondata.get('data',{}).get('msg','')}")
+                            control_data[str(cid)] = jsondata.get("data", {}).get("msg", "")
+                            valid = True
+                        else:
+                            error = f"    cid: {str(cid):5s} - {AT_READ} responded with error: {jsondata['code']}:{jsondata['msg']}"
+
+                    else:
+                        error = f"  cid: {str(cid):5s} - {AT_READ} responded with error: {result[MESSAGE]}"
+
+                if not valid:
+                    _LOGGER.info(error)
+
+        return control_data
+
+    async def _get_station_details(self, plant_id: str) -> dict[str, str] | None:
+        """
+        Fetch Station Details
+        """
+
+        params = {"id": plant_id}
+        result = await self._post_data_json(PLANT_DETAIL, params)
+
+        if result[SUCCESS] is True:
+            jsondata: dict[str, str] = result[CONTENT]
+            if jsondata["code"] == "0":
+                return jsondata
+            else:
+                _LOGGER.info(
+                    "%s responded with error: %s:%s",
+                    PLANT_DETAIL,
+                    jsondata["code"],
+                    jsondata["msg"],
+                )
+        else:
+            _LOGGER.info("Unable to fetch details for Station with ID: %s", plant_id)
+        return None
+
+    def _collect_station_list_data(self, payload: dict[str, Any]) -> None:
+        """Fetch dynamic properties"""
+        jsondata = payload
+        attributes = INVERTER_DATA[PLANT_LIST]
+        collect_energy_today = False
+        try:
+            collect_energy_today = self.config.workarounds["use_energy_today_from_plant"]
+        except KeyError:
+            pass
+        if collect_energy_today:
+            _LOGGER.debug("Using stationDetail for energy_today")
+
+        for dictkey in attributes:
+            key = attributes[dictkey][0]
+            type_ = attributes[dictkey][1]
+            precision = attributes[dictkey][2]
+            if key is not None:
+                value = None
+                if dictkey != INVERTER_ENERGY_TODAY or collect_energy_today:
+                    value = self._get_value(jsondata, key, type_, precision)
+                if value is not None:
+                    self._data[dictkey] = value
+
+    def _collect_plant_data(self, payload: dict[str, Any]) -> None:
+        """Fetch dynamic properties"""
+        jsondata = payload["data"]
+        attributes = INVERTER_DATA[PLANT_DETAIL]
+        collect_energy_today = False
+        try:
+            collect_energy_today = self.config.workarounds["use_energy_today_from_plant"]
+        except KeyError:
+            pass
+        if collect_energy_today:
+            _LOGGER.debug("Using stationDetail for energy_today")
+
+        for dictkey in attributes:
+            key = attributes[dictkey][0]
+            type_ = attributes[dictkey][1]
+            precision = attributes[dictkey][2]
+            if key is not None:
+                value = None
+                if dictkey != INVERTER_ENERGY_TODAY or collect_energy_today:
+                    value = self._get_value(jsondata, key, type_, precision)
+                if value is not None:
+                    self._data[dictkey] = value
+
+    def _post_process(self) -> None:
+        """Cleanup received data."""
+        if self._data:
+            # Fix timestamps
+            try:
+                self._data[INVERTER_TIMESTAMP_UPDATE] = float(self._data[INVERTER_TIMESTAMP_UPDATE]) / 1000
+            except KeyError:
+                pass
+
+            # Convert kW into W, etc. depending on unit returned from API.
+            self._fix_units(GRID_TOTAL_POWER, GRID_TOTAL_POWER_STR)
+            self._fix_units(BAT_POWER, BAT_POWER_STR)
+            self._fix_units(BAT_CURRENT, BAT_CURRENT_STR)
+            self._fix_units(BAT_VOLTAGE, BAT_VOLTAGE_STR)
+            self._fix_units(BAT_DAILY_ENERGY_CHARGED, BAT_DAILY_ENERGY_CHARGED_STR)
+            self._fix_units(BAT_DAILY_ENERGY_DISCHARGED, BAT_DAILY_ENERGY_DISCHARGED_STR)
+            self._fix_units(BAT_MONTHLY_ENERGY_CHARGED, BAT_MONTHLY_ENERGY_CHARGED_STR)
+            self._fix_units(BAT_MONTHLY_ENERGY_DISCHARGED, BAT_MONTHLY_ENERGY_DISCHARGED_STR)
+            self._fix_units(BAT_YEARLY_ENERGY_CHARGED, BAT_YEARLY_ENERGY_CHARGED_STR)
+            self._fix_units(BAT_YEARLY_ENERGY_DISCHARGED, BAT_YEARLY_ENERGY_DISCHARGED_STR)
+            self._fix_units(BAT_TOTAL_ENERGY_CHARGED, BAT_TOTAL_ENERGY_CHARGED_STR)
+            self._fix_units(BAT_TOTAL_ENERGY_DISCHARGED, BAT_TOTAL_ENERGY_DISCHARGED_STR)
+            self._fix_units(GRID_TOTAL_CONSUMPTION_POWER, GRID_TOTAL_CONSUMPTION_POWER_STR)
+            self._fix_units(PLANT_TOTAL_CONSUMPTION_POWER, PLANT_TOTAL_CONSUMPTION_POWER_STR)
+            self._fix_units(GRID_TOTAL_ENERGY_USED, GRID_TOTAL_ENERGY_USED_STR)
+            self._fix_units(INVERTER_ACPOWER, INVERTER_ACPOWER_STR)
+            self._fix_units(INVERTER_ENERGY_THIS_MONTH, INVERTER_ENERGY_THIS_MONTH_STR)
+            self._fix_units(INVERTER_ENERGY_THIS_YEAR, INVERTER_ENERGY_THIS_YEAR_STR)
+            self._fix_units(INVERTER_ENERGY_TOTAL_LIFE, INVERTER_ENERGY_TOTAL_LIFE_STR)
+            self._fix_units(GRID_TOTAL_ENERGY_PURCHASED, GRID_TOTAL_ENERGY_PURCHASED_STR)
+            self._fix_units(GRID_DAILY_ON_GRID_ENERGY, GRID_DAILY_ON_GRID_ENERGY_STR)
+            self._fix_units(GRID_MONTHLY_ON_GRID_ENERGY, GRID_MONTHLY_ON_GRID_ENERGY_STR)
+            self._fix_units(GRID_YEARLY_ON_GRID_ENERGY, GRID_YEARLY_ON_GRID_ENERGY_STR)
+            self._fix_units(GRID_TOTAL_ON_GRID_ENERGY, GRID_TOTAL_ON_GRID_ENERGY_STR)
+            self._fix_units(GRID_DAILY_ENERGY_PURCHASED, GRID_DAILY_ENERGY_PURCHASED_STR)
+            self._fix_units(GRID_MONTHLY_ENERGY_PURCHASED, GRID_MONTHLY_ENERGY_PURCHASED_STR)
+            self._fix_units(GRID_YEARLY_ENERGY_PURCHASED, GRID_YEARLY_ENERGY_PURCHASED_STR)
+            self._fix_units(GRID_DAILY_ENERGY_USED, GRID_DAILY_ENERGY_USED_STR)
+            self._fix_units(BYPASS_LOAD_POWER, BYPASS_LOAD_POWER_STR)
+
+            # Just temporary till SolisCloud is fixed
+            try:
+                if self.config.workarounds["correct_daily_on_grid_energy_enabled"]:
+                    self._data[GRID_DAILY_ON_GRID_ENERGY] = float(self._data[GRID_DAILY_ON_GRID_ENERGY]) * 10
+            except KeyError:
+                pass
+
+            # turn batteryPower negative when discharging (fix for https://github.com/hultenvp/solis-sensor/issues/158)
+            try:
+                self._data[BAT_POWER] = math.copysign(self._data[BAT_POWER], self._data[BAT_CURRENT])
+            except KeyError:
+                pass
+
+            # Unused phases are still in JSON payload as 0.0, remove them
+            # FIXME: use acOutputType
+            self._purge_if_unused(0.0, PHASE1_CURRENT, PHASE1_VOLTAGE)
+            self._purge_if_unused(0.0, PHASE2_CURRENT, PHASE2_VOLTAGE)
+            self._purge_if_unused(0.0, PHASE3_CURRENT, PHASE3_VOLTAGE)
+
+            # Unused PV chains are still in JSON payload as 0, remove them
+            # FIXME: use dcInputtype (NB num + 1) Unfortunately so are chains that are
+            # just making 0 voltage. So this is too simplistic.
+            # mypy trips over self_data[STRING_COUNT] as it could be of type str, int or float
+            # needs to be fixed at some point in time, but this works.
+            try:
+                for i, stringlist in enumerate(STRING_LISTS):
+                    if i > int(self._data[STRING_COUNT]):
+                        self._purge_if_unused(0, *stringlist)
+            except KeyError:
+                # Ignore offline inverters
+                pass
+
+    def _fix_units(self, num_key: str, units_key: str) -> None:
+        """Convert numeric values according to the units reported by the API."""
+        try:
+            if self._data[units_key] == "kW":
+                self._data[num_key] = float(self._data[num_key]) * 1000
+                self._data[units_key] = "W"
+
+            elif self._data[units_key] == "MWh":
+                self._data[num_key] = float(self._data[num_key]) * 1000
+                self._data[units_key] = "kWh"
+
+            elif self._data[units_key] == "GWh":
+                self._data[num_key] = float(self._data[num_key]) * 1000 * 1000
+                self._data[units_key] = "kWh"
+
+        except KeyError:
+            pass
+
+    def _purge_if_unused(self, value: Any, *elements: str) -> None:
+        for element in elements:
+            try:
+                if self._data[element] != value:
+                    return
+            except KeyError:
+                return
+        for element in elements:
+            self._data.pop(element)
+
+    def _get_value(self, data: dict[str, Any], key: str, type_: type, precision: int = 2) -> str | int | float | None:
+        """Retrieve 'key' from 'data' as type 'type_' with precision 'precision'"""
+        result: str | int | float | None = None
+
+        data_raw = data.get(key)
+        if data_raw is not None:
+            try:
+                if type_ is int:
+                    result = int(float(data_raw))
+                else:
+                    result = type_(data_raw)
+                # Round to specified precision
+                if type_ is float:
+                    result = round(float(result), precision)  # type: ignore
+            except ValueError:
+                _LOGGER.debug(
+                    "Failed to convert %s to type %s, raw value = %s",
+                    key,
+                    type_,
+                    data_raw,
+                )
+        return result
+
+    async def _get_data(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Http-get data from specified url."""
+
+        result: dict[str, Any] = {SUCCESS: False, MESSAGE: None, STATUS_CODE: None}
+        resp = None
+        if self._session is None:
+            return result
+        try:
+            async with async_timeout.timeout(10):
+                resp = await self._session.get(url, params=params)
+
+                result[STATUS_CODE] = resp.status
+                result[CONTENT] = await resp.json()
+                if resp.status == HTTPStatus.OK:
+                    result[SUCCESS] = True
+                    result[MESSAGE] = "OK"
+                else:
+                    result[MESSAGE] = "Got http statuscode: %d" % (resp.status)
+                return result
+        except (asyncio.TimeoutError, ClientError) as err:
+            result[MESSAGE] = "Exception: %s" % err.__class__
+            _LOGGER.debug("Error: %s", result[MESSAGE])
+            return result
+        finally:
+            if resp is not None:
+                await resp.release()
+
+    def _prepare_header(self, body: dict[str, str], canonicalized_resource: str) -> dict[str, str]:
+        content_md5 = base64.b64encode(
+            hashlib.md5(json.dumps(body, separators=(",", ":")).encode("utf-8")).digest()
+        ).decode("utf-8")
+
+        content_type = "application/json"
+
+        now = datetime.now(timezone.utc)
+        date = now.strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+        encrypt_str = VERB + "\n" + content_md5 + "\n" + content_type + "\n" + date + "\n" + canonicalized_resource
+        hmac_obj = hmac.new(self.config.secret, msg=encrypt_str.encode("utf-8"), digestmod=hashlib.sha1)
+        sign = base64.b64encode(hmac_obj.digest())
+        authorization = "API " + self.config.key_id + ":" + sign.decode("utf-8")
+
+        header: dict[str, str] = {
+            "Content-MD5": content_md5,
+            "Content-Type": content_type,
+            "Date": date,
+            "Authorization": authorization,
+        }
+        return header
+
+    async def _post_data_json(
+        self, canonicalized_resource: str, params: dict[str, Any], csrf: bool = False
+    ) -> dict[str, Any]:
+        """Http-post data to specified domain/canonicalized_resource."""
+
+        header: dict[str, str] = self._prepare_header(params, canonicalized_resource)
+        if csrf and self._token != "":
+            header["token"] = self._token
+
+        # _LOGGER.debug(f"header: {header}")
+        result: dict[str, Any] = {SUCCESS: False, MESSAGE: None, STATUS_CODE: None}
+        resp = None
+        if self._session is None:
+            return result
+        try:
+            async with async_timeout.timeout(10):
+                url = f"{self.config.domain}{canonicalized_resource}"
+                resp = await self._session.post(url, json=params, headers=header)
+
+                result[STATUS_CODE] = resp.status
+                result[CONTENT] = await resp.json()
+                if resp.status == HTTPStatus.OK:
+                    result[SUCCESS] = True
+                    result[MESSAGE] = "OK"
+                else:
+                    result[MESSAGE] = "Got http statuscode: %d" % (resp.status)
+        except (asyncio.TimeoutError, ClientError) as err:
+            result[MESSAGE] = f"{repr(err)}"
+            _LOGGER.debug("Error from URI (%s) : %s", canonicalized_resource, result[MESSAGE])
+        finally:
+            if resp is not None:
+                await resp.release()
+            return result
+
+    async def _fetch_token(self, username: str, password: str) -> str:
+        """
+        Fetch CSRF token for station control
+        """
+        params = {
+            "username": username,
+            "password": hashlib.md5(password.encode("utf-8")).hexdigest(),
+        }
+        result = await self._post_data_json(AUTHENTICATE, params)
+
+        if result[SUCCESS] is True:
+            jsondata: dict[str, str] = result[CONTENT]
+            if "csrfToken" in jsondata:
+                return jsondata["csrfToken"]
+            else:
+                _LOGGER.info(f"({AUTHENTICATE:s} responded with error: {jsondata}")
+        else:
+            _LOGGER.info("Unable to fetch authentication token with username and password")
+        return ""
+
+    async def write_control_data(self, device_serial: str, cid: str, value: str):
+        _LOGGER.debug(f"Writing value {value} for cid {cid} to inverter {device_serial}")
+        params = {"inverterSn": str(device_serial), "cid": str(cid), "value": value}
+        result = await self._post_data_json(CONTROL, params, csrf=True)
+
+        if result[SUCCESS] is True:
+            jsondata = result[CONTENT]
+            if str(jsondata["code"]) == "0":
+                jsondata = jsondata["data"][0]
+                if str(jsondata["code"]) == "0":
+                    _LOGGER.debug(f"Set code returned OK. Reading code back.")
+                    await asyncio.sleep(CONTROL_DELAY)
+                    control_data = await self.get_control_data(device_serial, cid=str(cid))
+                    _LOGGER.debug(f"Data read back: {control_data.get(str(cid), None)}")
+                else:
+                    _LOGGER.info(
+                        f"cid: {str(cid):5s} - {CONTROL} responded with error: {jsondata['code']}:{jsondata.get('msg',None)}"
+                    )
+            else:
+                _LOGGER.info(
+                    f"cid: {str(cid):5s} - {CONTROL} responded with error: {jsondata['code']}:{jsondata.get('msg',None)}"
+                )
+        else:
+            _LOGGER.info(f"  cid: {str(cid):5s} - {CONTROL} responded with error: {result[MESSAGE]}")

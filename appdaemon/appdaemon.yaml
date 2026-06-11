@@ -1,0 +1,23 @@
+appdaemon:
+  latitude: 54.6872
+  longitude: 25.2797
+  elevation: 100
+  time_zone: Europe/Vilnius
+  plugins:
+    HASS:
+      type: hass
+      ha_url: http://homeassistant:8123
+      token: !secret appdaemon_token
+
+http:
+  url: http://127.0.0.1:5050
+
+logs:
+  main_log:
+    filename: /config/appdaemon/appdaemon.log
+    log_generations: 3
+    log_size: 1000000
+  error_log:
+    filename: /config/appdaemon/error.log
+    log_generations: 3
+    log_size: 1000000

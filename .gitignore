@@ -1,0 +1,26 @@
+# Jautrūs failai — niekada neversionuoti (auth tokenai, slaptažodžiai)
+secrets.yaml
+.storage/
+.cloud/
+.claude/
+
+# Duombazės ir runtime
+home-assistant_v2.db*
+*.log
+*.log.*
+home-assistant.log.fault
+.ha_run.lock
+.cache/
+deps/
+tts/
+
+# AppDaemon apps turi atskirą git repo (github.com/celadondeep/Solis)
+appdaemon/apps/
+appdaemon/*.log*
+
+# Python
+__pycache__/
+*.pyc
+
+# Solcast cache
+solcast_solar/*.json

@@ -1,0 +1,223 @@
+title: Energijos valdymas
+views:
+  - title: Energija
+    path: energija
+    cards:
+      - type: vertical-stack
+        cards:
+          # Duomenų amžius skaičiuojamas tiesiai iš last_modbus_success
+          # (timestamp) — atskiro kas 1 s template sensoriaus nebereikia.
+          # Kortelė persipiešia su kiekvienu Modbus atnaujinimu (~10 s).
+          - type: custom:button-card
+            entity: sensor.solis_s6_eh3p_last_modbus_success
+            icon: mdi:satellite-variant
+            name: ☀️ Energijos valdymas
+            show_name: true
+            show_icon: true
+            show_label: true
+            show_state: false
+            label: |
+              [[[
+                var a = Math.max(0, Math.round((Date.now() - new Date(entity.state).getTime()) / 1000));
+                return a + 's';
+              ]]]
+            tap_action:
+              action: none
+            styles:
+              card:
+                - background: none
+                - box-shadow: none
+                - border: none
+                - padding: 0
+              grid:
+                - grid-template-areas: '"n i l"'
+                - grid-template-columns: 1fr min-content min-content
+                - align-items: center
+              name:
+                - justify-self: start
+                - font-size: 1.4em
+                - font-weight: normal
+                - color: var(--primary-text-color)
+              icon:
+                - width: 22px
+                - color: |
+                    [[[
+                      var a = Math.max(0, Math.round((Date.now() - new Date(entity.state).getTime()) / 1000));
+                      return a > 60 ? '#f44336' : (a <= 15 ? '#00E676' : 'var(--primary-text-color)');
+                    ]]]
+              label:
+                - font-size: 14px
+                - padding-left: 6px
+                - color: var(--primary-text-color)
+
+          - type: glance
+            title: Dabartinė galia
+            entities:
+              - entity: sensor.solis_s6_eh3p_total_pv_power
+                name: Saulė
+              - entity: sensor.solis_s6_eh3p_household_load_power
+                name: Namai
+              - entity: sensor.solis_s6_eh3p_grid_power_net
+                name: Tinklas
+              - entity: sensor.solis_s6_eh3p_battery_power_net
+                name: Baterija
+              - entity: sensor.solis_s6_eh3p_battery_soc
+                name: SOC
+            show_state: true
+
+          - type: glance
+            title: Energijos valdymas
+            entities:
+              - entity: sensor.energy_manager_balance
+                name: Balansas
+              - entity: sensor.energy_manager_surplus
+                name: Perteklius
+              - entity: sensor.energy_manager_target_soc
+                name: SOC tikslas
+              - entity: sensor.energy_manager_discharge_needed
+                name: Reikia iškrauti
+              - entity: sensor.energy_manager_surplus_now
+                name: Perteklius dabar
+              - entity: sensor.energy_manager_inverter_temp
+                name: Inverteris
+            show_state: true
+
+          - type: entities
+            title: Inverterio režimas
+            entities:
+              - entity: select.solis_s6_eh3p_work_mode
+                name: Darbo režimas
+
+          # Ką inverteris REALIAI turi nustatyta TOU slotuose — automacijos
+          # juos valdo, bet iki šiol dashboard'e nesimatė.
+          - type: entities
+            title: TOU slotai (inverterio registrai)
+            entities:
+              - entity: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+                name: Iškrovimo slotas 1
+              - entity: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
+                name: Iškrovimo cut-off SOC
+              - entity: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
+                name: Iškrovimo srovė
+              - entity: time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1
+                name: Iškrovimo pradžia
+              - entity: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
+                name: Iškrovimo pabaiga
+              - entity: switch.solis_s6_eh3p_grid_time_of_use_charging_period_1
+                name: Krovimo slotas 1 (audros rež.)
+              - entity: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
+                name: Eksportas leidžiamas
+
+          - type: entities
+            title: Automacijos būsena
+            entities:
+              - entity: sensor.energy_manager_status
+                name: Režimas
+                secondary_info: last-changed
+              - entity: sensor.energy_manager_decision
+                name: Paskutinis sprendimas
+                secondary_info: last-changed
+              - entity: sensor.energy_manager_boiler_status
+                name: Boilerio valdymas
+              - entity: input_boolean.storm_mode
+                name: Audros / ESO režimas
+              - entity: input_select.energy_season
+                name: Sezonas
+
+          - type: glance
+            title: Vakar
+            entities:
+              - entity: input_number.solcast_forecast_yesterday
+                name: Prognozuota
+              - entity: sensor.solis_s6_eh3p_pv_yesterday_energy_generation
+                name: Pagaminta
+              - entity: sensor.solcast_forecast_yesterday_accuracy
+                name: Tikslumas
+            show_state: true
+
+          - type: glance
+            title: Šiandien
+            entities:
+              - entity: sensor.solis_s6_eh3p_pv_today_energy_generation
+                name: Pagaminta
+                icon: mdi:solar-power-variant
+              - entity: sensor.solcast_pv_forecast_forecast_remaining_today
+                name: Liko
+                icon: mdi:timer-sand
+              - entity: sensor.solcast_pv_forecast_forecast_today
+                name: Prognozė
+                icon: mdi:weather-sunny
+              - entity: sensor.solar_today_expected
+                name: Numatoma
+                icon: mdi:chart-bell-curve-cumulative
+              - entity: sensor.solcast_pv_forecast_forecast_tomorrow
+                name: Rytoj
+                icon: mdi:weather-partly-cloudy
+
+          # SOC (kairė ašis, %) + galios (dešinė ašis, W) vienoje diagramoje.
+          # Pakeičia history-graph, kur 0–100 % ir 0–5000 W bendroje ašyje
+          # buvo neįskaitomi.
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: SOC ir galios (24 val.)
+            graph_span: 24h
+            yaxis:
+              - id: soc
+                min: 0
+                max: 100
+                decimals: 0
+                apex_config:
+                  title:
+                    text: 'SOC %'
+              - id: power
+                opposite: true
+                min: 0
+                decimals: 0
+                apex_config:
+                  title:
+                    text: 'W'
+            series:
+              - entity: sensor.solis_s6_eh3p_battery_soc
+                name: SOC
+                yaxis_id: soc
+                stroke_width: 2
+                group_by:
+                  func: avg
+                  duration: 5min
+              - entity: sensor.solis_s6_eh3p_total_pv_power
+                name: Saulė
+                yaxis_id: power
+                type: area
+                opacity: 0.25
+                stroke_width: 1
+                group_by:
+                  func: avg
+                  duration: 5min
+              - entity: sensor.solis_s6_eh3p_household_load_power
+                name: Namai
+                yaxis_id: power
+                stroke_width: 1
+                group_by:
+                  func: avg
+                  duration: 5min
+
+          # Solcast prognozės tikslumas per 30 d. — ar verta koreguoti
+          # prognozę koeficientu.
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Prognozės tikslumas (30 d.)
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - min: 0
+                decimals: 0
+            series:
+              - entity: sensor.solcast_forecast_yesterday_accuracy
+                name: Tikslumas %
+                type: column
+                group_by:
+                  func: last
+                  duration: 1d
