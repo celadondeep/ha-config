@@ -90,6 +90,10 @@ views:
             entities:
               - entity: select.solis_s6_eh3p_work_mode
                 name: Darbo režimas
+              - entity: input_boolean.night_inverter_shutdown
+                name: Naktinis išjungimas (taupo ~140 W)
+              - entity: switch.solis_s6_eh3p_power_state
+                name: Inverterio maitinimas
 
           # Ką inverteris REALIAI turi nustatyta TOU slotuose — automacijos
           # juos valdo, bet iki šiol dashboard'e nesimatė.

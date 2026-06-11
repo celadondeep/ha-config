@@ -362,6 +362,92 @@
               kitą 06:00 / 20:00.
   mode: single
 
+- id: solis_night_inverter_shutdown
+  alias: "Solis - Naktinis inverterio išjungimas (taupo ~140 W savivartojimą)"
+  description: >
+    Naktį, kai baterija pasiekia tikslinį rytinį SOC ir nebėra ko iškrauti,
+    inverteris išjungiamas (power_state off) — kitaip jo ~140 W savivartojimas
+    visą naktį sektų bateriją žemiau tikslo. Namus toliau maitina tinklas,
+    Modbus (valdymo plokštė) lieka gyvas, todėl rytą įjungiama nuotoliniu būdu.
+    Įjungiama atgal: solis_morning_inverter_power_on (30 min iki saulėtekio).
+    Valdoma jungikliu input_boolean.night_inverter_shutdown. Audros režimu
+    nevykdoma — inverteris reikalingas backup funkcijai.
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+    - platform: sun
+      event: sunset
+    - platform: state
+      entity_id: input_boolean.night_inverter_shutdown
+      to: "on"
+  condition:
+    - condition: state
+      entity_id: input_boolean.night_inverter_shutdown
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.storm_mode
+      state: "off"
+    - condition: state
+      entity_id: sun.sun
+      state: "below_horizon"
+    - condition: state
+      entity_id: switch.solis_s6_eh3p_power_state
+      state: "on"
+    # TOU eksportas turi būti pasibaigęs (slotą išjungia solis_tou_recalc_5min)
+    - condition: state
+      entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+      state: "off"
+    # Baterija jau ties tiksliniu rytiniu SOC (apsauga: tikslas niekada < 11%)
+    - condition: template
+      value_template: >
+        {{ states('sensor.solis_s6_eh3p_battery_soc') | float(100)
+           <= [states('sensor.energy_manager_target_soc') | float(100), 11] | max + 1 }}
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh3p_power_state
+    - service: notify.persistent_notification
+      data:
+        title: "Solis - Inverteris išjungtas nakčiai 💤"
+        message: >
+          Baterija {{ states('sensor.solis_s6_eh3p_battery_soc') }}% pasiekė
+          tikslinį SOC {{ [states('sensor.energy_manager_target_soc') | float(100), 11] | max | round(0) }}%.
+          Inverteris išjungtas — sutaupoma ~140 W savivartojimo iš baterijos.
+          Namus maitina tinklas. Įsijungs 30 min iki saulėtekio.
+  mode: single
+
+- id: solis_morning_inverter_power_on
+  alias: "Solis - Ryto inverterio įjungimas po naktinio išjungimo"
+  description: >
+    Įjungia inverterį (power_state on) 30 min iki saulėtekio po naktinio
+    išjungimo. Saugikliai: įjungiama iškart, jei įjungiamas audros režimas
+    (reikia backup) arba išjungiamas naktinio išjungimo jungiklis.
+  trigger:
+    - platform: sun
+      event: sunrise
+      offset: "-00:30:00"
+    - platform: state
+      entity_id: input_boolean.night_inverter_shutdown
+      to: "off"
+    - platform: state
+      entity_id: input_boolean.storm_mode
+      to: "on"
+  condition:
+    - condition: state
+      entity_id: switch.solis_s6_eh3p_power_state
+      state: "off"
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.solis_s6_eh3p_power_state
+    - service: notify.persistent_notification
+      data:
+        title: "Solis - Inverteris įjungtas ☀️"
+        message: >
+          Inverteris įjungtas po naktinio išjungimo
+          (baterija: {{ states('sensor.solis_s6_eh3p_battery_soc') }}%).
+  mode: single
+
 - id: solis_storm_export_at_high_soc
   alias: "Solis - Audros režimas: eksportas kai SOC ≥ 95%"
   description: >

@@ -22,6 +22,9 @@ input_boolean:
   storm_mode:
     name: Audros / ESO režimas
     icon: mdi:weather-lightning
+  night_inverter_shutdown:
+    name: Naktinis inverterio išjungimas
+    icon: mdi:power-sleep
 
 input_select:
   energy_season:
