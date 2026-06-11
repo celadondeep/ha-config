@@ -7,9 +7,12 @@ views:
         cards:
           # Duomenų amžius skaičiuojamas tiesiai iš last_modbus_success
           # (timestamp) — atskiro kas 1 s template sensoriaus nebereikia.
-          # Kortelė persipiešia su kiekvienu Modbus atnaujinimu (~10 s).
+          # update_timer būtinas: be jo button-card JS šablonus perskaičiuoja
+          # tik entity pokyčio momentu, tad sekundės "stovi", o Modbus'ui
+          # nutrūkus kortelė apskritai nebepersipiešia ir neparaudonuoja.
           - type: custom:button-card
             entity: sensor.solis_s6_eh3p_last_modbus_success
+            update_timer: 1000
             icon: mdi:satellite-variant
             name: ☀️ Energijos valdymas
             show_name: true
