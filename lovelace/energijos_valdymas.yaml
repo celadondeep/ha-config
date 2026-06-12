@@ -70,11 +70,11 @@ views:
                 name: SOC
             show_state: true
 
-          # Fazės — visi duomenys iš smart meter (prijungtas prie inverterio,
-          # registrai ateina per lokalų Modbus kaip meter_*). Galia: tinklo
-          # mainai pagal fazę (0 kai namus maitina baterija/saulė).
+          # Fazės: įtampa ir tinklo mainai iš smart meter (registrai per
+          # lokalų Modbus kaip meter_*), inverterio paduodama galia į fazes
+          # — U×I iš inverterio AC gnybtų (fazinės galios registro nėra).
           - type: glance
-            title: Smart meter — fazės L1 / L2 / L3
+            title: Fazės L1 / L2 / L3
             columns: 3
             entities:
               - entity: sensor.solis_s6_eh3p_meter_ac_voltage_a
@@ -84,23 +84,20 @@ views:
               - entity: sensor.solis_s6_eh3p_meter_ac_voltage_c
                 name: Įtampa L3
               - entity: sensor.solis_s6_eh3p_meter_active_power_a
-                name: Galia L1
+                name: Tinklas L1
                 icon: mdi:transmission-tower
               - entity: sensor.solis_s6_eh3p_meter_active_power_b
-                name: Galia L2
+                name: Tinklas L2
                 icon: mdi:transmission-tower
               - entity: sensor.solis_s6_eh3p_meter_active_power_c
-                name: Galia L3
+                name: Tinklas L3
                 icon: mdi:transmission-tower
-              - entity: sensor.solis_s6_eh3p_meter_ac_current_a
-                name: Srovė L1
-                icon: mdi:current-ac
-              - entity: sensor.solis_s6_eh3p_meter_ac_current_b
-                name: Srovė L2
-                icon: mdi:current-ac
-              - entity: sensor.solis_s6_eh3p_meter_ac_current_c
-                name: Srovė L3
-                icon: mdi:current-ac
+              - entity: sensor.inverter_phase_power_l1
+                name: Inverteris L1
+              - entity: sensor.inverter_phase_power_l2
+                name: Inverteris L2
+              - entity: sensor.inverter_phase_power_l3
+                name: Inverteris L3
             show_state: true
 
           - type: glance
