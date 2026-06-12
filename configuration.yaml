@@ -214,6 +214,43 @@ template:
       # (energy_manager_boiler_status publikuoja AppDaemon — placeholder
       # template pašalintas, kad nebūtų dviejų rašytojų į tą patį entity.)
 
+      # Inverterio fazių galia (VA ≈ W, nes cos φ ~0.99). Solis neturi
+      # atskiro fazinės galios registro, todėl skaičiuojama U × I iš
+      # inverterio AC gnybtų. Rodo apkrovos pasiskirstymą tarp fazių.
+      - name: "inverter_phase_power_l1"
+        unique_id: inverter_phase_power_l1
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:flash
+        state: >
+          {{ (states('sensor.solis_s6_eh3p_a_phase_voltage') | float(0)
+              * states('sensor.solis_s6_eh3p_a_phase_current') | float(0)) | round(0) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_a_phase_voltage') not in ['unavailable', 'unknown', ''] }}
+      - name: "inverter_phase_power_l2"
+        unique_id: inverter_phase_power_l2
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:flash
+        state: >
+          {{ (states('sensor.solis_s6_eh3p_b_phase_voltage') | float(0)
+              * states('sensor.solis_s6_eh3p_b_phase_current') | float(0)) | round(0) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_b_phase_voltage') not in ['unavailable', 'unknown', ''] }}
+      - name: "inverter_phase_power_l3"
+        unique_id: inverter_phase_power_l3
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:flash
+        state: >
+          {{ (states('sensor.solis_s6_eh3p_c_phase_voltage') | float(0)
+              * states('sensor.solis_s6_eh3p_c_phase_current') | float(0)) | round(0) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_c_phase_voltage') not in ['unavailable', 'unknown', ''] }}
+
       # Ekvivalentiniai baterijos ciklai = bendra įkrova / naudingoji talpa.
       - name: "battery_equivalent_cycles"
         unique_id: battery_equivalent_cycles

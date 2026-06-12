@@ -70,6 +70,36 @@ views:
                 name: SOC
             show_state: true
 
+          # Fazės: tinklo įtampa (skaitiklis), inverterio AC išėjimo galia
+          # (U×I template) ir tinklo mainai pagal fazę (+ eksportas,
+          # − importas; 0 kai namus maitina baterija/saulė).
+          - type: glance
+            title: Fazės L1 / L2 / L3
+            columns: 3
+            entities:
+              - entity: sensor.solis_s6_eh3p_meter_ac_voltage_a
+                name: Tinklas L1
+              - entity: sensor.solis_s6_eh3p_meter_ac_voltage_b
+                name: Tinklas L2
+              - entity: sensor.solis_s6_eh3p_meter_ac_voltage_c
+                name: Tinklas L3
+              - entity: sensor.inverter_phase_power_l1
+                name: Inverteris L1
+              - entity: sensor.inverter_phase_power_l2
+                name: Inverteris L2
+              - entity: sensor.inverter_phase_power_l3
+                name: Inverteris L3
+              - entity: sensor.solis_s6_eh3p_meter_active_power_a
+                name: Mainai L1
+                icon: mdi:transmission-tower
+              - entity: sensor.solis_s6_eh3p_meter_active_power_b
+                name: Mainai L2
+                icon: mdi:transmission-tower
+              - entity: sensor.solis_s6_eh3p_meter_active_power_c
+                name: Mainai L3
+                icon: mdi:transmission-tower
+            show_state: true
+
           - type: glance
             title: Energijos valdymas
             entities:
