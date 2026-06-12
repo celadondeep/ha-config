@@ -2,8 +2,10 @@ title: Energijos valdymas
 views:
   - title: Energija
     path: energija
-    cards:
-      - type: vertical-stack
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
         cards:
           # Duomenų amžius skaičiuojamas tiesiai iš last_modbus_success
           # (timestamp) — atskiro kas 1 s template sensoriaus nebereikia.
@@ -91,10 +93,25 @@ views:
               - entity: select.solis_s6_eh3p_work_mode
                 name: Darbo režimas
               - entity: input_boolean.night_inverter_shutdown
-                name: Naktinis išjungimas (taupo ~140 W)
+                name: Naktinis išjungimas (idle 130 W → 30 W)
               - entity: switch.solis_s6_eh3p_power_state
                 name: Inverterio maitinimas
 
+          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager.py):
+          # kada apsimoka išjungti inverterį ir kada jį vėl įjungti ryte.
+          - type: markdown
+            title: Naktinis planas 💤
+            content: >
+              **{{ states('sensor.inverter_night_economics') }}**
+
+              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
+                išjungtas: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
+              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics', 'baterijos_kwh_verte') }}
+              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta') }}**
+              - Ryto įjungimas (Solcast >100 W): **{{ state_attr('sensor.inverter_morning_on_time', 'laikas') | default('—', true) }}**
+
+      - type: grid
+        cards:
           # Ką inverteris REALIAI turi nustatyta TOU slotuose — automacijos
           # juos valdo, bet iki šiol dashboard'e nesimatė.
           - type: entities
@@ -131,6 +148,17 @@ views:
               - entity: input_select.energy_season
                 name: Sezonas
 
+          - type: entities
+            title: Prognozė ir kainos
+            entities:
+              - entity: sensor.solcast_correction_factor
+                name: Solcast korekcijos koeficientas
+                secondary_info: last-updated
+              - entity: input_number.electricity_price_buy
+                name: Pirkimo kaina
+              - entity: input_number.electricity_price_sell
+                name: Pardavimo kaina
+
           - type: glance
             title: Vakar
             entities:
@@ -161,40 +189,49 @@ views:
                 name: Rytoj
                 icon: mdi:weather-partly-cloudy
 
+      # Grafikai per visą puslapio plotį (abu stulpeliai).
+      - type: grid
+        column_span: 2
+        cards:
           # SOC (kairė ašis, %) + galios (dešinė ašis, W) vienoje diagramoje.
           # Pakeičia history-graph, kur 0–100 % ir 0–5000 W bendroje ašyje
           # buvo neįskaitomi.
           - type: custom:apexcharts-card
             header:
               show: true
-              title: SOC ir galios (24 val.)
+              title: Suvartojimas ir gamyba (24 val. · SOC % / W)
             graph_span: 24h
+            apex_config:
+              chart:
+                height: 300
+                parentHeightOffset: 0
+              grid:
+                padding:
+                  left: 0
+                  right: 0
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  datetimeFormatter:
+                    hour: 'HH:mm'
             yaxis:
               - id: soc
                 min: 0
                 max: 100
                 decimals: 0
-                apex_config:
-                  title:
-                    text: 'SOC %'
               - id: power
                 opposite: true
                 min: 0
+                align_to: 500
                 decimals: 0
                 apex_config:
-                  title:
-                    text: 'W'
+                  stepSize: 500
             series:
-              - entity: sensor.solis_s6_eh3p_battery_soc
-                name: SOC
-                yaxis_id: soc
-                stroke_width: 2
-                group_by:
-                  func: avg
-                  duration: 5min
               - entity: sensor.solis_s6_eh3p_total_pv_power
                 name: Saulė
                 yaxis_id: power
+                color: '#2196f3'
                 type: area
                 opacity: 0.25
                 stroke_width: 1
@@ -204,13 +241,162 @@ views:
               - entity: sensor.solis_s6_eh3p_household_load_power
                 name: Namai
                 yaxis_id: power
+                color: '#f44336'
                 stroke_width: 1
                 group_by:
                   func: avg
                   duration: 5min
+              - entity: sensor.solis_s6_eh3p_battery_soc
+                name: SOC
+                yaxis_id: soc
+                color: '#880e4f'
+                stroke_width: 2
+                group_by:
+                  func: avg
+                  duration: 5min
 
-          # Solcast prognozės tikslumas per 30 d. — ar verta koreguoti
-          # prognozę koeficientu.
+  # Gilesnė analizė: vartojimo modelis, baterijos sveikata, ilgalaikiai
+  # grafikai. Kasdieniam valdymui — pirmas puslapis.
+  - title: Analizė
+    path: analize
+    icon: mdi:chart-box
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: glance
+            title: Šiandienos rezultatas
+            entities:
+              - entity: sensor.self_sufficiency_today
+                name: Savarankiškumas
+                icon: mdi:home-percent
+              - entity: sensor.energy_savings_today
+                name: Sutaupyta
+                icon: mdi:piggy-bank
+              - entity: sensor.solis_s6_eh3p_today_energy_consumption
+                name: Suvartota
+              - entity: sensor.solis_s6_eh3p_today_energy_imported_from_grid
+                name: Pirkta
+              - entity: sensor.solis_s6_eh3p_today_energy_fed_into_grid
+                name: Parduota
+            show_state: true
+
+          - type: glance
+            title: Vartojimo modelis (AppDaemon)
+            entities:
+              - entity: sensor.consumption_daily_avg
+                name: Paros vidurkis
+                icon: mdi:counter
+              - entity: sensor.consumption_remaining_today
+                name: Liko šiandien
+                icon: mdi:timer-sand
+              - entity: sensor.consumption_forecast_tomorrow
+                name: Rytoj
+                icon: mdi:calendar-arrow-right
+            show_state: true
+
+      - type: grid
+        cards:
+          - type: glance
+            title: Baterijos sveikata
+            entities:
+              - entity: sensor.solis_s6_eh3p_battery_soh
+                name: SOH
+                icon: mdi:battery-heart-variant
+              - entity: sensor.battery_equivalent_cycles
+                name: Ciklai
+              - entity: sensor.solis_s6_eh3p_today_battery_charge_energy
+                name: Įkrauta šiandien
+                icon: mdi:battery-plus
+              - entity: sensor.solis_s6_eh3p_today_battery_discharge_energy
+                name: Iškrauta šiandien
+                icon: mdi:battery-minus
+            show_state: true
+
+          - type: glance
+            title: Inverteris
+            entities:
+              - entity: sensor.solis_s6_eh3p_temperature
+                name: Temperatūra
+              - entity: sensor.solis_s6_eh3p_status_string
+                name: Būsena
+              - entity: sensor.solis_s6_eh3p_grid_frequency
+                name: Tinklo dažnis
+            show_state: true
+
+      - type: grid
+        column_span: 2
+        cards:
+          # 14 d. dienos balansas — gamyba, suvartojimas, tinklo mainai.
+          # Dienos skaitliukai resetinasi vidurnaktį, todėl max per parą =
+          # dienos suma.
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Dienos balansas (14 d. · kWh)
+            graph_span: 14d
+            span:
+              end: day
+            apex_config:
+              chart:
+                height: 280
+            yaxis:
+              - min: 0
+                decimals: 0
+            series:
+              - entity: sensor.solis_s6_eh3p_pv_today_energy_generation
+                name: Saulė
+                type: column
+                color: '#fbc02d'
+                group_by:
+                  func: max
+                  duration: 1d
+              - entity: sensor.solis_s6_eh3p_today_energy_consumption
+                name: Suvartota
+                type: column
+                color: '#f44336'
+                group_by:
+                  func: max
+                  duration: 1d
+              - entity: sensor.solis_s6_eh3p_today_energy_fed_into_grid
+                name: Parduota
+                type: column
+                color: '#4caf50'
+                group_by:
+                  func: max
+                  duration: 1d
+              - entity: sensor.solis_s6_eh3p_today_energy_imported_from_grid
+                name: Pirkta
+                type: column
+                color: '#9e9e9e'
+                group_by:
+                  func: max
+                  duration: 1d
+
+          # Inverterio temperatūra — derating prasideda ~75°C.
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Inverterio temperatūra (48 val.)
+            graph_span: 48h
+            apex_config:
+              chart:
+                height: 220
+            yaxis:
+              - min: ~20
+                decimals: 0
+            series:
+              - entity: sensor.solis_s6_eh3p_temperature
+                name: Temperatūra °C
+                color: '#ff7043'
+                stroke_width: 2
+                group_by:
+                  func: avg
+                  duration: 15min
+
+          # Solcast prognozės tikslumas per 30 d. — korekcijos koeficientas
+          # (sensor.solcast_correction_factor) mokosi iš šių duomenų.
           - type: custom:apexcharts-card
             header:
               show: true

@@ -18,8 +18,13 @@
   condition: []
   action:
     - variables:
-        forecast_today: "{{ states('sensor.solcast_pv_forecast_forecast_today') | float(0) }}"
+        forecast_raw: "{{ states('sensor.solcast_pv_forecast_forecast_today') | float(0) }}"
+        # Adaptyvi korekcija — AppDaemon mokosi iš faktas/prognozė santykio
+        factor: "{{ states('sensor.solcast_correction_factor') | float(1) }}"
+        forecast_today: "{{ (forecast_raw * factor) | round(1) }}"
         threshold: 22
+        soc_now: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) | round(0) }}"
+        consumption_today: "{{ states('sensor.consumption_remaining_today') | float(0) | round(1) }}"
     # Išjungti TOU discharge slot → naktinis iškrovimas sustabdomas
     - service: switch.turn_off
       target:
@@ -38,7 +43,8 @@
                 message: >
                   Audros/ESO rezervo režimas — visa saulė kraunama į bateriją,
                   namus maitina tinklas, baterija namams neiškraunama, eksportas
-                  sustabdytas. Prognozė: {{ forecast_today | round(1) }} kWh.
+                  sustabdytas. Prognozė: {{ forecast_today }} kWh.
+                  Baterija: {{ soc_now }}%.
         - conditions:
             - condition: template
               value_template: "{{ forecast_today > threshold }}"
@@ -52,8 +58,12 @@
               data:
                 title: "Solis - Saulėta diena ☀️"
                 message: >
-                  Prognozė: {{ forecast_today | round(1) }} kWh (riba: {{ threshold }} kWh).
-                  Režimas: Feed-In Priority (atidavimas į tinklą).
+                  Labas rytas! Prognozė: {{ forecast_today }} kWh
+                  (Solcast {{ forecast_raw | round(1) }} × korekcija {{ factor | round(2) }},
+                  riba: {{ threshold }} kWh).
+                  Namams šiandien reikės ~{{ consumption_today }} kWh.
+                  Baterija: {{ soc_now }}%.
+                  Režimas: Feed-In Priority — perteklius parduodamas į tinklą.
       default:
         - service: select.select_option
           target:
@@ -64,8 +74,12 @@
           data:
             title: "Solis - Debesuota diena ☁️"
             message: >
-              Prognozė: {{ forecast_today | round(1) }} kWh (riba: {{ threshold }} kWh).
-              Režimas: Self-Use (krauti bateriją pirma).
+              Labas rytas! Prognozė: {{ forecast_today }} kWh
+              (Solcast {{ forecast_raw | round(1) }} × korekcija {{ factor | round(2) }},
+              riba: {{ threshold }} kWh).
+              Namams šiandien reikės ~{{ consumption_today }} kWh.
+              Baterija: {{ soc_now }}%.
+              Režimas: Self-Use — pirmiausia kraunama baterija, perteklius namams.
   mode: single
 
 - id: solis_evening_discharge
@@ -83,7 +97,11 @@
   condition: []
   action:
     - variables:
-        forecast_tomorrow: "{{ states('sensor.solcast_pv_forecast_forecast_tomorrow') | float(0) }}"
+        # Koreguota rytojaus prognozė — ta pati, pagal kurią AppDaemon
+        # skaičiuoja tikslinį SOC (žalia Solcast × korekcijos koeficientas).
+        forecast_tomorrow: >-
+          {{ (states('sensor.solcast_pv_forecast_forecast_tomorrow') | float(0)
+              * states('sensor.solcast_correction_factor') | float(1)) | round(1) }}
         current_soc: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) }}"
         # Tikslinis SOC — iš AppDaemon (energy_manager.py). Apsauga: niekada
         # nenaudoti reikšmės žemiau baterijos dugno 11% (pvz. jei sensorius
@@ -363,13 +381,16 @@
   mode: single
 
 - id: solis_night_inverter_shutdown
-  alias: "Solis - Naktinis inverterio išjungimas (taupo ~140 W savivartojimą)"
+  alias: "Solis - Naktinis inverterio išjungimas (idle 130 W → off 30 W)"
   description: >
     Naktį, kai baterija pasiekia tikslinį rytinį SOC ir nebėra ko iškrauti,
-    inverteris išjungiamas (power_state off) — kitaip jo ~140 W savivartojimas
-    visą naktį sektų bateriją žemiau tikslo. Namus toliau maitina tinklas,
-    Modbus (valdymo plokštė) lieka gyvas, todėl rytą įjungiama nuotoliniu būdu.
-    Įjungiama atgal: solis_morning_inverter_power_on (30 min iki saulėtekio).
+    inverteris išjungiamas (power_state off) — kitaip jo ~130 W idle
+    savivartojimas visą naktį sektų bateriją žemiau tikslo. Išjungto
+    inverterio valdymo plokštė ima ~30 W iš tinklo, tad grynasis sutaupymas
+    ~100 W. Namus toliau maitina tinklas, Modbus lieka gyvas, todėl rytą
+    įjungiama nuotoliniu būdu. Ekonomiką skaičiuoja AppDaemon
+    (sensor.inverter_night_economics). Įjungiama atgal:
+    solis_morning_inverter_power_on (pagal Solcast gamybos pradžią).
     Valdoma jungikliu input_boolean.night_inverter_shutdown. Audros režimu
     nevykdoma — inverteris reikalingas backup funkcijai.
   trigger:
@@ -412,20 +433,28 @@
         message: >
           Baterija {{ states('sensor.solis_s6_eh3p_battery_soc') }}% pasiekė
           tikslinį SOC {{ [states('sensor.energy_manager_target_soc') | float(100), 11] | max | round(0) }}%.
-          Inverteris išjungtas — sutaupoma ~140 W savivartojimo iš baterijos.
-          Namus maitina tinklas. Įsijungs 30 min iki saulėtekio.
+          Inverteris išjungtas: idle 130 W (iš baterijos) → 30 W (iš tinklo),
+          sutaupoma ~{{ state_attr('sensor.inverter_night_economics', 'sutaupymas_nakti_eur') | float(0) | round(2) }} €
+          per naktį. Namus maitina tinklas.
+          Įsijungs {{ state_attr('sensor.inverter_morning_on_time', 'laikas') | default('prieš gamybos pradžią', true) }} —
+          kai Solcast numato >100 W gamybą.
   mode: single
 
 - id: solis_morning_inverter_power_on
-  alias: "Solis - Ryto inverterio įjungimas po naktinio išjungimo"
+  alias: "Solis - Ryto inverterio įjungimas pagal Solcast gamybos pradžią"
   description: >
-    Įjungia inverterį (power_state on) 30 min iki saulėtekio po naktinio
-    išjungimo. Saugikliai: įjungiama iškart, jei įjungiamas audros režimas
-    (reikia backup) arba išjungiamas naktinio išjungimo jungiklis.
+    Įjungia inverterį (power_state on) po naktinio išjungimo tada, kai pagal
+    Solcast pusvalandinę prognozę PV gamyba viršys ~100 W (idle/off
+    skirtumą) — laiką skaičiuoja AppDaemon (sensor.inverter_morning_on_time,
+    timestamp). Birželį tai ~1–2 val. vėliau už saulėtekį, kas sutaupo
+    ~100 W tuščio veikimo. Atsarginis trigeris 10:00, jei sensorius
+    nepasiekiamas. Saugikliai: įjungiama iškart, jei įjungiamas audros
+    režimas (reikia backup) arba išjungiamas naktinio išjungimo jungiklis.
   trigger:
-    - platform: sun
-      event: sunrise
-      offset: "-00:30:00"
+    - platform: time
+      at: sensor.inverter_morning_on_time
+    - platform: time
+      at: "10:00:00"
     - platform: state
       entity_id: input_boolean.night_inverter_shutdown
       to: "off"
@@ -446,6 +475,7 @@
         message: >
           Inverteris įjungtas po naktinio išjungimo
           (baterija: {{ states('sensor.solis_s6_eh3p_battery_soc') }}%).
+          Solcast numato gamybos pradžią — inverteris pasiruošęs dienai.
   mode: single
 
 - id: solis_storm_export_at_high_soc
@@ -491,4 +521,28 @@
             message: >
               Baterija {{ states('sensor.solis_s6_eh3p_battery_soc') }}% (<90%)
               — eksportas vėl sustabdytas, visa saulė į bateriją.
+  mode: single
+
+- id: solis_inverter_temp_alert
+  alias: "Solis - Inverterio temperatūros įspėjimas (>70°C)"
+  description: >
+    Įspėja, kai inverterio temperatūra 10 min laikosi virš 70°C — artėja
+    galios ribojimo (derating) zona, verta patikrinti vėdinimą. Trigeris
+    suveikia tik kertant ribą, todėl pranešimas nesikartoja, kol
+    temperatūra nenukrenta ir vėl nepakyla.
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.solis_s6_eh3p_temperature
+      above: 70
+      for: "00:10:00"
+  condition: []
+  action:
+    - service: notify.persistent_notification
+      data:
+        title: "Solis - Aukšta inverterio temperatūra 🌡️"
+        message: >
+          Inverterio temperatūra {{ states('sensor.solis_s6_eh3p_temperature') }}°C
+          jau 10 min viršija 70°C. Artėjant ~75°C inverteris pradės riboti
+          galią. Patikrinkite vėdinimą / užtemdymą. PV galia:
+          {{ states('sensor.solis_s6_eh3p_total_pv_power') }} W.
   mode: single

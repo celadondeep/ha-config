@@ -49,6 +49,24 @@ input_number:
     unit_of_measurement: kWh
     icon: mdi:weather-partly-cloudy
     mode: box
+  # Elektros kainos — naudoja AppDaemon (nakties ekonomika, ataskaitos) ir
+  # template sensoriai. Keičiamos iš dashboard be konfigūracijos redagavimo.
+  electricity_price_buy:
+    name: Elektros pirkimo kaina
+    min: 0
+    max: 1
+    step: 0.001
+    unit_of_measurement: "€/kWh"
+    icon: mdi:transmission-tower-import
+    mode: box
+  electricity_price_sell:
+    name: Elektros pardavimo kaina
+    min: 0
+    max: 1
+    step: 0.001
+    unit_of_measurement: "€/kWh"
+    icon: mdi:transmission-tower-export
+    mode: box
 
 # Savaitiniai energijos skaitliukai weekly_report.py ataskaitai.
 # Šaltiniai — Solis Modbus total skaitliukai; resetinasi pirmadienį 00:00.
@@ -195,6 +213,49 @@ template:
 
       # (energy_manager_boiler_status publikuoja AppDaemon — placeholder
       # template pašalintas, kad nebūtų dviejų rašytojų į tą patį entity.)
+
+      # Ekvivalentiniai baterijos ciklai = bendra įkrova / naudingoji talpa.
+      - name: "battery_equivalent_cycles"
+        unique_id: battery_equivalent_cycles
+        unit_of_measurement: "ciklai"
+        state_class: total_increasing
+        icon: mdi:battery-sync
+        state: >
+          {{ (states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) / 14.2) | round(1) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') not in ['unavailable', 'unknown', ''] }}
+
+      # Savarankiškumas šiandien: kiek % namų suvartojimo padengė ne tinklas.
+      - name: "self_sufficiency_today"
+        unique_id: self_sufficiency_today
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:home-percent
+        state: >
+          {% set cons = states('sensor.solis_s6_eh3p_today_energy_consumption') | float(0) %}
+          {% set imp  = states('sensor.solis_s6_eh3p_today_energy_imported_from_grid') | float(0) %}
+          {{ ([(1 - imp / cons) * 100, 0] | max) | round(0) if cons > 0.1 else 0 }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_today_energy_consumption') not in ['unavailable', 'unknown', ''] }}
+
+      # Sutaupyta šiandien €: savo reikmėms panaudota saulė × pirkimo kaina
+      # + parduota × pardavimo kaina − pirkta × pirkimo kaina.
+      - name: "energy_savings_today"
+        unique_id: energy_savings_today
+        unit_of_measurement: "€"
+        state_class: measurement
+        icon: mdi:piggy-bank
+        state: >
+          {% set pv   = states('sensor.solis_s6_eh3p_pv_today_energy_generation') | float(0) %}
+          {% set sell = states('sensor.solis_s6_eh3p_today_energy_fed_into_grid') | float(0) %}
+          {% set buy  = states('sensor.solis_s6_eh3p_today_energy_imported_from_grid') | float(0) %}
+          {% set p_buy  = states('input_number.electricity_price_buy') | float(0.18) %}
+          {% set p_sell = states('input_number.electricity_price_sell') | float(0.08) %}
+          {% set p_buy  = p_buy if p_buy > 0.001 else 0.18 %}
+          {% set p_sell = p_sell if p_sell > 0.001 else 0.08 %}
+          {{ (([pv - sell, 0] | max) * p_buy + sell * p_sell - buy * p_buy) | round(2) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_pv_today_energy_generation') not in ['unavailable', 'unknown', ''] }}
 
       # Vakar prognozės tikslumas: faktinė / prognozuota gamyba (%).
       - name: "solcast_forecast_yesterday_accuracy"
