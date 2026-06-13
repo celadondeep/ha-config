@@ -355,6 +355,36 @@ views:
                 name: Tinklo dažnis
             show_state: true
 
+          # Sistemos nuostolių balansas iš lifetime skaitliukų: kur dingsta
+          # energija — baterijos round-trip vs inverterio konversija + idle.
+          - type: glance
+            title: Efektyvumas ir nuostoliai (nuo įrengimo)
+            entities:
+              - entity: sensor.system_efficiency
+                name: Sistema
+              - entity: sensor.battery_roundtrip_efficiency
+                name: Baterija
+              - entity: sensor.battery_losses_total
+                name: Bat. nuostoliai
+              - entity: sensor.inverter_losses_total
+                name: Inv. nuostoliai
+            show_state: true
+
+          # I²R nuostoliai 50 m 5×6 mm² kabelyje inverteris ↔ skydas,
+          # skaičiuojami iš inverterio fazių srovių (R ≈ 0.146 Ω/gysla).
+          - type: glance
+            title: Kabelio nuostoliai (50 m, 5×6 mm²)
+            entities:
+              - entity: sensor.cable_loss_power
+                name: Dabar
+              - entity: sensor.cable_loss_percent
+                name: Nuo srauto
+              - entity: sensor.kabelio_nuostoliai_siandien
+                name: Šiandien
+              - entity: sensor.cable_loss_energy
+                name: Iš viso
+            show_state: true
+
       - type: grid
         column_span: 2
         cards:

@@ -68,6 +68,16 @@ input_number:
     icon: mdi:transmission-tower-export
     mode: box
 
+# Kabelio nuostolių galios (W) integravimas į energiją (kWh) — Riemann suma.
+sensor:
+  - platform: integration
+    source: sensor.cable_loss_power
+    name: cable_loss_energy
+    unique_id: cable_loss_energy
+    unit_prefix: k
+    round: 3
+    method: trapezoidal
+
 # Savaitiniai energijos skaitliukai weekly_report.py ataskaitai.
 # Šaltiniai — Solis Modbus total skaitliukai; resetinasi pirmadienį 00:00.
 utility_meter:
@@ -87,6 +97,11 @@ utility_meter:
     name: Savaitės namų suvartojimas
     source: sensor.solis_s6_eh3p_household_load_total_energy
     cycle: weekly
+  # Kabelio nuostoliai per dieną — iš Riemann integralo cable_loss_energy.
+  energy_cable_loss_today:
+    name: Kabelio nuostoliai šiandien
+    source: sensor.cable_loss_energy
+    cycle: daily
 
 template:
   - sensor:
@@ -251,6 +266,129 @@ template:
               * states('sensor.solis_s6_eh3p_c_phase_current') | float(0)) | round(0) }}
         availability: >
           {{ states('sensor.solis_s6_eh3p_c_phase_voltage') not in ['unavailable', 'unknown', ''] }}
+
+      # --- Kabelio nuostoliai: inverteris ↔ tinklo skydas --------------------
+      # 50 m varinis 5×6 mm² kabelis: R = 0.0175 Ω·mm²/m × 50 / 6 ≈ 0.146 Ω
+      # vienai gyslai (20°C). Nuostoliai = R × (I₁²+I₂²+I₃²+I_N²); nulinio
+      # laido srovė įvertinta iš fazių disbalanso (I_N² = ΣI² − ΣIᵢIⱼ,
+      # prielaida — 120° tarp fazių). Srovės — inverterio AC gnybtų, t. y.
+      # visas inverterio srautas, tekantis kabeliu iki skydo.
+      - name: "cable_loss_power"
+        unique_id: cable_loss_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:resistor
+        state: >
+          {% set r = 0.0175 * 50 / 6 %}
+          {% set ia = states('sensor.solis_s6_eh3p_a_phase_current') | float(0) %}
+          {% set ib = states('sensor.solis_s6_eh3p_b_phase_current') | float(0) %}
+          {% set ic = states('sensor.solis_s6_eh3p_c_phase_current') | float(0) %}
+          {% set sumsq = ia*ia + ib*ib + ic*ic %}
+          {% set i_n_sq = [sumsq - (ia*ib + ib*ic + ic*ia), 0] | max %}
+          {{ (r * (sumsq + i_n_sq)) | round(1) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_a_phase_current') not in ['unavailable', 'unknown', ''] }}
+        attributes:
+          gyslos_varza_om: "0.146"
+          nulinio_laido_srove_a: >
+            {% set ia = states('sensor.solis_s6_eh3p_a_phase_current') | float(0) %}
+            {% set ib = states('sensor.solis_s6_eh3p_b_phase_current') | float(0) %}
+            {% set ic = states('sensor.solis_s6_eh3p_c_phase_current') | float(0) %}
+            {{ (([ia*ia + ib*ib + ic*ic - (ia*ib + ib*ic + ic*ia), 0] | max) ** 0.5) | round(2) }}
+
+      # Nuostolių dalis nuo perduodamos galios (%); reikšminga tik kai
+      # inverterio srautas > 100 W.
+      - name: "cable_loss_percent"
+        unique_id: cable_loss_percent
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:percent
+        state: >
+          {% set loss = states('sensor.cable_loss_power') | float(0) %}
+          {% set p = states('sensor.solis_s6_eh3p_active_power') | float(0) | abs %}
+          {{ (loss / p * 100) | round(2) if p > 100 else 0 }}
+        availability: >
+          {{ states('sensor.cable_loss_power') not in ['unavailable', 'unknown', ''] }}
+
+      # --- Sistemos efektyvumas ir nuostoliai (lifetime skaitliukai) ---------
+      # Baterijos round-trip efektyvumas DC pusėje: iškrauta / įkrauta,
+      # atėmus šiuo metu baterijoje likusią energiją (SOC × 16 kWh), kad
+      # dabartinis įkrovos lygis neiškreiptų santykio.
+      - name: "battery_roundtrip_efficiency"
+        unique_id: battery_roundtrip_efficiency
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:battery-sync
+        state: >
+          {% set chg = states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) %}
+          {% set dis = states('sensor.solis_s6_eh3p_total_battery_discharge_energy') | float(0) %}
+          {% set stored = states('sensor.solis_s6_eh3p_battery_soc') | float(0) / 100 * 16 %}
+          {% set denom = chg - stored %}
+          {{ (dis / denom * 100) | round(1) if denom > 50 else 'unknown' }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') not in ['unavailable', 'unknown', ''] }}
+
+      # Visos sistemos efektyvumas: naudinga energija (namai + backup +
+      # eksportas) / įvestis (PV + importas − baterijoje likusi). Skirtumas
+      # nuo 100% = visi nuostoliai: baterijos round-trip, inverterio
+      # konversija ir ~130 W idle savivartojimas.
+      - name: "system_efficiency"
+        unique_id: system_efficiency
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:gauge
+        state: >
+          {% set pv = states('sensor.solis_s6_eh3p_pv_total_energy_generation') | float(0) %}
+          {% set imp = states('sensor.solis_s6_eh3p_total_energy_imported_from_grid') | float(0) %}
+          {% set home = states('sensor.solis_s6_eh3p_household_load_total_energy') | float(0) %}
+          {% set bkp = states('sensor.solis_s6_eh3p_backup_load_total_energy') | float(0) %}
+          {% set exp = states('sensor.solis_s6_eh3p_total_energy_fed_into_grid') | float(0) %}
+          {% set stored = states('sensor.solis_s6_eh3p_battery_soc') | float(0) / 100 * 16 %}
+          {% set denom = pv + imp - stored %}
+          {{ ((home + bkp + exp) / denom * 100) | round(1) if denom > 50 else 'unknown' }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_pv_total_energy_generation') not in ['unavailable', 'unknown', ''] }}
+
+      # Baterijos round-trip nuostoliai kWh (lifetime): įkrauta − iškrauta −
+      # šiuo metu baterijoje likusi energija.
+      - name: "battery_losses_total"
+        unique_id: battery_losses_total
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        icon: mdi:battery-minus-variant
+        state: >
+          {% set chg = states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) %}
+          {% set dis = states('sensor.solis_s6_eh3p_total_battery_discharge_energy') | float(0) %}
+          {% set stored = states('sensor.solis_s6_eh3p_battery_soc') | float(0) / 100 * 16 %}
+          {{ ([chg - dis - stored, 0] | max) | round(1) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') not in ['unavailable', 'unknown', ''] }}
+
+      # Inverterio nuostoliai kWh (lifetime) = visi sistemos nuostoliai −
+      # baterijos nuostoliai. Apima AC/DC konversiją ir idle savivartojimą
+      # (~130 W įjungus = didžioji nuostolių dalis).
+      - name: "inverter_losses_total"
+        unique_id: inverter_losses_total
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        icon: mdi:sine-wave
+        state: >
+          {% set pv = states('sensor.solis_s6_eh3p_pv_total_energy_generation') | float(0) %}
+          {% set imp = states('sensor.solis_s6_eh3p_total_energy_imported_from_grid') | float(0) %}
+          {% set home = states('sensor.solis_s6_eh3p_household_load_total_energy') | float(0) %}
+          {% set bkp = states('sensor.solis_s6_eh3p_backup_load_total_energy') | float(0) %}
+          {% set exp = states('sensor.solis_s6_eh3p_total_energy_fed_into_grid') | float(0) %}
+          {% set chg = states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) %}
+          {% set dis = states('sensor.solis_s6_eh3p_total_battery_discharge_energy') | float(0) %}
+          {% set stored = states('sensor.solis_s6_eh3p_battery_soc') | float(0) / 100 * 16 %}
+          {% set total_loss = pv + imp - home - bkp - exp - stored %}
+          {% set batt_loss = [chg - dis - stored, 0] | max %}
+          {{ ([total_loss - batt_loss, 0] | max) | round(1) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_pv_total_energy_generation') not in ['unavailable', 'unknown', ''] }}
 
       # Ekvivalentiniai baterijos ciklai = bendra įkrova / naudingoji talpa.
       - name: "battery_equivalent_cycles"

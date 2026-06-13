@@ -478,6 +478,46 @@
           Solcast numato gamybos pradžią — inverteris pasiruošęs dienai.
   mode: single
 
+- id: solis_low_soc_night_shutdown
+  alias: "Solis - SOC ≤ 11%: išjungti inverterį iki ryto"
+  description: >
+    Apsauga nuo nakties ciklavimo ties apatine riba: baterijai naktį
+    nukritus iki 11%, inverteris pats imdavo priverstinai krautis iš tinklo
+    iki ~14% ir vėl išsikraudavo — iki 6 ciklų per naktį (sekli ciklika,
+    baterijos dėvėjimas, visas pirkimas naktį). Vietoj to inverteris
+    išjungiamas: namus maitina tinklas, baterija ilsisi ties 11%.
+    Veikia NEPRIKLAUSOMAI nuo input_boolean.night_inverter_shutdown —
+    tai apsauga, ne ekonomika. Rytą įjungia solis_morning_inverter_power_on
+    (Solcast gamybos pradžia arba 10:00 atsarginis). Audros režimu
+    nevykdoma — inverteris reikalingas backup funkcijai.
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.solis_s6_eh3p_battery_soc
+      below: 11.5
+  condition:
+    - condition: state
+      entity_id: sun.sun
+      state: "below_horizon"
+    - condition: state
+      entity_id: input_boolean.storm_mode
+      state: "off"
+    - condition: state
+      entity_id: switch.solis_s6_eh3p_power_state
+      state: "on"
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh3p_power_state
+    - service: notify.persistent_notification
+      data:
+        title: "Solis - Inverteris išjungtas: baterija 11% 🛡️"
+        message: >
+          Baterija pasiekė {{ states('sensor.solis_s6_eh3p_battery_soc') }}% —
+          inverteris išjungtas iki ryto, kad neprasidėtų priverstinio krovimo
+          iš tinklo ciklai ties 10–14%. Namus maitina tinklas.
+          Įsijungs {{ state_attr('sensor.inverter_morning_on_time', 'laikas') | default('prieš gamybos pradžią', true) }}.
+  mode: single
+
 - id: solis_storm_export_at_high_soc
   alias: "Solis - Audros režimas: eksportas kai SOC ≥ 95%"
   description: >
