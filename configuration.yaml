@@ -1,6 +1,11 @@
 # Loads default set of integrations. Do not remove.
 default_config:
 
+# 2-os elektrinės (Eimo SE) atskira konfigūracija — packages/eimo.yaml.
+# Nepriklausoma nuo 1-os elektrinės; lengvai išjungiama pašalinus failą.
+homeassistant:
+  packages: !include_dir_named packages
+
 # Load frontend themes from the themes folder
 frontend:
   themes: !include_dir_merge_named themes
@@ -17,6 +22,12 @@ lovelace:
       icon: mdi:solar-power
       show_in_sidebar: true
       filename: lovelace/energijos_valdymas.yaml
+    eimo-energija:
+      mode: yaml
+      title: Eimo SE energija
+      icon: mdi:solar-power-variant
+      show_in_sidebar: true
+      filename: lovelace/eimo.yaml
 
 input_boolean:
   storm_mode:

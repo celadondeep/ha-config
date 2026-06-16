@@ -1,0 +1,104 @@
+title: Eimo SE energija
+views:
+  - title: Eimo SE
+    path: eimo
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: glance
+            title: Dabartinė galia
+            entities:
+              - entity: sensor.eimo_pv_power
+                name: Saulė
+              - entity: sensor.solis_inverter_1033300254190112_solis_total_consumption_power
+                name: Namai
+              - entity: sensor.solis_inverter_1033300254190112_solis_power_grid_total_power
+                name: Tinklas
+              - entity: sensor.solis_inverter_1033300254190112_solis_battery_power
+                name: Baterija
+              - entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
+                name: SOC
+
+          - type: gauge
+            entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
+            name: Baterijos SOC
+            unit: "%"
+            min: 0
+            max: 100
+            severity:
+              green: 50
+              yellow: 20
+              red: 5
+
+          - type: gauge
+            entity: sensor.energy_manager_eimo_target_soc
+            name: Tikslinė SOC riba
+            unit: "%"
+            min: 0
+            max: 100
+
+      - type: grid
+        cards:
+          - type: entities
+            title: Energijos valdymas (Eimo)
+            entities:
+              - entity: sensor.energy_manager_eimo_target_soc
+                name: Tikslinė SOC riba
+              - entity: sensor.energy_manager_eimo_decision
+                name: Sprendimas
+              - entity: sensor.energy_manager_eimo_balance
+                name: Energijos balansas
+              - entity: sensor.energy_manager_eimo_surplus_now
+                name: Perteklius dabar
+              - entity: sensor.consumption_forecast_tomorrow_eimo
+                name: Rytojaus suvartojimas
+              - entity: sensor.consumption_remaining_today_eimo
+                name: Likęs suvartojimas šiandien
+              - entity: sensor.solcast_correction_factor_eimo
+                name: Solcast korekcija
+              - entity: sensor.inverter_night_economics_eimo
+                name: Nakties ekonomika
+
+          - type: entities
+            title: Saulės prognozė (bendra)
+            entities:
+              - entity: sensor.solcast_pv_forecast_forecast_remaining_today
+                name: Liko šiandien
+              - entity: sensor.solcast_pv_forecast_forecast_tomorrow
+                name: Rytoj
+              - entity: input_number.solcast_forecast_yesterday_eimo
+                name: Vakar prognozuota
+
+          - type: entities
+            title: Valdymas ir nustatymai
+            entities:
+              - entity: input_boolean.storm_mode_eimo
+                name: Audros / ESO režimas
+              - entity: input_select.energy_season_eimo
+                name: Sezonas
+              - entity: input_number.electricity_price_buy_eimo
+                name: Pirkimo kaina
+              - entity: input_number.electricity_price_sell_eimo
+                name: Pardavimo kaina
+              - entity: select.inverter_control_1033300254190112_storage_mode
+                name: Inverterio režimas
+              - entity: switch.inverter_control_1033300254190112_slot1_discharge
+                name: Iškrovimo slotas (slot1)
+              - entity: number.inverter_control_1033300254190112_slot1_discharge_soc
+                name: Iškrovimo cut-off SOC
+
+          - type: entities
+            title: Inverterio būsena
+            entities:
+              - entity: sensor.solis_inverter_1033300254190112_solis_temperature
+                name: Temperatūra
+              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
+                name: Pagaminta šiandien
+              - entity: sensor.solis_inverter_1033300254190112_solis_battery_state_of_health
+                name: Baterijos sveikata (SOH)
+              - entity: sensor.solis_inverter_1033300254190112_solis_state
+                name: Inverterio būsena
+              - entity: switch.inverter_control_1033300254190112_inverter_on_off
+                name: Inverteris (on/off)
