@@ -78,6 +78,26 @@ ml_model.py, weekly_report.py, battery_health.py), /config/automations.yaml.
    (inverter_morning_on_time), ar įjungimo laikas sutapo su realia gamybos pradžia.
 6. **Pirkimas/pardavimas brangiu/pigiu metu.** Kiek kWh pirkta, ar tai įvyko
    naktį (pigiai) ar dieną (brangiai). Įvertink dienos balansą eurais.
+   **PRIVALOMA naktinio importo dekompozicija — NEnaudok žalios sumos.**
+   `*_today_energy_imported_from_grid` yra kaupiamasis ir sudeda du iš esmės
+   skirtingus dalykus, kuriuos reikia atskirti pagal `switch.solis_s6_eh3p_power_state`
+   perjungimų laiką (inverteris on/off) lygintą su importo prieaugiu:
+   - **(a) Namai iš tinklo, kol inverteris IŠJUNGTAS naktį** — tai DIZAINO
+     tikslas (idle 130 W → off 30 W), kainuoja 0 € ESO schemoje. **NEFLAGUOTI**
+     kaip problemos. Tai sėkmė, ne defektas.
+   - **(b) Aušros force-charge / ciklavimas ties grindimis** — inverteriui
+     įsijungus žemu SOC prieš realią PV, jis trumpam prisikrauna iš tinklo
+     (staigus importo šuolis + SOC kilimas per kelias minutes). Tik ŠITĄ dalį
+     vertink kaip galimą neefektyvumą (nors ESO schemoje irgi 0 € — tik
+     baterijos dėvėjimas + banko kredito mažėjimas).
+   Vakaro TOU eksportas, ištuštinantis bateriją iki ~10 % prieš saulėtą rytojų,
+   yra RACIONALUS (eksportas už sell vertę, rytoj refill iš nemokamos saulės) —
+   neflaguoti kaip „per gilios iškrovos". Smulkiai nakties rekonstrukcijai
+   naudok lokalų `home-assistant_v2.db` (skaityk TIK read-only:
+   `sqlite3 'file:home-assistant_v2.db?mode=ro&immutable=1'` arba python uri
+   mode=ro; states_meta↔states pagal metadata_id) — jis duoda tikslesnį laiką
+   nei history API. Žurnale „KARTOJASI" žymėk tik realų (b) tipo neefektyvumą,
+   ne sudėtinę žalią sumą.
 7. **Anomalijos.** home-assistant.log klaidos, susijusios su energy_manager /
    solis / solcast; AppDaemon klaidos (/addon_configs/*appdaemon*/logs jei yra).
 8. **Efektyvumas ir nuostoliai.** Sek sensor.system_efficiency,
