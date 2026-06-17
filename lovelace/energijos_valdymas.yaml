@@ -76,20 +76,131 @@ views:
             tap_action:
               action: toggle
 
-          - type: glance
-            title: Dabartinė galia
-            entities:
-              - entity: sensor.solis_s6_eh3p_total_pv_power
-                name: Saulė
-              - entity: sensor.solis_s6_eh3p_household_load_power
-                name: Namai
-              - entity: sensor.solis_s6_eh3p_grid_power_net
-                name: Tinklas
-              - entity: sensor.solis_s6_eh3p_battery_power_net
-                name: Baterija
-              - entity: sensor.solis_s6_eh3p_battery_soc
-                name: SOC
-            show_state: true
+          # Dabartinė galia — button-card eilė su krypčiai jautriomis ikonomis.
+          # Ženklai (patikrinti iš Modbus): grid_power_net + = ima iš tinklo,
+          # − = atiduoda; battery_power_net + = iškrauna, − = kraunasi.
+          - type: vertical-stack
+            cards:
+              - type: markdown
+                content: "#### Dabartinė galia"
+              - type: horizontal-stack
+                cards:
+                  # Saulė
+                  - type: custom:button-card
+                    entity: sensor.solis_s6_eh3p_total_pv_power
+                    name: Saulė
+                    show_state: true
+                    icon: mdi:solar-power-variant
+                    state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
+                    styles:
+                      icon:
+                        - color: |
+                            [[[ return parseFloat(entity.state) > 10 ? '#FFB300' : 'var(--secondary-text-color)'; ]]]
+
+                  # Namai
+                  - type: custom:button-card
+                    entity: sensor.solis_s6_eh3p_household_load_power
+                    name: Namai
+                    show_state: true
+                    icon: mdi:home-lightning-bolt
+                    state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
+                    styles:
+                      icon:
+                        - color: "#42A5F5"
+
+                  # Tinklas — import (raudona, įeinanti) / export (žalia, išeinanti)
+                  - type: custom:button-card
+                    entity: sensor.solis_s6_eh3p_grid_power_net
+                    show_state: true
+                    name: |
+                      [[[
+                        var p = parseFloat(entity.state);
+                        if (p > 20) return 'Iš tinklo';
+                        if (p < -20) return 'Į tinklą';
+                        return 'Tinklas';
+                      ]]]
+                    icon: |
+                      [[[
+                        var p = parseFloat(entity.state);
+                        if (p > 20) return 'mdi:transmission-tower-import';
+                        if (p < -20) return 'mdi:transmission-tower-export';
+                        return 'mdi:transmission-tower';
+                      ]]]
+                    state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
+                    styles:
+                      icon:
+                        - color: |
+                            [[[
+                              var p = parseFloat(entity.state);
+                              if (p > 20) return '#F44336';
+                              if (p < -20) return '#00C853';
+                              return 'var(--secondary-text-color)';
+                            ]]]
+
+                  # Baterija — kraunasi (žalia, animuota) / iškrauna (oranžinė)
+                  - type: custom:button-card
+                    entity: sensor.solis_s6_eh3p_battery_power_net
+                    show_state: true
+                    name: |
+                      [[[
+                        var p = parseFloat(entity.state);
+                        if (p < -20) return 'Kraunasi';
+                        if (p > 20) return 'Iškrauna';
+                        return 'Baterija';
+                      ]]]
+                    icon: |
+                      [[[
+                        var p = parseFloat(entity.state);
+                        var s = states['sensor.solis_s6_eh3p_battery_soc'];
+                        var soc = s ? parseFloat(s.state) : 0;
+                        var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
+                        if (p < -20) return lvl <= 0 ? 'mdi:battery-charging-outline' : 'mdi:battery-charging-' + lvl;
+                        if (lvl >= 100) return 'mdi:battery';
+                        if (lvl <= 0) return 'mdi:battery-outline';
+                        return 'mdi:battery-' + lvl;
+                      ]]]
+                    state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
+                    extra_styles: |
+                      @keyframes batt-pulse {
+                        0%   { opacity: 1;    transform: scale(1); }
+                        50%  { opacity: 0.35; transform: scale(0.92); }
+                        100% { opacity: 1;    transform: scale(1); }
+                      }
+                    styles:
+                      icon:
+                        - color: |
+                            [[[
+                              var p = parseFloat(entity.state);
+                              if (p < -20) return '#00C853';
+                              if (p > 20) return '#FF9800';
+                              return 'var(--secondary-text-color)';
+                            ]]]
+                        - animation: |
+                            [[[ return parseFloat(entity.state) < -20 ? 'batt-pulse 1.3s ease-in-out infinite' : 'none'; ]]]
+
+                  # SOC — pripildymo lygis, spalva pagal %
+                  - type: custom:button-card
+                    entity: sensor.solis_s6_eh3p_battery_soc
+                    name: SOC
+                    show_state: true
+                    icon: |
+                      [[[
+                        var soc = parseFloat(entity.state);
+                        var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
+                        if (lvl >= 100) return 'mdi:battery';
+                        if (lvl <= 0) return 'mdi:battery-outline';
+                        return 'mdi:battery-' + lvl;
+                      ]]]
+                    state_display: '[[[ return Math.round(parseFloat(entity.state)) + "%"; ]]]'
+                    styles:
+                      icon:
+                        - color: |
+                            [[[
+                              var soc = parseFloat(entity.state);
+                              if (soc < 20) return '#F44336';
+                              if (soc < 50) return '#FF9800';
+                              return '#00C853';
+                            ]]]
 
           # Fazės: įtampa ir tinklo mainai iš smart meter (registrai per
           # lokalų Modbus kaip meter_*), inverterio paduodama galia į fazes
