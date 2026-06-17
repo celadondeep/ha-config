@@ -15,7 +15,11 @@
   trigger:
     - platform: time
       at: "06:00:00"
-  condition: []
+  condition:
+    # Rankinio valdymo režimu nesikišti — vartotojas pats valdo iškrovimą
+    - condition: state
+      entity_id: input_boolean.manual_tou_override
+      state: "off"
   action:
     - variables:
         forecast_raw: "{{ states('sensor.solcast_pv_forecast_forecast_today') | float(0) }}"
@@ -94,7 +98,16 @@
   trigger:
     - platform: time
       at: "20:00:00"
-  condition: []
+  condition:
+    # Rankinio valdymo režimu nesikišti — vartotojas pats valdo iškrovimą
+    - condition: state
+      entity_id: input_boolean.manual_tou_override
+      state: "off"
+    # Cut-off bypass režimu nesikišti — vartotojas pats valdo iškrovimo slotą
+    # (cut-off SOC, srovė, jungiklis); automatika jų neperrašo / neišjungia.
+    - condition: state
+      entity_id: input_boolean.manual_soc_override
+      state: "off"
   action:
     - variables:
         # Koreguota rytojaus prognozė — ta pati, pagal kurią AppDaemon
@@ -106,7 +119,7 @@
         # Tikslinis SOC — iš AppDaemon (energy_manager.py). Apsauga: niekada
         # nenaudoti reikšmės žemiau baterijos dugno 11% (pvz. jei sensorius
         # po restarto dar nepaskelbtas ar klaidingas).
-        target_soc: "{{ [states('sensor.energy_manager_target_soc') | float(100) | round(0) | int, 11] | max }}"
+        target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 11] | max }}"
         discharge_needed: "{{ states('sensor.energy_manager_discharge_needed') | float(0) }}"
     - choose:
         # 1) Audros/ESO režimas — joks aktyvus iškrovimas, tik namų reikmėms
@@ -225,13 +238,22 @@
     - condition: state
       entity_id: input_boolean.storm_mode
       state: "off"
+    # Rankinio valdymo režimu nesikišti — vartotojas pats valdo iškrovimą
+    - condition: state
+      entity_id: input_boolean.manual_tou_override
+      state: "off"
+    # Cut-off bypass režimu nesikišti — vartotojas pats valdo iškrovimo slotą
+    # (cut-off SOC, srovė, jungiklis); automatika jų neperrašo / neišjungia.
+    - condition: state
+      entity_id: input_boolean.manual_soc_override
+      state: "off"
   action:
     # 1) Tikslinį SOC publikuoja AppDaemon (energy_manager.py) kas 5–30 min —
     #    update_entity nebereikalingas (tai nebe template sensorius).
     #    Apsauga: niekada nenaudoti reikšmės žemiau baterijos dugno 11%;
     #    jei sensorius nepasiekiamas — 100% (= neiškrauti nieko).
     - variables:
-        target_soc: "{{ [states('sensor.energy_manager_target_soc') | float(100) | round(0) | int, 11] | max }}"
+        target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 11] | max }}"
         current_soc: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(100) }}"
         tou_on: "{{ is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on') }}"
     # Jei iškrovimo slotas išjungtas — nieko nedaryti (nerašinėti į Modbus
@@ -285,6 +307,10 @@
     - condition: time
       after: "07:00:00"
       before: "20:00:00"
+    # Rankinio valdymo režimu nesikišti — vartotojas pats valdo iškrovimą
+    - condition: state
+      entity_id: input_boolean.manual_tou_override
+      state: "off"
     - condition: template
       value_template: >
         {{ states('select.solis_s6_eh3p_work_mode')
@@ -321,6 +347,10 @@
     # Audros/ESO režimas — neatnaujinti eksporto, baterija lieka tik namams
     - condition: state
       entity_id: input_boolean.storm_mode
+      state: "off"
+    # Rankinio valdymo režimu nesikišti — vartotojas pats valdo iškrovimą
+    - condition: state
+      entity_id: input_boolean.manual_tou_override
       state: "off"
     - condition: state
       entity_id: select.solis_s6_eh3p_work_mode
@@ -408,6 +438,10 @@
     - condition: state
       entity_id: input_boolean.storm_mode
       state: "off"
+    # Rankinio valdymo režimu nesikišti — inverteris reikalingas eksportui
+    - condition: state
+      entity_id: input_boolean.manual_tou_override
+      state: "off"
     - condition: state
       entity_id: sun.sun
       state: "below_horizon"
@@ -422,7 +456,7 @@
     - condition: template
       value_template: >
         {{ states('sensor.solis_s6_eh3p_battery_soc') | float(100)
-           <= [states('sensor.energy_manager_target_soc') | float(100), 11] | max + 1 }}
+           <= [states('sensor.target_soc_effective') | float(100), 11] | max + 1 }}
   action:
     - service: switch.turn_off
       target:
@@ -432,7 +466,7 @@
         title: "Solis - Inverteris išjungtas nakčiai 💤"
         message: >
           Baterija {{ states('sensor.solis_s6_eh3p_battery_soc') }}% pasiekė
-          tikslinį SOC {{ [states('sensor.energy_manager_target_soc') | float(100), 11] | max | round(0) }}%.
+          tikslinį SOC {{ [states('sensor.target_soc_effective') | float(100), 11] | max | round(0) }}%.
           Inverteris išjungtas: idle 130 W (iš baterijos) → 30 W (iš tinklo),
           sutaupoma ~{{ state_attr('sensor.inverter_night_economics', 'sutaupymas_nakti_eur') | float(0) | round(2) }} €
           per naktį. Namus maitina tinklas.

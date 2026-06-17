@@ -36,6 +36,18 @@ input_boolean:
   night_inverter_shutdown:
     name: Naktinis inverterio išjungimas
     icon: mdi:power-sleep
+  manual_tou_override:
+    name: Rankinis iškrovimo valdymas
+    icon: mdi:hand-back-right
+  # SOC cut-off bypass: įjungus — automacijos NEBERAŠO į iškrovimo cut-off SOC
+  # slot registrą (number.solis_s6_eh3p_..._discharge_cut_off_soc_slot_1).
+  # Vartotojas pats nustato cut-off SOC „TOU slotai" kortelėje ir reikšmė
+  # nebeperšoka. Iškrovimo slotų grafikas / įjungimas-išjungimas ties pasiektu
+  # cut-off veikia toliau. Skiriasi nuo manual_tou_override, kuris visiškai
+  # sustabdo automacijų kišimąsi (ir darbo režimą, ir naktinį išjungimą).
+  manual_soc_override:
+    name: Rankinis cut-off SOC (bypass)
+    icon: mdi:battery-lock
 
 input_select:
   energy_season:
@@ -194,6 +206,28 @@ template:
       # konfliktuodavo, todėl pašalintas. discharge_needed žemiau naudoja AppDaemon
       # paskelbtą energy_manager_target_soc reikšmę.
 
+      # Efektyvus tikslinis SOC — VIENAS šaltinis automacijoms ir kortelėms.
+      # Jei įjungtas input_boolean.manual_soc_override (bypass) → reikšmė imama
+      # tiesiai iš inverterio cut-off slot registro (jį vartotojas keičia ranka
+      # „TOU slotai" kortelėje), o automacijos į tą registrą NEBERAŠO (žr.
+      # guard'us automations.yaml). Kitaip — AppDaemon paskelbtas
+      # sensor.energy_manager_target_soc. Visada clamp ≥ 11% (baterijos dugnas);
+      # jei šaltinis nepasiekiamas — 100% (= neiškrauti nieko).
+      - name: "target_soc_effective"
+        unique_id: target_soc_effective
+        unit_of_measurement: "%"
+        icon: mdi:battery-charging-medium
+        state: >
+          {% if is_state('input_boolean.manual_soc_override', 'on') %}
+            {{ [states('number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1') | float(11) | round(0) | int, 11] | max }}
+          {% else %}
+            {{ [states('sensor.energy_manager_target_soc') | float(100) | round(0) | int, 11] | max }}
+          {% endif %}
+        attributes:
+          saltinis: >
+            {{ 'Rankinis (bypass)' if is_state('input_boolean.manual_soc_override', 'on')
+               else 'AppDaemon' }}
+
       # Kiek kWh reikia iškrauti iš baterijos (į tinklą) iki ryto, kad tilptų
       # rytojaus gamyba.  = (esamas SOC − tikslinis SOC) × 0.15955 kWh.  ≤0 → nereikia.
       # Atributai įvertina ~1 kW eksportą į tinklą (TOU 20A) + ~0.7 kW namų apkrovą.
@@ -207,11 +241,11 @@ template:
         state: >
           {% set per = 14.2 / (100 - 11) %}
           {% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(0) %}
-          {% set target = states('sensor.energy_manager_target_soc') | float(100) %}
+          {% set target = states('sensor.target_soc_effective') | float(100) %}
           {{ [(soc - target) * per, 0] | max | round(2) }}
         availability: >
           {{ states('sensor.solis_s6_eh3p_battery_soc') not in ['unavailable', 'unknown', '']
-             and states('sensor.energy_manager_target_soc') not in ['unavailable', 'unknown', ''] }}
+             and states('sensor.target_soc_effective') not in ['unavailable', 'unknown', ''] }}
         attributes:
           grid_export_kw: 1.0
           house_load_kw: 0.7
@@ -219,21 +253,21 @@ template:
           hours_grid_only: >
             {% set per = 14.2 / (100 - 11) %}
             {% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(0) %}
-            {% set target = states('sensor.energy_manager_target_soc') | float(100) %}
+            {% set target = states('sensor.target_soc_effective') | float(100) %}
             {% set need = [(soc - target) * per, 0] | max %}
             {{ (need / 1.0) | round(1) }}
           # Valandos iškrauti su 1 kW eksportu + 0.7 kW namų apkrova
           hours_total: >
             {% set per = 14.2 / (100 - 11) %}
             {% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(0) %}
-            {% set target = states('sensor.energy_manager_target_soc') | float(100) %}
+            {% set target = states('sensor.target_soc_effective') | float(100) %}
             {% set need = [(soc - target) * per, 0] | max %}
             {{ (need / 1.7) | round(1) }}
           # Ar telpa į naktinį langą (10.5h) vien per 1 kW eksportą
           fits_night_window: >
             {% set per = 14.2 / (100 - 11) %}
             {% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(0) %}
-            {% set target = states('sensor.energy_manager_target_soc') | float(100) %}
+            {% set target = states('sensor.target_soc_effective') | float(100) %}
             {% set need = [(soc - target) * per, 0] | max %}
             {{ (need / 1.0) <= 10.5 }}
 
@@ -535,3 +569,6 @@ http:
     - 172.16.0.0/12
     - 192.168.0.0/16
     - 127.0.0.1
+  # Apsauga nuo įsilaužimo (brute-force): po N nesėkmingų prisijungimų IP banuojamas
+  ip_ban_enabled: true
+  login_attempts_threshold: 5

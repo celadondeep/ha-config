@@ -55,6 +55,27 @@ views:
                 - padding-left: 6px
                 - color: var(--primary-text-color)
 
+          # Rankinis valdymas: įjungus — sustabdo automatizacijas, kurios
+          # perrašo TOU iškrovimo slotą / darbo režimą (recalc kas 5 min,
+          # ryto/vakaro režimai, dienos apsaugos, naktinis išjungimas).
+          # Leidžia rankiniu būdu forsuoti iškrovimą į tinklą.
+          - type: tile
+            entity: input_boolean.manual_tou_override
+            name: Rankinis valdymas
+            icon: mdi:hand-back-right
+            tap_action:
+              action: toggle
+
+          # SOC cut-off bypass: įjungus — automacijos nebeperrašo iškrovimo
+          # cut-off SOC. Reikšmę nustatai pats „TOU slotai" kortelėje
+          # (Iškrovimo cut-off SOC) ir ji nebeperšoka.
+          - type: tile
+            entity: input_boolean.manual_soc_override
+            name: Cut-off SOC bypass (rankinis)
+            icon: mdi:battery-lock
+            tap_action:
+              action: toggle
+
           - type: glance
             title: Dabartinė galia
             entities:
@@ -107,7 +128,7 @@ views:
                 name: Balansas
               - entity: sensor.energy_manager_surplus
                 name: Perteklius
-              - entity: sensor.energy_manager_target_soc
+              - entity: sensor.target_soc_effective
                 name: SOC tikslas
               - entity: sensor.energy_manager_discharge_needed
                 name: Reikia iškrauti

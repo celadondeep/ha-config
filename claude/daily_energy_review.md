@@ -6,9 +6,16 @@ teisingus sprendimus, ir kaupti išvadas tobulinimui.
 
 ## Griežtos taisyklės
 
-1. **TIK ANALIZĖ.** Nekeisk automations.yaml, AppDaemon kodo ar inverterio
-   nustatymų. Jei radai konkretų patobulinimą — aprašyk jį ataskaitoje su
-   siūlomu pakeitimu, vartotojas pats paprašys įgyvendinti.
+1. **Įgyvendink patikimus pataisymus į git šaką — gyvos sistemos neliesk.**
+   Radęs patobulinimą, ne tik aprašyk jį, bet ir įgyvendink pagal skyrių
+   „Patobulinimų įgyvendinimas" žemiau: pakeitimas patenka į atskirą
+   `claude/auto/YYYY-MM-DD` git šaką, kuri laukia vartotojo peržiūros (pull,
+   ne push). Gyva šaka (env `$LIVE_BRANCH`, dabar `eimo-se`) ir veikiantis
+   `/config` lieka neliesti, kol vartotojas pats nesumergina. Šitą eigą vykdyk
+   TIK kai `$AUTO_APPLY=1`; jei `$AUTO_APPLY=0` — tik analizė, jokių failų
+   keitimų (išskyrus ataskaitą/žurnalą) ir jokių git operacijų.
+   **NIEKADA** nekeisk inverterio nustatymų realiu laiku (Modbus registrų,
+   servisų) — keisk tik konfigūracijos/logikos failus.
 2. Architektūra: AppDaemon tik skaičiuoja (target_soc, prognozės), inverterį
    valdo tik automations.yaml. Iškrovimas — tik per charge/discharge slotus,
    overdischarge parametro neliesti. Naudoti tik lokalius solis_s6_eh3p_* entities.
@@ -83,13 +90,44 @@ ml_model.py, weekly_report.py, battery_health.py), /config/automations.yaml.
    efektyvumas (iškrauta/įkrauta per dieną) iškreiptas SOC pokyčio —
    lifetime sensoriai patikimesni.
 
-## Vienkartinė užduotis kitam auditui (ištrink šį bloką atlikęs)
+## Patobulinimų įgyvendinimas
 
-Peržiūrėk visas /config/lovelace/energijos_valdymas.yaml korteles ir abu
-puslapius (Energija, Analizė): ar visi entities egzistuoja ir atsivaizduoja,
-ar duomenys nesikartoja tarp kortelių, ar grafikai ir kortelės išdėstyti
-tikslingai, ar netrūksta svarbios informacijos. Išvadas ir siūlomą
-pertvarkymą aprašyk ataskaitoje (pats nekeisk — taisyklė №1 galioja).
+Vykdyk šį skyrių TIK jei `$AUTO_APPLY=1`. Kiekvieną radinį suskirstyk:
+
+- **Įgyvendinamas dabar** — pakeitimas, kurį gali padaryti konfigūracijos/kodo
+  failuose ir kuris pereina validaciją. Tinka VISKAS, kas pereina patikrą:
+  input_number/slenksčių reikšmės, automations.yaml sąlygos/trigeriai/veiksmai,
+  AppDaemon Python logika.
+- **Tik siūlymas** — jei nesi tikras, pakeitimas dviprasmiškas, reikia duomenų,
+  kurių neturi, arba neaišku ar pageidaujamas. Tokius tik aprašyk ataskaitoje.
+
+Eiga (tiksliai šia tvarka, kad gyva sistema liktų neliesta):
+
+1. Padaryk pakeitimus failuose (`/config`).
+2. **Validuok:**
+   - HA konfigūracija (automations.yaml, packages, configuration.yaml, template
+     ir kt.): `ha core check`.
+   - AppDaemon Python (.py): `python3 -m py_compile <failas>` kiekvienam keistam
+     failui. DĖMESIO: tai tikrina TIK sintaksę, ne logiką — todėl AppDaemon
+     logikos keitimą ataskaitoje aprašyk ypač aiškiai (kas, kodėl, ko tikiesi),
+     kad peržiūra būtų prasminga.
+   - Jei validacija nepraeina — atstatyk tuos failus (`git checkout -- <failas>`)
+     ir nuleisk radinį į „tik siūlymas".
+3. **Git:**
+   a. Pirma commit'ink TIK dokumentus į gyvą šaką:
+      `git add claude/reports/<DATA>.md claude/improvements_log.md && git commit -m "auditas <DATA>"`
+   b. Sukurk pasiūlymų šaką: `git checkout -b claude/auto/<DATA>`
+   c. Commit'ink konfigūracijos pakeitimus: `git add -A && git commit` su žinute
+      `auto(<DATA>): <ką ir kodėl>` ir eilute `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+   d. Push: `git push -u origin claude/auto/<DATA>` (jei push nepavyksta —
+      vis tiek tęsk, pakeitimas lieka lokalioje šakoje, pažymėk tai ataskaitoje).
+   e. Grįžk į gyvą šaką: `git checkout "$LIVE_BRANCH"` — taip `/config` failai
+      atstatomi į peržiūrėtą būseną, gyva sistema nepaliesta.
+   f. Push dokumentų commit'ą: `git push origin "$LIVE_BRANCH"`.
+4. Ataskaitoje aiškiai nurodyk: kurie pakeitimai įgyvendinti šakoje
+   `claude/auto/<DATA>` (trumpas diff aprašymas + kodėl), kurie liko tik
+   siūlymais. Tai tavo „waiting-on-you" eilė — vartotojas peržiūrės ir sumergins,
+   kai prieis.
 
 ## Rezultatai
 
@@ -103,7 +141,9 @@ pertvarkymą aprašyk ataskaitoje (pats nekeisk — taisyklė №1 galioja).
 3. **Pranešimas HA:** sukurk persistent notification su santrauka:
    `POST /api/services/notify/persistent_notification` body
    `{"title": "Energijos auditas YYYY-MM-DD", "message": "<santrauka + svarbiausi siūlymai>"}`.
-4. Jei buvo git pakeitimų /config — NEkomituok, tai ne tavo darbas.
+4. Git — pagal skyrių „Patobulinimų įgyvendinimas". Dokumentus (ataskaita,
+   žurnalas) commit'ink į `$LIVE_BRANCH`; konfigūracijos pasiūlymus — į
+   `claude/auto/<DATA>` šaką peržiūrai. Jei `$AUTO_APPLY=0` — nieko nekomituok.
 
 ## Ilgalaikis tobulinimas
 
