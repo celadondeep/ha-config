@@ -407,10 +407,13 @@ views:
               show: true
               title: Suvartojimas ir gamyba (24 val. · SOC % / W)
             graph_span: 24h
+            update_interval: 30s
             apex_config:
               chart:
                 height: 300
                 parentHeightOffset: 0
+                animations:
+                  enabled: false
               grid:
                 padding:
                   left: 0
@@ -572,11 +575,14 @@ views:
               show: true
               title: Dienos balansas (14 d. · kWh)
             graph_span: 14d
+            update_interval: 5min
             span:
               end: day
             apex_config:
               chart:
                 height: 280
+                animations:
+                  enabled: false
             yaxis:
               - min: 0
                 decimals: 0
@@ -616,9 +622,12 @@ views:
               show: true
               title: Inverterio temperatūra (48 val.)
             graph_span: 48h
+            update_interval: 5min
             apex_config:
               chart:
                 height: 220
+                animations:
+                  enabled: false
             yaxis:
               - min: ~20
                 decimals: 0
@@ -638,8 +647,13 @@ views:
               show: true
               title: Prognozės tikslumas (30 d.)
             graph_span: 30d
+            update_interval: 10min
             span:
               end: day
+            apex_config:
+              chart:
+                animations:
+                  enabled: false
             yaxis:
               - min: 0
                 decimals: 0
