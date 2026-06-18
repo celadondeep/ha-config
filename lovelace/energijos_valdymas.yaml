@@ -88,37 +88,51 @@ views:
                   # Saulė
                   - type: custom:button-card
                     entity: sensor.solis_s6_eh3p_total_pv_power
+                    size: 24px
                     name: Saulė
                     show_state: true
-                    icon: mdi:solar-power-variant
+                    icon: mdi:weather-sunny
                     state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
-                    extra_styles: |
-                      @keyframes spin { to { transform: rotate(360deg); } }
                     styles:
+                      grid:
+                        - grid-template-areas: '"n" "i" "s"'
+                      name:
+                        - font-size: 0.9em
+                        - font-weight: normal
+                        - color: var(--secondary-text-color)
+                      state:
+                        - font-size: 1em
+                        - color: var(--primary-text-color)
                       icon:
                         - color: |
                             [[[ return parseFloat(entity.state) > 10 ? '#FFB300' : 'var(--secondary-text-color)'; ]]]
-                        - animation: |
-                            [[[ return parseFloat(entity.state) > 10 ? 'spin 7s linear infinite' : 'none'; ]]]
 
                   # Namai
                   - type: custom:button-card
                     entity: sensor.solis_s6_eh3p_household_load_power
+                    size: 24px
                     name: Namai
                     show_state: true
-                    icon: mdi:home-lightning-bolt
+                    icon: mdi:home-import-outline
                     state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
-                    extra_styles: |
-                      @keyframes home-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
                     styles:
+                      grid:
+                        - grid-template-areas: '"n" "i" "s"'
+                      name:
+                        - font-size: 0.9em
+                        - font-weight: normal
+                        - color: var(--secondary-text-color)
+                      state:
+                        - font-size: 1em
+                        - color: var(--primary-text-color)
                       icon:
-                        - color: "#42A5F5"
-                        - animation: |
-                            [[[ return parseFloat(entity.state) > 50 ? 'home-pulse 1.8s ease-in-out infinite' : 'none'; ]]]
+                        - color: |
+                            [[[ return parseFloat(entity.state) > 0 ? '#42A5F5' : 'var(--secondary-text-color)'; ]]]
 
                   # Tinklas — import (raudona, įeinanti) / export (žalia, išeinanti)
                   - type: custom:button-card
                     entity: sensor.solis_s6_eh3p_grid_power_net
+                    size: 24px
                     show_state: true
                     name: |
                       [[[
@@ -130,15 +144,21 @@ views:
                     icon: |
                       [[[
                         var p = parseFloat(entity.state);
-                        if (p > 20) return 'mdi:transmission-tower-import';
-                        if (p < -20) return 'mdi:transmission-tower-export';
+                        if (p > 20) return 'mdi:transmission-tower-export';
+                        if (p < -20) return 'mdi:transmission-tower-import';
                         return 'mdi:transmission-tower';
                       ]]]
                     state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
-                    extra_styles: |
-                      @keyframes flow-l { 0%,100% { transform: translateX(4px); } 50% { transform: translateX(-4px); } }
-                      @keyframes flow-r { 0%,100% { transform: translateX(-4px); } 50% { transform: translateX(4px); } }
                     styles:
+                      grid:
+                        - grid-template-areas: '"n" "i" "s"'
+                      name:
+                        - font-size: 0.9em
+                        - font-weight: normal
+                        - color: var(--secondary-text-color)
+                      state:
+                        - font-size: 1em
+                        - color: var(--primary-text-color)
                       icon:
                         - color: |
                             [[[
@@ -147,17 +167,11 @@ views:
                               if (p < -20) return '#00C853';
                               return 'var(--secondary-text-color)';
                             ]]]
-                        - animation: |
-                            [[[
-                              var p = parseFloat(entity.state);
-                              if (p > 20) return 'flow-l 1.1s ease-in-out infinite';
-                              if (p < -20) return 'flow-r 1.1s ease-in-out infinite';
-                              return 'none';
-                            ]]]
 
-                  # Baterija — kraunasi (žalia, animuota) / iškrauna (oranžinė)
+                  # Baterija — su žaibu kai kraunasi, be žaibo kai iškrauna/rimsta; lygis pagal SOC (10 % žingsniu)
                   - type: custom:button-card
                     entity: sensor.solis_s6_eh3p_battery_power_net
+                    size: 24px
                     show_state: true
                     name: |
                       [[[
@@ -172,16 +186,23 @@ views:
                         var s = states['sensor.solis_s6_eh3p_battery_soc'];
                         var soc = s ? parseFloat(s.state) : 0;
                         var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
+                        // Kraunasi → su žaibu; kitaip → paprasta baterija pagal SOC.
                         if (p < -20) return lvl <= 0 ? 'mdi:battery-charging-outline' : 'mdi:battery-charging-' + lvl;
                         if (lvl >= 100) return 'mdi:battery';
                         if (lvl <= 0) return 'mdi:battery-outline';
                         return 'mdi:battery-' + lvl;
                       ]]]
                     state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
-                    extra_styles: |
-                      @keyframes batt-charge { 0%,100% { transform: translateY(3px); } 50% { transform: translateY(-3px); } }
-                      @keyframes batt-discharge { 0%,100% { transform: translateY(-3px); } 50% { transform: translateY(3px); } }
                     styles:
+                      grid:
+                        - grid-template-areas: '"n" "i" "s"'
+                      name:
+                        - font-size: 0.9em
+                        - font-weight: normal
+                        - color: var(--secondary-text-color)
+                      state:
+                        - font-size: 1em
+                        - color: var(--primary-text-color)
                       icon:
                         - color: |
                             [[[
@@ -190,17 +211,11 @@ views:
                               if (p > 20) return '#FF9800';
                               return 'var(--secondary-text-color)';
                             ]]]
-                        - animation: |
-                            [[[
-                              var p = parseFloat(entity.state);
-                              if (p < -20) return 'batt-charge 1.2s ease-in-out infinite';
-                              if (p > 20) return 'batt-discharge 1.4s ease-in-out infinite';
-                              return 'none';
-                            ]]]
 
                   # SOC — pripildymo lygis, spalva pagal %
                   - type: custom:button-card
                     entity: sensor.solis_s6_eh3p_battery_soc
+                    size: 24px
                     name: SOC
                     show_state: true
                     icon: |
@@ -213,6 +228,15 @@ views:
                       ]]]
                     state_display: '[[[ return Math.round(parseFloat(entity.state)) + "%"; ]]]'
                     styles:
+                      grid:
+                        - grid-template-areas: '"n" "i" "s"'
+                      name:
+                        - font-size: 0.9em
+                        - font-weight: normal
+                        - color: var(--secondary-text-color)
+                      state:
+                        - font-size: 1em
+                        - color: var(--primary-text-color)
                       icon:
                         - color: |
                             [[[
