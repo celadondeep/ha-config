@@ -333,17 +333,24 @@
 - id: solis_daytime_export_resume
   alias: "Solis - Baterija > 30%: atnaujinti eksportą"
   description: >
-    Jei baterija pasikrovė iki 30%+ ir likusios dienos prognozė > 8 kWh
-    → grįžti į Feed-In Priority. Tai dengia debesėlio epizodus: saulė
-    grįžta, baterija pasikrauna, eksportas atnaujinamas automatiškai.
+    Jei baterija pasikrovė iki 30%+ ir likusios dienos prognozė > 2 kWh
+    → grįžti į Feed-In Priority, kad popietės perteklius būtų parduodamas.
+    Persiskaičiuoja kas 15 min (ne tik SOC kirtimo akimirką), todėl
+    neužstringa Self-Use, jei 30% buvo pasiekta prognozei dar nesutapus.
   trigger:
     - platform: numeric_state
       entity_id: sensor.solis_s6_eh3p_battery_soc
       above: 30
+    - platform: time_pattern
+      minutes: "/15"
   condition:
     - condition: time
       after: "07:00:00"
-      before: "18:00:00"
+      before: "20:00:00"
+    # time_pattern trigeris suveikia nepriklausomai nuo SOC — patikrinam ribą
+    - condition: numeric_state
+      entity_id: sensor.solis_s6_eh3p_battery_soc
+      above: 30
     # Audros/ESO režimas — neatnaujinti eksporto, baterija lieka tik namams
     - condition: state
       entity_id: input_boolean.storm_mode
@@ -357,7 +364,7 @@
       state: "Self-Use"
     - condition: numeric_state
       entity_id: sensor.solcast_pv_forecast_forecast_remaining_today
-      above: 8
+      above: 2
   action:
     - service: select.select_option
       target:

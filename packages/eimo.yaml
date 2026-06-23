@@ -263,7 +263,8 @@ automation:
     mode: single
 
   # ───────────────────────────────────────────────────────────────────────
-  #  Dienos eksporto atnaujinimas: SOC > 30% ir likusi prognozė > 8 kWh → Feed-In.
+  #  Dienos eksporto atnaujinimas: SOC > 30% ir likusi prognozė > 2 kWh → Feed-In.
+  #  Persiskaičiuoja kas 15 min — neužstringa Self-Use po midday dipo.
   # ───────────────────────────────────────────────────────────────────────
   - id: solis_daytime_export_resume_eimo
     alias: "Eimo - Baterija > 30%: atnaujinti eksportą"
@@ -271,10 +272,16 @@ automation:
       - platform: numeric_state
         entity_id: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
         above: 30
+      - platform: time_pattern
+        minutes: "/15"
     condition:
       - condition: time
         after: "07:00:00"
-        before: "18:00:00"
+        before: "20:00:00"
+      # time_pattern trigeris suveikia nepriklausomai nuo SOC — patikrinam ribą
+      - condition: numeric_state
+        entity_id: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
+        above: 30
       - condition: state
         entity_id: input_boolean.storm_mode_eimo
         state: "off"
@@ -283,7 +290,7 @@ automation:
         state: "Self-Use"
       - condition: numeric_state
         entity_id: sensor.solcast_pv_forecast_forecast_remaining_today
-        above: 8
+        above: 2
     action:
       - service: select.select_option
         target:
