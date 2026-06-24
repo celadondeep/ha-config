@@ -111,10 +111,11 @@ input_number:
   # Dienos „feed-in + TOU" tolygaus eksporto apatinė riba (TOU cut-off SOC).
   # Saulėtą pertekliaus dieną, kai SOC pasiekia ribą+5%, įjungiamas Feed-in + TOU,
   # kad baterija būtų laikoma ~ties riba, o perteklius (kuris netilptų baterijoje)
-  # tolygiai atiduodamas į tinklą per dieną. Turi būti >13% (battery_protect).
+  # tolygiai atiduodamas į tinklą per dieną. Operacinis dugnas 5, battery_protect
+  # 7% — riba turi būti >7% (kaip Eimo pusėje).
   daytime_export_floor:
     name: Dienos eksporto apatinė riba
-    min: 14
+    min: 8
     max: 50
     step: 1
     unit_of_measurement: "%"

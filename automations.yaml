@@ -308,15 +308,16 @@
   mode: single
 
 - id: solis_daytime_battery_protect
-  alias: "Solis - Baterija < 13%: stabdyti eksportą"
+  alias: "Solis - Baterija < 7%: stabdyti eksportą"
   description: >
-    Dienos metu: jei baterija nukrinta iki 12–13% → keisti į Self-Use.
+    Dienos metu: jei baterija nukrinta iki 6–7% → keisti į Self-Use.
     Taip stabdomas eksportas iš baterijos. Debesėlio epizodai čia
     NESUREAGUOJA — triggeris tik į faktinį SOC, ne į saulės kritimą.
+    7% — saugi riba virš operacinio dugno 5% (kaip Eimo pusėje).
   trigger:
     - platform: numeric_state
       entity_id: sensor.solis_s6_eh3p_battery_soc
-      below: 13
+      below: 7
   condition:
     - condition: time
       after: "07:00:00"
@@ -409,7 +410,7 @@
     ~ties riba (TOU cut-off = floor, srovė 150A, langas 07:00–18:00), o perteklius
     tolygiai atiduodamas į tinklą per dieną — vietoj staigaus dempingo, kai
     baterija pavakary pasiekia 100%. Langas iki 18:00, kad nesikirstų su naktiniu
-    solis_tou_recalc_5min (18:00–08:00). Apsauga ties 13% (battery_protect) lieka.
+    solis_tou_recalc_5min (18:00–08:00). Apsauga ties 7% (battery_protect) lieka.
   trigger:
     - platform: time_pattern
       minutes: "/15"
