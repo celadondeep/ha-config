@@ -50,6 +50,16 @@ input_number:
     unit_of_measurement: "€/kWh"
     icon: mdi:transmission-tower-export
     mode: box
+  # Dienos tolygaus eksporto apatinė riba (slot1 cut-off SOC). Slot SOC min = 6,
+  # baterijos dugnas 5, battery_protect 7% — riba turi būti >7%.
+  daytime_export_floor_eimo:
+    name: "Eimo: Dienos eksporto apatinė riba"
+    min: 8
+    max: 50
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-arrow-down
+    mode: box
 
 template:
   - sensor:
@@ -208,17 +218,29 @@ automation:
               - service: switch.turn_off
                 target:
                   entity_id: switch.inverter_control_1033300254190112_slot1_discharge
+              # Po iškrovos: jei RYTOJUI daug saulės (koreguota > 22 kWh) — likti
+              # Feed-In Priority (rytinis perteklius į tinklą), kitaip Self-Use.
+              - variables:
+                  forecast_tomorrow: >-
+                    {{ (states('sensor.solcast_pv_forecast_forecast_tomorrow') | float(0)
+                        * states('sensor.solcast_correction_factor_eimo') | float(1)) | round(1) }}
+                  next_mode: >-
+                    {{ 'Feed-In Priority'
+                       if (states('sensor.solcast_pv_forecast_forecast_tomorrow') | float(0)
+                           * states('sensor.solcast_correction_factor_eimo') | float(1)) > 22
+                       else 'Self-Use' }}
               - service: select.select_option
                 target:
                   entity_id: select.inverter_control_1033300254190112_storage_mode
                 data:
-                  option: "Self-Use"
+                  option: "{{ next_mode }}"
               - service: notify.persistent_notification
                 data:
                   title: "Eimo - TOU išjungtas: SOC tikslas pasiektas 🔋"
                   message: >
                     Baterija {{ current_soc }}% ≤ tikslo {{ target_soc }}%.
-                    Iškrovimas išjungtas, baterija tiekia namams.
+                    Rytojaus prognozė: {{ forecast_tomorrow }} kWh →
+                    iškrovimas išjungtas, režimas: {{ next_mode }}.
           # Tikslas pasikeitė — atnaujinti cut-off SOC (tik kai skiriasi)
           - conditions:
               - condition: template
@@ -263,8 +285,9 @@ automation:
     mode: single
 
   # ───────────────────────────────────────────────────────────────────────
-  #  Dienos eksporto atnaujinimas: SOC > 30% ir likusi prognozė > 2 kWh → Feed-In.
-  #  Persiskaičiuoja kas 15 min — neužstringa Self-Use po midday dipo.
+  #  Dienos eksporto atnaujinimas → Feed-In, kai likusi prognozė > 2 kWh.
+  #  SOC riba: didelės gamybos dieną (koreguota prognozė > 22 kWh) — 15%
+  #  (nuo pirmų watų), normalią dieną — 30%. Kas 15 min, kad neužstrigtų.
   # ───────────────────────────────────────────────────────────────────────
   - id: solis_daytime_export_resume_eimo
     alias: "Eimo - Baterija > 30%: atnaujinti eksportą"
@@ -278,10 +301,15 @@ automation:
       - condition: time
         after: "07:00:00"
         before: "20:00:00"
-      # time_pattern trigeris suveikia nepriklausomai nuo SOC — patikrinam ribą
-      - condition: numeric_state
-        entity_id: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
-        above: 30
+      # time_pattern trigeris suveikia nepriklausomai nuo SOC — patikrinam ribą.
+      # Didelės gamybos dieną riba 15% (nuo pirmų watų), kitaip 30%.
+      - condition: template
+        value_template: >
+          {% set soc = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(0) %}
+          {% set forecast = states('sensor.solcast_pv_forecast_forecast_today') | float(0)
+                            * states('sensor.solcast_correction_factor') | float(1) %}
+          {% set big_day = forecast > 22 %}
+          {{ soc > 30 or (big_day and soc > 15) }}
       - condition: state
         entity_id: input_boolean.storm_mode_eimo
         state: "off"
@@ -303,6 +331,80 @@ automation:
           message: >
             Baterija {{ states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') }}%.
             Grįžtama į Feed-In Priority.
+    mode: single
+
+  # ───────────────────────────────────────────────────────────────────────
+  #  Dienos tolygus eksportas (Feed-In Priority + slot1 iškrovimas).
+  #  Cloud neturi jungtinio „Feed-in + TOU" režimo, tad analogas =
+  #  storage_mode Feed-In Priority + slot1_discharge ON. Saulėtą pertekliaus
+  #  dieną, kai SOC ≥ floor+5% ir yra perteklius — baterija laikoma ~ties floor,
+  #  perteklius tolygiai į tinklą (slot 07:00–18:00, 150A). Langas iki 18:00,
+  #  kad nesikirstų su naktiniu solis_tou_recalc_eimo (18:00–08:00).
+  # ───────────────────────────────────────────────────────────────────────
+  - id: solis_daytime_feedin_tou_eimo
+    alias: "Eimo - Dienos tolygus eksportas (Feed-In + slot)"
+    trigger:
+      - platform: time_pattern
+        minutes: "/15"
+    condition:
+      - condition: time
+        after: "07:00:00"
+        before: "18:00:00"
+      - condition: state
+        entity_id: input_boolean.storm_mode_eimo
+        state: "off"
+      # Perteklius dabar (kW) — saulė viršija namų apkrovą, yra ką atiduoti
+      - condition: numeric_state
+        entity_id: sensor.energy_manager_eimo_surplus_now
+        above: 0.5
+      # Dar reikšminga likusios dienos gamyba
+      - condition: numeric_state
+        entity_id: sensor.solcast_pv_forecast_forecast_remaining_today
+        above: 2
+      # Baterija turi buferį virš ribos (riba + 5%)
+      - condition: template
+        value_template: >
+          {% set soc = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(0) %}
+          {% set floor = states('input_number.daytime_export_floor_eimo') | float(20) %}
+          {{ soc >= floor + 5 }}
+      # Veikiam tik kai slotas dar išjungtas — kitaip neperrašinėjam cloud kas 15 min
+      - condition: state
+        entity_id: switch.inverter_control_1033300254190112_slot1_discharge
+        state: "off"
+    variables:
+      floor: "{{ [states('input_number.daytime_export_floor_eimo') | float(20) | round(0) | int, 6] | max }}"
+    action:
+      - service: number.set_value
+        target:
+          entity_id: number.inverter_control_1033300254190112_slot1_discharge_soc
+        data:
+          value: "{{ floor }}"
+      - service: number.set_value
+        target:
+          entity_id: number.inverter_control_1033300254190112_slot1_discharge_current
+        data:
+          value: 150
+      - service: text.set_value
+        target:
+          entity_id: text.inverter_control_1033300254190112_slot1_discharge_time
+        data:
+          value: "07:00-18:00"
+      - service: switch.turn_on
+        target:
+          entity_id: switch.inverter_control_1033300254190112_slot1_discharge
+      - service: select.select_option
+        target:
+          entity_id: select.inverter_control_1033300254190112_storage_mode
+        data:
+          option: "Feed-In Priority"
+      - service: notify.persistent_notification
+        data:
+          title: "Eimo - Dienos tolygus eksportas ☀️→⚡"
+          message: >
+            Perteklius dabar: {{ states('sensor.energy_manager_eimo_surplus_now') }} kW.
+            Baterija {{ states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') }}%.
+            Feed-In + slot: baterija laikoma ~{{ floor }}%, perteklius tolygiai į tinklą
+            (slot 07:00–18:00, 150A).
     mode: single
 
   # ───────────────────────────────────────────────────────────────────────
