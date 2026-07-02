@@ -222,7 +222,7 @@
 - id: solis_tou_recalc_5min
   alias: "Solis - TOU: tikslinio SOC perskaičiavimas kas 5 min + išjungimas"
   description: >
-    Kas 5 min vakare/naktį (18:00–08:00) perskaičiuoja tikslinį rytinį SOC pagal
+    Kas 5 min vakare/naktį (20:05–07:00) perskaičiuoja tikslinį rytinį SOC pagal
     naujausią Solcast rytojaus prognozę ir atnaujina TOU iškrovimo cut-off SOC.
     Kai baterija pasiekia tikslinį SOC — išjungia TOU iškrovimo slotą ir
     persijungia į Self-Use, kad baterija toliau tiektų namams.
@@ -231,10 +231,13 @@
     - platform: time_pattern
       minutes: "/5"
   condition:
-    # Vakaras → naktis → rytas (langas per vidurnaktį)
+    # 20:05–07:00 (langas per vidurnaktį). Pradžia 20:05, kad nesilenktyniautų
+    # su solis_evening_discharge (20:00), o pabaiga 07:00 — kad nesikirstų su
+    # solis_daytime_feedin_tou (07:00–19:30), kuris naudoja kitą cut-off (floor).
+    # 2026-07-01 persidengiant 07:00–08:00 recalc užmušdavo dienos TOU slotą.
     - condition: time
-      after: "18:00:00"
-      before: "08:00:00"
+      after: "20:05:00"
+      before: "07:00:00"
     # Audros/ESO rezervo režimu nesikišti — galioja forsuoto krovimo slotas
     - condition: state
       entity_id: input_boolean.storm_mode
@@ -408,17 +411,18 @@
     baterijoje (sensor.energy_manager_surplus > 1 kWh) ir baterija pasiekė
     ribą+1% (SOC ≥ daytime_export_floor + 1%, t.y. 7% kai floor=6), įjungia
     Feed-in + TOU: baterija laikoma ~ties riba (TOU cut-off = floor=6%, srovė
-    150A, langas 07:00–18:00), o perteklius tolygiai atiduodamas į tinklą per
+    150A, langas 07:00–19:30), o perteklius tolygiai atiduodamas į tinklą per
     dieną — vietoj staigaus dempingo, kai baterija pavakary pasiekia 100%.
-    Langas iki 18:00, kad nesikirstų su naktiniu solis_tou_recalc_5min
-    (18:00–08:00). Apsauga ties 6% (battery_protect) lieka.
+    Langas iki 19:30, kad nesikirstų su naktiniu solis_tou_recalc_5min
+    (20:05–07:00) ir solis_evening_discharge (20:00). Apsauga ties 6%
+    (battery_protect) lieka.
   trigger:
     - platform: time_pattern
       minutes: "/15"
   condition:
     - condition: time
       after: "07:00:00"
-      before: "18:00:00"
+      before: "19:30:00"
     # Audros/ESO režimu nesikišti
     - condition: state
       entity_id: input_boolean.storm_mode
@@ -440,10 +444,16 @@
         {% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(0) %}
         {% set floor = states('input_number.daytime_export_floor') | float(6) %}
         {{ soc >= floor + 1 }}
-    # Dar ne Feed-in + TOU — kitaip nereikia perrašinėti kas 15 min
+    # Dar nesukonfigūruota dienos eksportui — kitaip neperrašinėti kas 15 min.
+    # Tikrinam REALIĄ sloto būseną (jungiklis + langas + režimas), ne vien
+    # režimo etiketę: 2026-07-01 užstrigo „Feed-in + TOU su išjungtu slotu"
+    # ir vien mode-sąlyga blokavo atsistatymą visą dieną. Taip pat pergaudo
+    # naktinį slotą (start 21:00), likusį ON po nebaigtos nakties iškrovos.
     - condition: template
       value_template: >
-        {{ states('select.solis_s6_eh3p_work_mode') != 'Feed-in + TOU' }}
+        {{ not (is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on')
+                and states('time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1') == '07:00:00'
+                and is_state('select.solis_s6_eh3p_work_mode', 'Feed-in + TOU')) }}
   action:
     - variables:
         floor: "{{ [states('input_number.daytime_export_floor') | float(6) | round(0) | int, 6] | max }}"
@@ -466,7 +476,7 @@
       target:
         entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
       data:
-        time: "18:00:00"
+        time: "19:30:00"
     - service: switch.turn_on
       target:
         entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
@@ -482,7 +492,7 @@
           Perteklius: {{ states('sensor.energy_manager_surplus') }} kWh netilps baterijoje.
           Baterija: {{ states('sensor.solis_s6_eh3p_battery_soc') }}%.
           Feed-in + TOU: baterija laikoma ~{{ floor }}%, perteklius tolygiai į tinklą
-          (TOU 07:00–18:00, 150A).
+          (TOU 07:00–19:30, 150A).
   mode: single
 
 - id: solis_storm_mode_toggle
