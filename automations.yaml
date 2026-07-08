@@ -405,17 +405,19 @@
   mode: single
 
 - id: solis_daytime_feedin_tou
-  alias: "Solis - Dienos tolygus eksportas (Feed-in + TOU)"
+  alias: "Solis - Dienos tolygus eksportas (Feed-in + TOU, pagal perteklių)"
   description: >
     Saulėtą pertekliaus dieną, kai prognozuojama, kad ne visa saulė tilps
     baterijoje (sensor.energy_manager_surplus > 1 kWh) ir baterija pasiekė
-    ribą+1% (SOC ≥ daytime_export_floor + 1%, t.y. 7% kai floor=6), įjungia
-    Feed-in + TOU: baterija laikoma ~ties riba (TOU cut-off = floor=6%, srovė
-    150A, langas 07:00–19:30), o perteklius tolygiai atiduodamas į tinklą per
-    dieną — vietoj staigaus dempingo, kai baterija pavakary pasiekia 100%.
+    ribą+1% (SOC ≥ daytime_export_floor + 1%), įjungia Feed-in + TOU:
+    baterija laikoma ~ties riba (TOU cut-off = floor, srovė 150A, langas
+    07:00–19:30), perteklius tolygiai į tinklą. HISTEREZĖ kaip Eimo pusėje
+    (2026-07-08): pertekliui iškritus <0.2 kWh — grąžinamas Self-Use ir
+    slotas išjungiamas, baterija kaupia link target_soc. Iki šiol OFF šakos
+    nebuvo: 2026-07-08 rytą trumpalaikis fiktyvus perteklius įjungė eksportą
+    ir tamsią dieną baterija nudrenuota 26→10% bei laikyta prie dugno.
     Langas iki 19:30, kad nesikirstų su naktiniu solis_tou_recalc_5min
-    (20:05–07:00) ir solis_evening_discharge (20:00). Apsauga ties 6%
-    (battery_protect) lieka.
+    (20:05–07:00) ir solis_evening_discharge (20:00).
   trigger:
     - platform: time_pattern
       minutes: "/15"
@@ -434,65 +436,86 @@
     - condition: state
       entity_id: input_boolean.manual_soc_override
       state: "off"
-    # Saulė netilps baterijoje — yra perteklius, kurį reikia atiduoti į tinklą
-    - condition: numeric_state
-      entity_id: sensor.energy_manager_surplus
-      above: 1
-    # Baterija pasiekė ribą+1% (floor=6 → įsijungia ties 7%)
-    - condition: template
-      value_template: >
-        {% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(0) %}
-        {% set floor = states('input_number.daytime_export_floor') | float(6) %}
-        {{ soc >= floor + 1 }}
-    # Dar nesukonfigūruota dienos eksportui — kitaip neperrašinėti kas 15 min.
-    # Tikrinam REALIĄ sloto būseną (jungiklis + langas + režimas), ne vien
-    # režimo etiketę: 2026-07-01 užstrigo „Feed-in + TOU su išjungtu slotu"
-    # ir vien mode-sąlyga blokavo atsistatymą visą dieną. Taip pat pergaudo
-    # naktinį slotą (start 21:00), likusį ON po nebaigtos nakties iškrovos.
-    - condition: template
-      value_template: >
-        {{ not (is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on')
-                and states('time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1') == '07:00:00'
-                and is_state('select.solis_s6_eh3p_work_mode', 'Feed-in + TOU')) }}
+  variables:
+    floor: "{{ [states('input_number.daytime_export_floor') | float(6) | round(0) | int, 6] | max }}"
+    surplus: "{{ states('sensor.energy_manager_surplus') | float(0) }}"
+    soc: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) }}"
+    # Reali sloto būsena (jungiklis + langas + režimas), ne vien režimo
+    # etiketė: 2026-07-01 užstrigo „Feed-in + TOU su išjungtu slotu" ir vien
+    # mode-sąlyga blokavo atsistatymą visą dieną. Taip pat pergaudo naktinį
+    # slotą (start 21:00), likusį ON po nebaigtos nakties iškrovos.
+    daytime_slot_active: >-
+      {{ is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on')
+         and states('time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1') == '07:00:00'
+         and is_state('select.solis_s6_eh3p_work_mode', 'Feed-in + TOU') }}
   action:
-    - variables:
-        floor: "{{ [states('input_number.daytime_export_floor') | float(6) | round(0) | int, 6] | max }}"
-    - service: number.set_value
-      target:
-        entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
-      data:
-        value: "{{ floor }}"
-    - service: number.set_value
-      target:
-        entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
-      data:
-        value: 150
-    - service: time.set_value
-      target:
-        entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1
-      data:
-        time: "07:00:00"
-    - service: time.set_value
-      target:
-        entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
-      data:
-        time: "19:30:00"
-    - service: switch.turn_on
-      target:
-        entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-    - service: select.select_option
-      target:
-        entity_id: select.solis_s6_eh3p_work_mode
-      data:
-        option: "Feed-in + TOU"
-    - service: notify.persistent_notification
-      data:
-        title: "Solis - Dienos tolygus eksportas ☀️→⚡"
-        message: >
-          Perteklius: {{ states('sensor.energy_manager_surplus') }} kWh netilps baterijoje.
-          Baterija: {{ states('sensor.solis_s6_eh3p_battery_soc') }}%.
-          Feed-in + TOU: baterija laikoma ~{{ floor }}%, perteklius tolygiai į tinklą
-          (TOU 07:00–19:30, 150A).
+    - choose:
+        # 1) Yra perteklius ir yra ką atiduoti — įjungti dienos eksportą,
+        #    jei dar nesukonfigūruotas (neperrašinėti kas 15 min).
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ surplus > 1 and soc >= floor + 1 and not daytime_slot_active }}
+          sequence:
+            - service: number.set_value
+              target:
+                entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
+              data:
+                value: "{{ floor }}"
+            - service: number.set_value
+              target:
+                entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
+              data:
+                value: 150
+            - service: time.set_value
+              target:
+                entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1
+              data:
+                time: "07:00:00"
+            - service: time.set_value
+              target:
+                entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
+              data:
+                time: "19:30:00"
+            - service: switch.turn_on
+              target:
+                entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+            - service: select.select_option
+              target:
+                entity_id: select.solis_s6_eh3p_work_mode
+              data:
+                option: "Feed-in + TOU"
+            - service: notify.persistent_notification
+              data:
+                title: "Solis - Dienos tolygus eksportas ☀️→⚡"
+                message: >
+                  Perteklius: {{ surplus }} kWh netilps baterijoje.
+                  Baterija: {{ soc }}%.
+                  Feed-in + TOU: baterija laikoma ~{{ floor }}%, perteklius
+                  tolygiai į tinklą (TOU 07:00–19:30, 150A).
+        # 2) Pertekliaus nebėra (<0.2 kWh) — išjungti slotą ir grąžinti
+        #    Self-Use: baterija kaupia PV link target_soc. Vakare 20:00
+        #    logika perima kaip įprasta.
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ surplus < 0.2 and daytime_slot_active }}
+          sequence:
+            - service: switch.turn_off
+              target:
+                entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+            - service: select.select_option
+              target:
+                entity_id: select.solis_s6_eh3p_work_mode
+              data:
+                option: "Self-Use"
+            - service: notify.persistent_notification
+              data:
+                title: "Solis - Dienos eksportas sustabdytas 🔋"
+                message: >
+                  Perteklius {{ surplus }} kWh — likusi saulė tilps baterijoje.
+                  Baterija {{ soc }}% kaupia link
+                  {{ states('sensor.energy_manager_target_soc') }}% tikslo.
   mode: single
 
 - id: solis_storm_mode_toggle
