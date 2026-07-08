@@ -722,3 +722,179 @@ views:
                 group_by:
                   func: last
                   duration: 1d
+
+  # ---------------------------------------------------------------------------
+  #  Atsipirkimas — abi elektrinės kartu. Investicija/parama įvedama ranka.
+  #  Kreivių forma iki šiandien ir į ateitį — sezoninis modelis (LT mėnesių
+  #  svoriai), prikabintas prie faktinių skaitliukų šiandien.
+  # ---------------------------------------------------------------------------
+  - title: Atsipirkimas
+    path: atsipirkimas
+    icon: mdi:cash-clock
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: entities
+            title: Įvestis (pildyk ranka)
+            entities:
+              - entity: input_number.pv_investicija
+                name: Investicija (abi elektrinės)
+              - entity: input_number.pv_parama
+                name: Parama (APVA)
+              - entity: input_number.pv_kwh_verte
+                name: kWh vertė
+              - entity: input_number.pv_men_mokestis
+                name: Pasaugojimo mokestis /mėn
+              - entity: input_number.pv_metine_gamyba
+                name: Metinė gamyba (prognozė)
+
+          - type: glance
+            title: Rezultatas
+            columns: 3
+            entities:
+              - entity: sensor.pv_pagaminta_viso
+                name: Pagaminta
+              - entity: sensor.pv_sutaupyta_viso
+                name: Sutaupyta
+              - entity: sensor.pv_gryna_investicija
+                name: Investicija–parama
+              - entity: sensor.pv_atsipirkes_procentais
+                name: Atsipirko
+              - entity: sensor.pv_liko_iki_atsipirkimo
+                name: Liko
+              - entity: sensor.pv_atsipirkimo_prognoze
+                name: Kada atsipirks
+
+      - type: grid
+        column_span: 2
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Atsipirkimas — sutaupyta € ir pagaminta kWh vs investicija
+            graph_span: 4y
+            span:
+              start: year
+            update_interval: 1h
+            now:
+              show: true
+              label: šiandien
+            apex_config:
+              chart:
+                height: 380
+                animations:
+                  enabled: false
+              stroke:
+                dashArray: [0, 8, 0]
+              legend:
+                show: true
+            yaxis:
+              - id: eur
+                min: 0
+                decimals: 0
+                apex_config:
+                  title:
+                    text: '€'
+              - id: kwh
+                opposite: true
+                min: 0
+                decimals: 0
+                apex_config:
+                  title:
+                    text: 'kWh'
+            series:
+              # Sutaupyta € — sezoninis modelis, prikabintas prie faktinio
+              # sensor.pv_sutaupyta_viso šiandien; ateitis = prognozė.
+              - entity: sensor.pv_sutaupyta_viso
+                name: Sutaupyta €
+                yaxis_id: eur
+                color: '#4caf50'
+                stroke_width: 3
+                extend_to: false
+                show:
+                  extremas: false
+                data_generator: |
+                  const W = [0.02, 0.04, 0.08, 0.12, 0.14, 0.14, 0.14, 0.12, 0.09, 0.06, 0.03, 0.02];
+                  const a = entity.attributes;
+                  const annual = Number(a.metine_gamyba) || 11000;
+                  const price = Number(a.kwh_verte) || 0.25;
+                  const fee = Number(a.men_mokestis) || 10;
+                  const eimoStart = new Date(2026, 1, 1);
+                  const modbusStart = new Date(2026, 3, 1);
+                  const eimoShare = 0.46;
+                  const pts = [];
+                  let cum = 0;
+                  let d = new Date(2026, 1, 1);
+                  const endD = new Date(2030, 1, 1);
+                  while (d <= endD) {
+                    pts.push([d.getTime(), cum]);
+                    const share = d < modbusStart ? eimoShare : 1;
+                    const mFee = (d >= eimoStart ? fee / 2 : 0) + (d >= modbusStart ? fee / 2 : 0);
+                    cum += annual * W[d.getMonth()] * share * price - mFee;
+                    d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+                  }
+                  const now = Date.now();
+                  let modelNow = null;
+                  for (let i = 1; i < pts.length; i++) {
+                    if (pts[i][0] >= now) {
+                      const [t0, v0] = pts[i - 1], [t1, v1] = pts[i];
+                      modelNow = v0 + (v1 - v0) * (now - t0) / (t1 - t0);
+                      break;
+                    }
+                  }
+                  const actual = Number(entity.state);
+                  const k = (modelNow > 0 && actual > 0) ? actual / modelNow : 1;
+                  return pts.map(([t, v]) => [t, Math.round(v * k)]);
+
+              # Grynoji investicija (investicija − parama) — tiesi linija.
+              # Kur ją kerta žalia kreivė — atsipirkimo momentas.
+              - entity: sensor.pv_gryna_investicija
+                name: Investicija (be paramos)
+                yaxis_id: eur
+                color: '#f44336'
+                stroke_width: 2
+                extend_to: false
+                show:
+                  extremas: false
+                data_generator: |
+                  const v = Number(entity.state) || 0;
+                  return [[new Date(2026, 1, 1).getTime(), v], [new Date(2030, 1, 1).getTime(), v]];
+
+              # Pagaminta kWh (kaupiamoji) — dešinė ašis.
+              - entity: sensor.pv_pagaminta_viso
+                name: Pagaminta kWh
+                yaxis_id: kwh
+                color: '#fbc02d'
+                stroke_width: 2
+                opacity: 0.7
+                extend_to: false
+                show:
+                  extremas: false
+                data_generator: |
+                  const W = [0.02, 0.04, 0.08, 0.12, 0.14, 0.14, 0.14, 0.12, 0.09, 0.06, 0.03, 0.02];
+                  const annual = Number(entity.attributes.metine_gamyba) || 11000;
+                  const modbusStart = new Date(2026, 3, 1);
+                  const eimoShare = 0.46;
+                  const pts = [];
+                  let cum = 0;
+                  let d = new Date(2026, 1, 1);
+                  const endD = new Date(2030, 1, 1);
+                  while (d <= endD) {
+                    pts.push([d.getTime(), cum]);
+                    cum += annual * W[d.getMonth()] * (d < modbusStart ? eimoShare : 1);
+                    d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+                  }
+                  const now = Date.now();
+                  let modelNow = null;
+                  for (let i = 1; i < pts.length; i++) {
+                    if (pts[i][0] >= now) {
+                      const [t0, v0] = pts[i - 1], [t1, v1] = pts[i];
+                      modelNow = v0 + (v1 - v0) * (now - t0) / (t1 - t0);
+                      break;
+                    }
+                  }
+                  const actual = Number(entity.state);
+                  const k = (modelNow > 0 && actual > 0) ? actual / modelNow : 1;
+                  return pts.map(([t, v]) => [t, Math.round(v * k)]);

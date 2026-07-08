@@ -1,0 +1,144 @@
+# =============================================================================
+#  Elektrinių atsipirkimas — ABI elektrinės kartu (Šeškinių Modbus + Eimo SE).
+#  Investicija įvedama ranka dashboard'e; parama (APVA) — 5012 €.
+#  Sutaupymas: kiekviena pagaminta kWh vertinama pasaugojimo schemos kaina
+#  (pagaminta kWh galiausiai atstoja pirkimą iš tinklo), minus pasaugojimo
+#  mėnesinis mokestis abiem objektams nuo paleidimo datų.
+#  Paleidimo datos (patvirtinta 2026-07-08): Eimo ~2026-02-01, Modbus ~2026-04-01.
+#  Metinės gamybos prognozė kalibruota pagal 2026-06 faktą (~1540 kWh/mėn abi
+#  kartu ≈ 14 % metinės) → ~11 000 kWh/metus. Tikslinti per input_number.
+# =============================================================================
+
+input_number:
+  pv_investicija:
+    name: "Investicija į elektrines (abi, be paramos atskaitymo)"
+    min: 0
+    max: 60000
+    step: 1
+    mode: box
+    unit_of_measurement: "€"
+    icon: mdi:cash-multiple
+
+  pv_parama:
+    name: "Gauta parama (APVA)"
+    min: 0
+    max: 30000
+    step: 1
+    mode: box
+    unit_of_measurement: "€"
+    icon: mdi:hand-coin
+
+  pv_kwh_verte:
+    name: "Saulės kWh vertė"
+    min: 0
+    max: 1
+    step: 0.01
+    mode: box
+    unit_of_measurement: "€/kWh"
+    icon: mdi:currency-eur
+
+  pv_men_mokestis:
+    name: "Pasaugojimo mokestis (abu objektai, per mėn.)"
+    min: 0
+    max: 50
+    step: 0.5
+    mode: box
+    unit_of_measurement: "€"
+    icon: mdi:bank-transfer-out
+
+  pv_metine_gamyba:
+    name: "Metinės gamybos prognozė (abi elektrinės)"
+    min: 0
+    max: 30000
+    step: 100
+    mode: box
+    unit_of_measurement: "kWh"
+    icon: mdi:solar-power
+
+template:
+  - sensor:
+      # Bendra abiejų elektrinių gamyba nuo paleidimo (inverterių skaitliukai).
+      - name: "pv_pagaminta_viso"
+        unique_id: pv_pagaminta_viso
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        icon: mdi:solar-power-variant
+        state: >
+          {% set m = states('sensor.solis_s6_eh3p_pv_total_energy_generation') | float(0) %}
+          {% set e = states('sensor.solis_inverter_1033300254190112_solis_energy_total') | float(0) %}
+          {{ (m + e) | round(0) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_pv_total_energy_generation') not in ['unavailable', 'unknown', '']
+             and states('sensor.solis_inverter_1033300254190112_solis_energy_total') not in ['unavailable', 'unknown', ''] }}
+        attributes:
+          modbus_kwh: "{{ states('sensor.solis_s6_eh3p_pv_total_energy_generation') | float(0) | round(0) }}"
+          eimo_kwh: "{{ states('sensor.solis_inverter_1033300254190112_solis_energy_total') | float(0) | round(0) }}"
+          metine_gamyba: "{{ states('input_number.pv_metine_gamyba') | float(11000) }}"
+
+      # Sutaupyta nuo paleidimo: gamyba × kWh vertė − pasaugojimo mokesčiai.
+      # Mokestis dalinamas pusiau abiem objektams nuo jų paleidimo datų.
+      - name: "pv_sutaupyta_viso"
+        unique_id: pv_sutaupyta_viso
+        unit_of_measurement: "€"
+        icon: mdi:piggy-bank
+        state: >
+          {% set pv = states('sensor.pv_pagaminta_viso') | float(0) %}
+          {% set verte = states('input_number.pv_kwh_verte') | float(0.25) %}
+          {% set fee = states('input_number.pv_men_mokestis') | float(10) %}
+          {% set eimo_men = (now().date() - strptime('2026-02-01', '%Y-%m-%d').date()).days / 30.44 %}
+          {% set modbus_men = (now().date() - strptime('2026-04-01', '%Y-%m-%d').date()).days / 30.44 %}
+          {{ (pv * verte - ([eimo_men, 0] | max) * fee / 2 - ([modbus_men, 0] | max) * fee / 2) | round(0) }}
+        availability: >
+          {{ has_value('sensor.pv_pagaminta_viso') }}
+        attributes:
+          metine_gamyba: "{{ states('input_number.pv_metine_gamyba') | float(11000) }}"
+          kwh_verte: "{{ states('input_number.pv_kwh_verte') | float(0.25) }}"
+          men_mokestis: "{{ states('input_number.pv_men_mokestis') | float(10) }}"
+
+      - name: "pv_gryna_investicija"
+        unique_id: pv_gryna_investicija
+        unit_of_measurement: "€"
+        icon: mdi:cash-minus
+        state: >
+          {{ ([states('input_number.pv_investicija') | float(0)
+              - states('input_number.pv_parama') | float(0), 0] | max) | round(0) }}
+
+      - name: "pv_atsipirkes_procentais"
+        unique_id: pv_atsipirkes_procentais
+        unit_of_measurement: "%"
+        icon: mdi:percent
+        state: >
+          {% set gryna = states('sensor.pv_gryna_investicija') | float(0) %}
+          {% set sutaupyta = states('sensor.pv_sutaupyta_viso') | float(0) %}
+          {{ (sutaupyta / gryna * 100) | round(1) if gryna > 0 else 0 }}
+        availability: >
+          {{ has_value('sensor.pv_sutaupyta_viso') and states('sensor.pv_gryna_investicija') | float(0) > 0 }}
+
+      # Linijinė prognozė: kiek liko / kada atsipirks pagal metinį sutaupymą
+      # (metinė gamyba × vertė − 12 mėn. mokesčių). Sezoniškumo nevertina —
+      # tikslumo ~±2 mėn. pakanka.
+      - name: "pv_atsipirkimo_prognoze"
+        unique_id: pv_atsipirkimo_prognoze
+        icon: mdi:calendar-check
+        state: >
+          {% set gryna = states('sensor.pv_gryna_investicija') | float(0) %}
+          {% set sutaupyta = states('sensor.pv_sutaupyta_viso') | float(0) %}
+          {% set metinis = states('input_number.pv_metine_gamyba') | float(11000)
+             * states('input_number.pv_kwh_verte') | float(0.25)
+             - states('input_number.pv_men_mokestis') | float(10) * 12 %}
+          {% if gryna <= 0 %} įvesk investiciją
+          {% elif sutaupyta >= gryna %} atsipirko 🎉
+          {% elif metinis <= 0 %} —
+          {% else %} {{ (now() + timedelta(days=365.25 * (gryna - sutaupyta) / metinis)).strftime('%Y-%m') }}
+          {% endif %}
+
+      - name: "pv_liko_iki_atsipirkimo"
+        unique_id: pv_liko_iki_atsipirkimo
+        unit_of_measurement: "€"
+        icon: mdi:cash-clock
+        state: >
+          {{ ([states('sensor.pv_gryna_investicija') | float(0)
+              - states('sensor.pv_sutaupyta_viso') | float(0), 0] | max) | round(0) }}
+        availability: >
+          {{ has_value('sensor.pv_sutaupyta_viso') }}
