@@ -603,12 +603,21 @@
     Solcast pusvalandinę prognozę PV gamyba viršys ~100 W (idle/off
     skirtumą) — laiką skaičiuoja AppDaemon (sensor.inverter_morning_on_time,
     timestamp). Birželį tai ~1–2 val. vėliau už saulėtekį, kas sutaupo
-    ~100 W tuščio veikimo. Atsarginis trigeris 10:00, jei sensorius
-    nepasiekiamas. Saugikliai: įjungiama iškart, jei įjungiamas audros
-    režimas (reikia backup) arba išjungiamas naktinio išjungimo jungiklis.
+    ~100 W tuščio veikimo. Realaus signalo trigeris: Eimo elektrinės faktinė
+    PV gamyba >200 W (10 min) — apsauga nuo Solcast ryto pesimizmo, kai
+    prognozuojamas 100 W perkirtimas vėluoja prieš tikrąją gamybos pradžią
+    (Solis su išjungtu inverteriu savo PV nemato; Eimo cloud sensorius čia
+    tik informacinis saulės signalas, ne valdymo maišymas tarp elektrinių).
+    Atsarginis trigeris 10:00, jei sensoriai nepasiekiami. Saugikliai:
+    įjungiama iškart, jei įjungiamas audros režimas (reikia backup) arba
+    išjungiamas naktinio išjungimo jungiklis.
   trigger:
     - platform: time
       at: sensor.inverter_morning_on_time
+    - platform: numeric_state
+      entity_id: sensor.eimo_pv_power
+      above: 200
+      for: "00:10:00"
     - platform: time
       at: "10:00:00"
     - platform: state
