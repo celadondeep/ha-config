@@ -635,21 +635,27 @@
   mode: single
 
 - id: solis_low_soc_night_shutdown
-  alias: "Solis - SOC ≤ 5.5%: išjungti inverterį iki ryto"
+  alias: "Solis - Naktinis išjungimas žemo SOC juostoje (churn apsauga)"
   description: >
-    Apsauga nuo nakties ciklavimo ties apatine riba: baterijai naktį
-    nukritus iki 5.5%, inverteris pats imtų priverstinai krautis iš tinklo
-    (force-charge ties 4%, overdischarge ties 5%) ir vėl išsikrauti — sekli
-    ciklika, baterijos dėvėjimas, pirkimas naktį. Vietoj to inverteris
-    išjungiamas: namus maitina tinklas, baterija ilsisi ties ~5.5%.
+    Apsauga nuo nakties ciklavimo ties apatine riba. BMS/firmware naktį
+    laiko bateriją 10–15 % juostoje: inverteris trumpam prisikrauna iš
+    tinklo ir vėl išsikrauna (pjūklas 10↔15 %) — sekli ciklika, baterijos
+    dėvėjimas, round-trip nuostolis (2026-07-06 serijos max 5.9 kWh/naktį).
+    Senasis 5.5 % slenkstis niekada nesuveikdavo, nes BMS SOC žemiau 10 %
+    naktį nenuleidžia. Dvi pakopos: SOC ≤ 6 % — išjungiama bet kuriuo
+    nakties metu (senoji apsauga nuo force-charge ties 4–5 %); SOC ≤ 16 %
+    (churn juosta) — tik 20:30–10:00 lange, kad netrukdytų vakariniam TOU
+    eksportui žiemą. Išjungus namus maitina tinklas, baterija ilsisi.
     Veikia NEPRIKLAUSOMAI nuo input_boolean.night_inverter_shutdown —
     tai apsauga, ne ekonomika. Rytą įjungia solis_morning_inverter_power_on
-    (Solcast gamybos pradžia arba 10:00 atsarginis). Audros režimu
-    nevykdoma — inverteris reikalingas backup funkcijai.
+    (Solcast gamybos pradžia arba 10:00 atsarginis). Audros ir rankinio
+    valdymo režimais nevykdoma.
   trigger:
     - platform: numeric_state
       entity_id: sensor.solis_s6_eh3p_battery_soc
-      below: 5.5
+      below: 16
+    - platform: time_pattern
+      minutes: "/15"
   condition:
     - condition: state
       entity_id: sun.sun
@@ -658,19 +664,32 @@
       entity_id: input_boolean.storm_mode
       state: "off"
     - condition: state
+      entity_id: input_boolean.manual_tou_override
+      state: "off"
+    - condition: state
       entity_id: switch.solis_s6_eh3p_power_state
       state: "on"
+    # TOU eksportas turi būti pasibaigęs (slotą išjungia solis_tou_recalc_5min)
+    - condition: state
+      entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+      state: "off"
+    - condition: template
+      value_template: >
+        {% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(100) %}
+        {{ soc <= 6 or (soc <= 16
+           and (now() >= today_at('20:30') or now() < today_at('10:00'))) }}
   action:
     - service: switch.turn_off
       target:
         entity_id: switch.solis_s6_eh3p_power_state
     - service: notify.persistent_notification
       data:
-        title: "Solis - Inverteris išjungtas: baterija ~5.5% 🛡️"
+        title: "Solis - Inverteris išjungtas: žemas SOC naktį 🛡️"
         message: >
-          Baterija pasiekė {{ states('sensor.solis_s6_eh3p_battery_soc') }}% —
-          inverteris išjungtas iki ryto, kad neprasidėtų priverstinio krovimo
-          iš tinklo ciklai ties 4–5%. Namus maitina tinklas.
+          Baterija {{ states('sensor.solis_s6_eh3p_battery_soc') }}% — churn
+          juosta (BMS naktį cikluoja 10–15 %, pjūklas iš tinklo). Inverteris
+          išjungtas iki ryto: be seklios ciklikos ir dėvėjimo, namus maitina
+          tinklas.
           Įsijungs {{ state_attr('sensor.inverter_morning_on_time', 'laikas') | default('prieš gamybos pradžią', true) }}.
   mode: single
 
