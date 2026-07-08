@@ -1,10 +1,17 @@
 title: Energijos valdymas
 views:
+  # Išdėstymo logika (2026-07-08 pertvarka): keturios funkcinės grupės —
+  # 1) DABAR (kairė viršuje) — kas vyksta šiuo metu ir ką nusprendė automatika,
+  # 2) VALDYMAS (dešinė viršuje) — visi jungikliai ir inverterio registrai,
+  # 3) FAZĖS (kairė apačioje) — techninė info, žiūrima rečiausiai,
+  # 4) PROGNOZĖS (dešinė apačioje) — kainos, šiandien/vakar rezultatai.
+  # Mobiliame sekcijos susideda ta pačia eile: Dabar → Valdymas → Fazės → Prognozės.
   - title: Energija
     path: energija
     type: sections
     max_columns: 2
     sections:
+      # ── 1. DABAR ─────────────────────────────────────────────────────
       - type: grid
         cards:
           # Duomenų amžius skaičiuojamas tiesiai iš last_modbus_success
@@ -55,6 +62,232 @@ views:
                 - padding-left: 6px
                 - color: var(--primary-text-color)
 
+          # Dabartinė galia — button-card eilė su krypčiai jautriomis ikonomis.
+          # Ženklai (patikrinti iš Modbus): grid_power_net + = ima iš tinklo,
+          # − = atiduoda; battery_power_net + = iškrauna, − = kraunasi.
+          - type: heading
+            heading: Dabartinė galia
+            heading_style: subtitle
+            icon: mdi:flash
+
+          - type: horizontal-stack
+            cards:
+              # Saulė
+              - type: custom:button-card
+                entity: sensor.solis_s6_eh3p_total_pv_power
+                size: 24px
+                name: Saulė
+                show_state: true
+                icon: mdi:weather-sunny
+                state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
+                styles:
+                  grid:
+                    - grid-template-areas: '"n" "i" "s"'
+                  name:
+                    - font-size: 0.9em
+                    - font-weight: normal
+                    - color: var(--secondary-text-color)
+                  state:
+                    - font-size: 1em
+                    - color: var(--primary-text-color)
+                  icon:
+                    - color: |
+                        [[[ return parseFloat(entity.state) > 10 ? '#FFB300' : 'var(--secondary-text-color)'; ]]]
+
+              # Namai
+              - type: custom:button-card
+                entity: sensor.solis_s6_eh3p_household_load_power
+                size: 24px
+                name: Namai
+                show_state: true
+                icon: mdi:home-import-outline
+                state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
+                styles:
+                  grid:
+                    - grid-template-areas: '"n" "i" "s"'
+                  name:
+                    - font-size: 0.9em
+                    - font-weight: normal
+                    - color: var(--secondary-text-color)
+                  state:
+                    - font-size: 1em
+                    - color: var(--primary-text-color)
+                  icon:
+                    - color: |
+                        [[[ return parseFloat(entity.state) > 0 ? '#42A5F5' : 'var(--secondary-text-color)'; ]]]
+
+              # Tinklas — import (raudona, įeinanti) / export (žalia, išeinanti)
+              - type: custom:button-card
+                entity: sensor.solis_s6_eh3p_grid_power_net
+                size: 24px
+                show_state: true
+                name: |
+                  [[[
+                    var p = parseFloat(entity.state);
+                    if (p > 20) return 'Iš tinklo';
+                    if (p < -20) return 'Į tinklą';
+                    return 'Tinklas';
+                  ]]]
+                icon: |
+                  [[[
+                    var p = parseFloat(entity.state);
+                    if (p > 20) return 'mdi:transmission-tower-export';
+                    if (p < -20) return 'mdi:transmission-tower-import';
+                    return 'mdi:transmission-tower';
+                  ]]]
+                state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
+                styles:
+                  grid:
+                    - grid-template-areas: '"n" "i" "s"'
+                  name:
+                    - font-size: 0.9em
+                    - font-weight: normal
+                    - color: var(--secondary-text-color)
+                  state:
+                    - font-size: 1em
+                    - color: var(--primary-text-color)
+                  icon:
+                    - color: |
+                        [[[
+                          var p = parseFloat(entity.state);
+                          if (p > 20) return '#F44336';
+                          if (p < -20) return '#00C853';
+                          return 'var(--secondary-text-color)';
+                        ]]]
+
+              # Baterija — su žaibu kai kraunasi, be žaibo kai iškrauna/rimsta; lygis pagal SOC (10 % žingsniu)
+              - type: custom:button-card
+                entity: sensor.solis_s6_eh3p_battery_power_net
+                size: 24px
+                show_state: true
+                name: |
+                  [[[
+                    var p = parseFloat(entity.state);
+                    if (p < -20) return 'Kraunasi';
+                    if (p > 20) return 'Iškrauna';
+                    return 'Baterija';
+                  ]]]
+                icon: |
+                  [[[
+                    var p = parseFloat(entity.state);
+                    var s = states['sensor.solis_s6_eh3p_battery_soc'];
+                    var soc = s ? parseFloat(s.state) : 0;
+                    var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
+                    // Kraunasi → su žaibu; kitaip → paprasta baterija pagal SOC.
+                    if (p < -20) return lvl <= 0 ? 'mdi:battery-charging-outline' : 'mdi:battery-charging-' + lvl;
+                    if (lvl >= 100) return 'mdi:battery';
+                    if (lvl <= 0) return 'mdi:battery-outline';
+                    return 'mdi:battery-' + lvl;
+                  ]]]
+                state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
+                styles:
+                  grid:
+                    - grid-template-areas: '"n" "i" "s"'
+                  name:
+                    - font-size: 0.9em
+                    - font-weight: normal
+                    - color: var(--secondary-text-color)
+                  state:
+                    - font-size: 1em
+                    - color: var(--primary-text-color)
+                  icon:
+                    - color: |
+                        [[[
+                          var p = parseFloat(entity.state);
+                          if (p < -20) return '#00C853';
+                          if (p > 20) return '#FF9800';
+                          return 'var(--secondary-text-color)';
+                        ]]]
+
+              # SOC — pripildymo lygis, spalva pagal %
+              - type: custom:button-card
+                entity: sensor.solis_s6_eh3p_battery_soc
+                size: 24px
+                name: SOC
+                show_state: true
+                icon: |
+                  [[[
+                    var soc = parseFloat(entity.state);
+                    var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
+                    if (lvl >= 100) return 'mdi:battery';
+                    if (lvl <= 0) return 'mdi:battery-outline';
+                    return 'mdi:battery-' + lvl;
+                  ]]]
+                state_display: '[[[ return Math.round(parseFloat(entity.state)) + "%"; ]]]'
+                styles:
+                  grid:
+                    - grid-template-areas: '"n" "i" "s"'
+                  name:
+                    - font-size: 0.9em
+                    - font-weight: normal
+                    - color: var(--secondary-text-color)
+                  state:
+                    - font-size: 1em
+                    - color: var(--primary-text-color)
+                  icon:
+                    - color: |
+                        [[[
+                          var soc = parseFloat(entity.state);
+                          if (soc < 20) return '#F44336';
+                          if (soc < 50) return '#FF9800';
+                          return '#00C853';
+                        ]]]
+
+          # Ką automatika suskaičiavo ir kur link veda bateriją.
+          - type: glance
+            title: Balansas ir tikslai
+            entities:
+              - entity: sensor.energy_manager_balance
+                name: Balansas
+              - entity: sensor.energy_manager_surplus
+                name: Perteklius
+              - entity: sensor.target_soc_effective
+                name: SOC tikslas
+              - entity: sensor.energy_manager_discharge_needed
+                name: Reikia iškrauti
+              - entity: sensor.energy_manager_surplus_now
+                name: Perteklius dabar
+              - entity: sensor.energy_manager_inverter_temp
+                name: Inverteris
+            show_state: true
+
+          - type: entities
+            title: Automacijos būsena
+            entities:
+              - entity: sensor.energy_manager_status
+                name: Režimas
+                secondary_info: last-changed
+              - entity: sensor.energy_manager_decision
+                name: Paskutinis sprendimas
+                secondary_info: last-changed
+              - entity: sensor.energy_manager_boiler_status
+                name: Boilerio valdymas
+              - entity: input_boolean.storm_mode
+                name: Audros / ESO režimas
+              - entity: input_select.energy_season
+                name: Sezonas
+
+          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager.py):
+          # kada apsimoka išjungti inverterį ir kada jį vėl įjungti ryte.
+          - type: markdown
+            title: Naktinis planas 💤
+            content: >
+              **{{ states('sensor.inverter_night_economics') }}**
+
+              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
+                išjungtas: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
+              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics', 'baterijos_kwh_verte') }}
+              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta') }}**
+              - Ryto įjungimas (Solcast >100 W): **{{ state_attr('sensor.inverter_morning_on_time', 'laikas') | default('—', true) }}**
+
+      # ── 2. VALDYMAS ──────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Valdymas
+            heading_style: title
+            icon: mdi:tune
+
           # Rankinis valdymas: įjungus — sustabdo automatizacijas, kurios
           # perrašo TOU iškrovimo slotą / darbo režimą (recalc kas 5 min,
           # ryto/vakaro režimai, dienos apsaugos, naktinis išjungimas).
@@ -76,176 +309,41 @@ views:
             tap_action:
               action: toggle
 
-          # Dabartinė galia — button-card eilė su krypčiai jautriomis ikonomis.
-          # Ženklai (patikrinti iš Modbus): grid_power_net + = ima iš tinklo,
-          # − = atiduoda; battery_power_net + = iškrauna, − = kraunasi.
-          - type: vertical-stack
-            cards:
-              - type: markdown
-                content: "#### Dabartinė galia"
-              - type: horizontal-stack
-                cards:
-                  # Saulė
-                  - type: custom:button-card
-                    entity: sensor.solis_s6_eh3p_total_pv_power
-                    size: 24px
-                    name: Saulė
-                    show_state: true
-                    icon: mdi:weather-sunny
-                    state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
-                    styles:
-                      grid:
-                        - grid-template-areas: '"n" "i" "s"'
-                      name:
-                        - font-size: 0.9em
-                        - font-weight: normal
-                        - color: var(--secondary-text-color)
-                      state:
-                        - font-size: 1em
-                        - color: var(--primary-text-color)
-                      icon:
-                        - color: |
-                            [[[ return parseFloat(entity.state) > 10 ? '#FFB300' : 'var(--secondary-text-color)'; ]]]
+          - type: entities
+            title: Inverterio režimas
+            entities:
+              - entity: select.solis_s6_eh3p_work_mode
+                name: Darbo režimas
+              - entity: input_boolean.night_inverter_shutdown
+                name: Naktinis išjungimas (idle 130 W → 30 W)
+              - entity: switch.solis_s6_eh3p_power_state
+                name: Inverterio maitinimas
 
-                  # Namai
-                  - type: custom:button-card
-                    entity: sensor.solis_s6_eh3p_household_load_power
-                    size: 24px
-                    name: Namai
-                    show_state: true
-                    icon: mdi:home-import-outline
-                    state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
-                    styles:
-                      grid:
-                        - grid-template-areas: '"n" "i" "s"'
-                      name:
-                        - font-size: 0.9em
-                        - font-weight: normal
-                        - color: var(--secondary-text-color)
-                      state:
-                        - font-size: 1em
-                        - color: var(--primary-text-color)
-                      icon:
-                        - color: |
-                            [[[ return parseFloat(entity.state) > 0 ? '#42A5F5' : 'var(--secondary-text-color)'; ]]]
+          # Ką inverteris REALIAI turi nustatyta TOU slotuose — automacijos
+          # juos valdo, bet iki šiol dashboard'e nesimatė.
+          - type: entities
+            title: TOU slotai (inverterio registrai)
+            entities:
+              - entity: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+                name: Iškrovimo slotas 1
+              - entity: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
+                name: Iškrovimo cut-off SOC
+              - entity: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
+                name: Iškrovimo srovė
+              - entity: time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1
+                name: Iškrovimo pradžia
+              - entity: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
+                name: Iškrovimo pabaiga
+              - entity: switch.solis_s6_eh3p_grid_time_of_use_charging_period_1
+                name: Krovimo slotas 1 (audros rež.)
+              - entity: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
+                name: Eksportas leidžiamas
+              - entity: input_number.daytime_export_floor
+                name: Dienos eksporto riba (floor)
 
-                  # Tinklas — import (raudona, įeinanti) / export (žalia, išeinanti)
-                  - type: custom:button-card
-                    entity: sensor.solis_s6_eh3p_grid_power_net
-                    size: 24px
-                    show_state: true
-                    name: |
-                      [[[
-                        var p = parseFloat(entity.state);
-                        if (p > 20) return 'Iš tinklo';
-                        if (p < -20) return 'Į tinklą';
-                        return 'Tinklas';
-                      ]]]
-                    icon: |
-                      [[[
-                        var p = parseFloat(entity.state);
-                        if (p > 20) return 'mdi:transmission-tower-export';
-                        if (p < -20) return 'mdi:transmission-tower-import';
-                        return 'mdi:transmission-tower';
-                      ]]]
-                    state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
-                    styles:
-                      grid:
-                        - grid-template-areas: '"n" "i" "s"'
-                      name:
-                        - font-size: 0.9em
-                        - font-weight: normal
-                        - color: var(--secondary-text-color)
-                      state:
-                        - font-size: 1em
-                        - color: var(--primary-text-color)
-                      icon:
-                        - color: |
-                            [[[
-                              var p = parseFloat(entity.state);
-                              if (p > 20) return '#F44336';
-                              if (p < -20) return '#00C853';
-                              return 'var(--secondary-text-color)';
-                            ]]]
-
-                  # Baterija — su žaibu kai kraunasi, be žaibo kai iškrauna/rimsta; lygis pagal SOC (10 % žingsniu)
-                  - type: custom:button-card
-                    entity: sensor.solis_s6_eh3p_battery_power_net
-                    size: 24px
-                    show_state: true
-                    name: |
-                      [[[
-                        var p = parseFloat(entity.state);
-                        if (p < -20) return 'Kraunasi';
-                        if (p > 20) return 'Iškrauna';
-                        return 'Baterija';
-                      ]]]
-                    icon: |
-                      [[[
-                        var p = parseFloat(entity.state);
-                        var s = states['sensor.solis_s6_eh3p_battery_soc'];
-                        var soc = s ? parseFloat(s.state) : 0;
-                        var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
-                        // Kraunasi → su žaibu; kitaip → paprasta baterija pagal SOC.
-                        if (p < -20) return lvl <= 0 ? 'mdi:battery-charging-outline' : 'mdi:battery-charging-' + lvl;
-                        if (lvl >= 100) return 'mdi:battery';
-                        if (lvl <= 0) return 'mdi:battery-outline';
-                        return 'mdi:battery-' + lvl;
-                      ]]]
-                    state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
-                    styles:
-                      grid:
-                        - grid-template-areas: '"n" "i" "s"'
-                      name:
-                        - font-size: 0.9em
-                        - font-weight: normal
-                        - color: var(--secondary-text-color)
-                      state:
-                        - font-size: 1em
-                        - color: var(--primary-text-color)
-                      icon:
-                        - color: |
-                            [[[
-                              var p = parseFloat(entity.state);
-                              if (p < -20) return '#00C853';
-                              if (p > 20) return '#FF9800';
-                              return 'var(--secondary-text-color)';
-                            ]]]
-
-                  # SOC — pripildymo lygis, spalva pagal %
-                  - type: custom:button-card
-                    entity: sensor.solis_s6_eh3p_battery_soc
-                    size: 24px
-                    name: SOC
-                    show_state: true
-                    icon: |
-                      [[[
-                        var soc = parseFloat(entity.state);
-                        var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
-                        if (lvl >= 100) return 'mdi:battery';
-                        if (lvl <= 0) return 'mdi:battery-outline';
-                        return 'mdi:battery-' + lvl;
-                      ]]]
-                    state_display: '[[[ return Math.round(parseFloat(entity.state)) + "%"; ]]]'
-                    styles:
-                      grid:
-                        - grid-template-areas: '"n" "i" "s"'
-                      name:
-                        - font-size: 0.9em
-                        - font-weight: normal
-                        - color: var(--secondary-text-color)
-                      state:
-                        - font-size: 1em
-                        - color: var(--primary-text-color)
-                      icon:
-                        - color: |
-                            [[[
-                              var soc = parseFloat(entity.state);
-                              if (soc < 20) return '#F44336';
-                              if (soc < 50) return '#FF9800';
-                              return '#00C853';
-                            ]]]
-
+      # ── 3. FAZĖS (techninė) ──────────────────────────────────────────
+      - type: grid
+        cards:
           # Fazės: įtampa ir tinklo mainai iš smart meter (registrai per
           # lokalų Modbus kaip meter_*), inverterio paduodama galia į fazes
           # — U×I iš inverterio AC gnybtų (fazinės galios registro nėra).
@@ -276,107 +374,13 @@ views:
                 name: Inverteris L3
             show_state: true
 
-          - type: glance
-            title: Energijos valdymas
-            entities:
-              - entity: sensor.energy_manager_balance
-                name: Balansas
-              - entity: sensor.energy_manager_surplus
-                name: Perteklius
-              - entity: sensor.target_soc_effective
-                name: SOC tikslas
-              - entity: sensor.energy_manager_discharge_needed
-                name: Reikia iškrauti
-              - entity: sensor.energy_manager_surplus_now
-                name: Perteklius dabar
-              - entity: sensor.energy_manager_inverter_temp
-                name: Inverteris
-            show_state: true
-
-          - type: entities
-            title: Inverterio režimas
-            entities:
-              - entity: select.solis_s6_eh3p_work_mode
-                name: Darbo režimas
-              - entity: input_boolean.night_inverter_shutdown
-                name: Naktinis išjungimas (idle 130 W → 30 W)
-              - entity: switch.solis_s6_eh3p_power_state
-                name: Inverterio maitinimas
-
-          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager.py):
-          # kada apsimoka išjungti inverterį ir kada jį vėl įjungti ryte.
-          - type: markdown
-            title: Naktinis planas 💤
-            content: >
-              **{{ states('sensor.inverter_night_economics') }}**
-
-              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
-                išjungtas: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
-              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics', 'baterijos_kwh_verte') }}
-              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta') }}**
-              - Ryto įjungimas (Solcast >100 W): **{{ state_attr('sensor.inverter_morning_on_time', 'laikas') | default('—', true) }}**
-
+      # ── 4. PROGNOZĖS IR REZULTATAI ───────────────────────────────────
       - type: grid
         cards:
-          # Ką inverteris REALIAI turi nustatyta TOU slotuose — automacijos
-          # juos valdo, bet iki šiol dashboard'e nesimatė.
-          - type: entities
-            title: TOU slotai (inverterio registrai)
-            entities:
-              - entity: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-                name: Iškrovimo slotas 1
-              - entity: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
-                name: Iškrovimo cut-off SOC
-              - entity: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
-                name: Iškrovimo srovė
-              - entity: time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1
-                name: Iškrovimo pradžia
-              - entity: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
-                name: Iškrovimo pabaiga
-              - entity: switch.solis_s6_eh3p_grid_time_of_use_charging_period_1
-                name: Krovimo slotas 1 (audros rež.)
-              - entity: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
-                name: Eksportas leidžiamas
-              - entity: input_number.daytime_export_floor
-                name: Dienos eksporto riba (floor)
-
-          - type: entities
-            title: Automacijos būsena
-            entities:
-              - entity: sensor.energy_manager_status
-                name: Režimas
-                secondary_info: last-changed
-              - entity: sensor.energy_manager_decision
-                name: Paskutinis sprendimas
-                secondary_info: last-changed
-              - entity: sensor.energy_manager_boiler_status
-                name: Boilerio valdymas
-              - entity: input_boolean.storm_mode
-                name: Audros / ESO režimas
-              - entity: input_select.energy_season
-                name: Sezonas
-
-          - type: entities
-            title: Prognozė ir kainos
-            entities:
-              - entity: sensor.solcast_correction_factor
-                name: Solcast korekcijos koeficientas
-                secondary_info: last-updated
-              - entity: input_number.electricity_price_buy
-                name: Pirkimo kaina
-              - entity: input_number.electricity_price_sell
-                name: Pardavimo kaina
-
-          - type: glance
-            title: Vakar
-            entities:
-              - entity: input_number.solcast_forecast_yesterday
-                name: Prognozuota
-              - entity: sensor.solis_s6_eh3p_pv_yesterday_energy_generation
-                name: Pagaminta
-              - entity: sensor.solcast_forecast_yesterday_accuracy
-                name: Tikslumas
-            show_state: true
+          - type: heading
+            heading: Prognozės ir rezultatai
+            heading_style: title
+            icon: mdi:weather-partly-cloudy
 
           - type: glance
             title: Šiandien
@@ -396,6 +400,29 @@ views:
               - entity: sensor.solcast_pv_forecast_forecast_tomorrow
                 name: Rytoj
                 icon: mdi:weather-partly-cloudy
+            show_state: true
+
+          - type: glance
+            title: Vakar
+            entities:
+              - entity: input_number.solcast_forecast_yesterday
+                name: Prognozuota
+              - entity: sensor.solis_s6_eh3p_pv_yesterday_energy_generation
+                name: Pagaminta
+              - entity: sensor.solcast_forecast_yesterday_accuracy
+                name: Tikslumas
+            show_state: true
+
+          - type: entities
+            title: Prognozė ir kainos
+            entities:
+              - entity: sensor.solcast_correction_factor
+                name: Solcast korekcijos koeficientas
+                secondary_info: last-updated
+              - entity: input_number.electricity_price_buy
+                name: Pirkimo kaina
+              - entity: input_number.electricity_price_sell
+                name: Pardavimo kaina
 
       # Grafikai per visą puslapio plotį (abu stulpeliai).
       - type: grid

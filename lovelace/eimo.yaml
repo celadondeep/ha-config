@@ -1,10 +1,15 @@
 title: Eimo SE energija
 views:
+  # Išdėstymo logika (2026-07-08 pertvarka, veidrodinė Modbus dashboard'ui):
+  # 1) DABAR (kairė) — galia, SOC vs tikslas, balansas/sprendimas, naktinis planas,
+  # 2) VALDYMAS (dešinė) — nustatymai, Slot1 registrai, inverterio būsena,
+  # 3) PROGNOZĖS (kairė apačioje) — šiandienos rezultatai ir Solcast.
   - title: Eimo SE
     path: eimo
     type: sections
     max_columns: 2
     sections:
+      # ── 1. DABAR ─────────────────────────────────────────────────────
       - type: grid
         cards:
           # Cloud duomenų amžius iš solis_timestamp_measurements_received
@@ -92,46 +97,9 @@ views:
                 min: 0
                 max: 100
 
-          - type: glance
-            title: Šiandien
-            entities:
-              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
-                name: Pagaminta
-                icon: mdi:solar-power-variant
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used
-                name: Suvartota
-                icon: mdi:home-lightning-bolt
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy
-                name: Parduota
-                icon: mdi:transmission-tower-import
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased
-                name: Pirkta
-                icon: mdi:transmission-tower-export
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_charged
-                name: Į bateriją
-                icon: mdi:battery-plus
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_discharged
-                name: Iš baterijos
-                icon: mdi:battery-minus
-            show_state: true
-
-          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager_eimo.py),
-          # analogiška Modbus kortelei.
-          - type: markdown
-            title: Naktinis planas 💤
-            content: >
-              **{{ states('sensor.inverter_night_economics_eimo') }}**
-
-              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
-                išjungtas: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
-              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics_eimo', 'baterijos_kwh_verte') }}
-              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta_eimo') }}**
-              - Ryto įjungimas: **{{ states('sensor.inverter_morning_on_time_eimo') | as_timestamp(none) | timestamp_custom('%H:%M', true, '—') }}**
-
-      - type: grid
-        cards:
+          # Ką automatika suskaičiavo ir kur link veda bateriją.
           - type: entities
-            title: Energijos valdymas (Eimo)
+            title: Balansas ir automatika (Eimo)
             entities:
               - entity: sensor.energy_manager_eimo_target_soc
                 name: Tikslinė SOC riba
@@ -152,15 +120,26 @@ views:
                 name: Solcast korekcija
                 secondary_info: last-updated
 
-          - type: entities
-            title: Saulės prognozė (bendra)
-            entities:
-              - entity: sensor.solcast_pv_forecast_forecast_remaining_today
-                name: Liko šiandien
-              - entity: sensor.solcast_pv_forecast_forecast_tomorrow
-                name: Rytoj
-              - entity: input_number.solcast_forecast_yesterday_eimo
-                name: Vakar prognozuota
+          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager_eimo.py),
+          # analogiška Modbus kortelei.
+          - type: markdown
+            title: Naktinis planas 💤
+            content: >
+              **{{ states('sensor.inverter_night_economics_eimo') }}**
+
+              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
+                išjungtas: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
+              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics_eimo', 'baterijos_kwh_verte') }}
+              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta_eimo') }}**
+              - Ryto įjungimas: **{{ states('sensor.inverter_morning_on_time_eimo') | as_timestamp(none) | timestamp_custom('%H:%M', true, '—') }}**
+
+      # ── 2. VALDYMAS ──────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Valdymas
+            heading_style: title
+            icon: mdi:tune
 
           - type: entities
             title: Valdymas ir nustatymai
@@ -210,6 +189,47 @@ views:
                 name: Inverterio būsena
               - entity: switch.inverter_control_1033300254190112_inverter_on_off
                 name: Inverteris (on/off)
+
+      # ── 3. PROGNOZĖS IR REZULTATAI ───────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Prognozės ir rezultatai
+            heading_style: title
+            icon: mdi:weather-partly-cloudy
+
+          - type: glance
+            title: Šiandien
+            entities:
+              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
+                name: Pagaminta
+                icon: mdi:solar-power-variant
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used
+                name: Suvartota
+                icon: mdi:home-lightning-bolt
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy
+                name: Parduota
+                icon: mdi:transmission-tower-import
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased
+                name: Pirkta
+                icon: mdi:transmission-tower-export
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_charged
+                name: Į bateriją
+                icon: mdi:battery-plus
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_discharged
+                name: Iš baterijos
+                icon: mdi:battery-minus
+            show_state: true
+
+          - type: entities
+            title: Saulės prognozė (bendra)
+            entities:
+              - entity: sensor.solcast_pv_forecast_forecast_remaining_today
+                name: Liko šiandien
+              - entity: sensor.solcast_pv_forecast_forecast_tomorrow
+                name: Rytoj
+              - entity: input_number.solcast_forecast_yesterday_eimo
+                name: Vakar prognozuota
 
       # Grafikai per visą plotį — cloud duomenys ~5 min žingsniu.
       - type: grid
