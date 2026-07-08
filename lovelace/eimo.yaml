@@ -7,6 +7,55 @@ views:
     sections:
       - type: grid
         cards:
+          # Cloud duomenų amžius iš solis_timestamp_measurements_received
+          # (unix s). Cloud atnaujina kas ~1–5 min; >10 min — raudona
+          # (cloud/integracijos strigtis, audituose pasitaikydavo unavailable
+          # ruožų). update_timer būtinas, kad amžius "bėgtų" ir kortelė
+          # paraudonuotų net kai entity nebesikeičia.
+          - type: custom:button-card
+            entity: sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received
+            update_timer: 5000
+            icon: mdi:cloud-check-variant
+            name: ☀️ Eimo SE energija
+            show_name: true
+            show_icon: true
+            show_label: true
+            show_state: false
+            label: |
+              [[[
+                var a = Math.max(0, Math.round(Date.now()/1000 - parseFloat(entity.state)));
+                if (a < 120) return a + 's';
+                return Math.round(a/60) + ' min';
+              ]]]
+            tap_action:
+              action: none
+            styles:
+              card:
+                - background: none
+                - box-shadow: none
+                - border: none
+                - padding: 0
+              grid:
+                - grid-template-areas: '"n i l"'
+                - grid-template-columns: 1fr min-content min-content
+                - align-items: center
+              name:
+                - justify-self: start
+                - font-size: 1.4em
+                - font-weight: normal
+                - color: var(--primary-text-color)
+              icon:
+                - width: 22px
+                - color: |
+                    [[[
+                      var a = Math.max(0, Math.round(Date.now()/1000 - parseFloat(entity.state)));
+                      return a > 600 ? '#f44336' : (a <= 180 ? '#00E676' : 'var(--primary-text-color)');
+                    ]]]
+              label:
+                - font-size: 14px
+                - padding-left: 6px
+                - color: var(--primary-text-color)
+
           - type: glance
             title: Dabartinė galia
             entities:
@@ -21,23 +70,63 @@ views:
               - entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
                 name: SOC
 
-          - type: gauge
-            entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
-            name: Baterijos SOC
-            unit: "%"
-            min: 0
-            max: 100
-            severity:
-              green: 50
-              yellow: 20
-              red: 5
+          # Esamas SOC prieš algoritmo tikslą — vienoje eilėje matosi, ar
+          # baterija juda link tikslo (07-08 dienos iškrova tapo sąlyginė —
+          # be pertekliaus baterija turi kauptis link target).
+          - type: horizontal-stack
+            cards:
+              - type: gauge
+                entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
+                name: Baterijos SOC
+                unit: "%"
+                min: 0
+                max: 100
+                severity:
+                  green: 50
+                  yellow: 20
+                  red: 5
+              - type: gauge
+                entity: sensor.energy_manager_eimo_target_soc
+                name: Tikslinė SOC riba
+                unit: "%"
+                min: 0
+                max: 100
 
-          - type: gauge
-            entity: sensor.energy_manager_eimo_target_soc
-            name: Tikslinė SOC riba
-            unit: "%"
-            min: 0
-            max: 100
+          - type: glance
+            title: Šiandien
+            entities:
+              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
+                name: Pagaminta
+                icon: mdi:solar-power-variant
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used
+                name: Suvartota
+                icon: mdi:home-lightning-bolt
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy
+                name: Parduota
+                icon: mdi:transmission-tower-import
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased
+                name: Pirkta
+                icon: mdi:transmission-tower-export
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_charged
+                name: Į bateriją
+                icon: mdi:battery-plus
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_discharged
+                name: Iš baterijos
+                icon: mdi:battery-minus
+            show_state: true
+
+          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager_eimo.py),
+          # analogiška Modbus kortelei.
+          - type: markdown
+            title: Naktinis planas 💤
+            content: >
+              **{{ states('sensor.inverter_night_economics_eimo') }}**
+
+              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
+                išjungtas: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
+              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics_eimo', 'baterijos_kwh_verte') }}
+              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta_eimo') }}**
+              - Ryto įjungimas: **{{ states('sensor.inverter_morning_on_time_eimo') | as_timestamp(none) | timestamp_custom('%H:%M', true, '—') }}**
 
       - type: grid
         cards:
@@ -48,8 +137,11 @@ views:
                 name: Tikslinė SOC riba
               - entity: sensor.energy_manager_eimo_decision
                 name: Sprendimas
+                secondary_info: last-changed
               - entity: sensor.energy_manager_eimo_balance
                 name: Energijos balansas
+              - entity: sensor.energy_manager_eimo_surplus
+                name: Perteklius (netilps šiandien)
               - entity: sensor.energy_manager_eimo_surplus_now
                 name: Perteklius dabar
               - entity: sensor.consumption_forecast_tomorrow_eimo
@@ -58,8 +150,7 @@ views:
                 name: Likęs suvartojimas šiandien
               - entity: sensor.solcast_correction_factor_eimo
                 name: Solcast korekcija
-              - entity: sensor.inverter_night_economics_eimo
-                name: Nakties ekonomika
+                secondary_info: last-updated
 
           - type: entities
             title: Saulės prognozė (bendra)
@@ -78,27 +169,161 @@ views:
                 name: Audros / ESO režimas
               - entity: input_select.energy_season_eimo
                 name: Sezonas
+              - entity: input_number.daytime_export_floor_eimo
+                name: Dienos eksporto riba (floor)
               - entity: input_number.electricity_price_buy_eimo
                 name: Pirkimo kaina
               - entity: input_number.electricity_price_sell_eimo
                 name: Pardavimo kaina
+
+          # Ką inverteris REALIAI turi nustatyta slot1 (automacijos jį valdo).
+          # Slot1 — vienintelis automatikos naudojamas; slot2–6 palikti seni
+          # rankiniai įrašai su OFF jungikliais.
+          - type: entities
+            title: Slot1 (inverterio registrai)
+            entities:
               - entity: select.inverter_control_1033300254190112_storage_mode
                 name: Inverterio režimas
               - entity: switch.inverter_control_1033300254190112_slot1_discharge
-                name: Iškrovimo slotas (slot1)
+                name: Iškrovimo slotas
+              - entity: text.inverter_control_1033300254190112_slot1_discharge_time
+                name: Iškrovimo langas
               - entity: number.inverter_control_1033300254190112_slot1_discharge_soc
                 name: Iškrovimo cut-off SOC
+              - entity: number.inverter_control_1033300254190112_slot1_discharge_current
+                name: Iškrovimo srovė
+              - entity: switch.inverter_control_1033300254190112_slot1_charge
+                name: Krovimo slotas (audros rež.)
+              - entity: switch.inverter_control_1033300254190112_allow_grid_charging
+                name: Krovimas iš tinklo leidžiamas
+              - entity: switch.inverter_control_1033300254190112_allow_export
+                name: Eksportas leidžiamas
 
           - type: entities
             title: Inverterio būsena
             entities:
               - entity: sensor.solis_inverter_1033300254190112_solis_temperature
                 name: Temperatūra
-              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
-                name: Pagaminta šiandien
               - entity: sensor.solis_inverter_1033300254190112_solis_battery_state_of_health
                 name: Baterijos sveikata (SOH)
               - entity: sensor.solis_inverter_1033300254190112_solis_state
                 name: Inverterio būsena
               - entity: switch.inverter_control_1033300254190112_inverter_on_off
                 name: Inverteris (on/off)
+
+      # Grafikai per visą plotį — cloud duomenys ~5 min žingsniu.
+      - type: grid
+        column_span: 2
+        cards:
+          # SOC (kairė ašis, %) + galios (dešinė ašis, W) — kaip Modbus
+          # dashboard'e. Matosi, ar baterija kaupiasi link target, kada
+          # iškrauna, kaip saulė dengia namus.
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Suvartojimas ir gamyba (24 val. · SOC % / W)
+            graph_span: 24h
+            update_interval: 60s
+            apex_config:
+              chart:
+                height: 300
+                parentHeightOffset: 0
+                animations:
+                  enabled: false
+              grid:
+                padding:
+                  left: 0
+                  right: 0
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  datetimeFormatter:
+                    hour: 'HH:mm'
+            yaxis:
+              - id: soc
+                min: 0
+                max: 100
+                decimals: 0
+              - id: power
+                opposite: true
+                min: 0
+                align_to: 500
+                decimals: 0
+                apex_config:
+                  stepSize: 500
+            series:
+              - entity: sensor.eimo_pv_power
+                name: Saulė
+                yaxis_id: power
+                color: '#2196f3'
+                type: area
+                opacity: 0.25
+                stroke_width: 1
+                group_by:
+                  func: avg
+                  duration: 5min
+              - entity: sensor.solis_inverter_1033300254190112_solis_total_consumption_power
+                name: Namai
+                yaxis_id: power
+                color: '#f44336'
+                stroke_width: 1
+                group_by:
+                  func: avg
+                  duration: 5min
+              - entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
+                name: SOC
+                yaxis_id: soc
+                color: '#880e4f'
+                stroke_width: 2
+                group_by:
+                  func: avg
+                  duration: 5min
+
+          # 14 d. dienos balansas iš cloud dienos skaitliukų (resetinasi
+          # vidurnaktį, todėl max per parą = dienos suma).
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Dienos balansas (14 d. · kWh)
+            graph_span: 14d
+            update_interval: 5min
+            span:
+              end: day
+            apex_config:
+              chart:
+                height: 280
+                animations:
+                  enabled: false
+            yaxis:
+              - min: 0
+                decimals: 0
+            series:
+              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
+                name: Saulė
+                type: column
+                color: '#fbc02d'
+                group_by:
+                  func: max
+                  duration: 1d
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used
+                name: Suvartota
+                type: column
+                color: '#f44336'
+                group_by:
+                  func: max
+                  duration: 1d
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy
+                name: Parduota
+                type: column
+                color: '#4caf50'
+                group_by:
+                  func: max
+                  duration: 1d
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased
+                name: Pirkta
+                type: column
+                color: '#9e9e9e'
+                group_by:
+                  func: max
+                  duration: 1d

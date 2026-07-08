@@ -337,6 +337,8 @@ views:
                 name: Krovimo slotas 1 (audros rež.)
               - entity: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
                 name: Eksportas leidžiamas
+              - entity: input_number.daytime_export_floor
+                name: Dienos eksporto riba (floor)
 
           - type: entities
             title: Automacijos būsena
@@ -639,6 +641,35 @@ views:
                 group_by:
                   func: avg
                   duration: 15min
+
+          # Baterijos round-trip efektyvumo trendas — audituose stebima tema
+          # (lėtas dreifas žemyn nuo ~96 % birželį iki ~93 % liepą); vienas
+          # skaičius glance kortelėje krypties neparodo.
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Baterijos round-trip efektyvumas (30 d.)
+            graph_span: 30d
+            update_interval: 10min
+            span:
+              end: day
+            apex_config:
+              chart:
+                height: 220
+                animations:
+                  enabled: false
+            yaxis:
+              - min: 88
+                max: 100
+                decimals: 1
+            series:
+              - entity: sensor.battery_roundtrip_efficiency
+                name: Round-trip %
+                color: '#7e57c2'
+                stroke_width: 2
+                group_by:
+                  func: last
+                  duration: 1d
 
           # Solcast prognozės tikslumas per 30 d. — korekcijos koeficientas
           # (sensor.solcast_correction_factor) mokosi iš šių duomenų.
