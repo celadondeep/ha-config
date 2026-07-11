@@ -419,6 +419,9 @@ views:
               - entity: sensor.solcast_correction_factor
                 name: Solcast korekcijos koeficientas
                 secondary_info: last-updated
+              - entity: sensor.solcast_intraday_ratio
+                name: Intradienos santykis (faktas/prognozė)
+                secondary_info: last-updated
               - entity: input_number.electricity_price_buy
                 name: Pirkimo kaina
               - entity: input_number.electricity_price_sell

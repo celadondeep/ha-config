@@ -119,6 +119,9 @@ views:
               - entity: sensor.solcast_correction_factor_eimo
                 name: Solcast korekcija
                 secondary_info: last-updated
+              - entity: sensor.solcast_intraday_ratio_eimo
+                name: Intradienos santykis (faktas/prognozė)
+                secondary_info: last-updated
 
           # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager_eimo.py),
           # analogiška Modbus kortelei.
