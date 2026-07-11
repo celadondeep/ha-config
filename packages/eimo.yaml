@@ -65,12 +65,49 @@ input_number:
 
 template:
   - sensor:
+      # Intradienos Solcast santykis (Eimo) — faktinė šios dienos gamyba
+      # lyginama su tuo, kiek pagal koreguotą prognozę TURĖJO būti pagaminta
+      # iki šio momento. Naudojamas surplus skaičiavime, kad geresnę nei
+      # prognozuota dieną dienos iškrovimas įsijungtų nuo to momento, kai
+      # likusi gamyba nebetilps baterijoje — nelaukiant paros EMA (23:50).
+      # Kol tikėtina gamyba < 1.5 kWh — santykis 1 (ryto triukšmas / mažas
+      # vardiklis; cloud energy_today dar ir vėluoja ~5 min). Clamp 0.5–1.8.
+      # Modbus analogas: sensor.solcast_intraday_ratio (configuration.yaml).
+      - name: "solcast_intraday_ratio_eimo"
+        unique_id: solcast_intraday_ratio_eimo
+        state_class: measurement
+        icon: mdi:sun-clock
+        state: >
+          {% set corr = states('sensor.solcast_correction_factor_eimo') | float(1) %}
+          {% set total = states('sensor.solcast_pv_forecast_forecast_today') | float(0) %}
+          {% set remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0) %}
+          {% set expected = [total - remaining, 0] | max * corr %}
+          {% set actual = states('sensor.solis_inverter_1033300254190112_solis_energy_today') | float(0) %}
+          {% if expected < 1.5 %}
+            1.0
+          {% else %}
+            {{ [[actual / expected, 0.5] | max, 1.8] | min | round(3) }}
+          {% endif %}
+        availability: >
+          {{ states('sensor.solcast_pv_forecast_forecast_today') not in ['unavailable', 'unknown', '']
+             and states('sensor.solcast_pv_forecast_forecast_remaining_today') not in ['unavailable', 'unknown', '']
+             and states('sensor.solis_inverter_1033300254190112_solis_energy_today') not in ['unavailable', 'unknown', ''] }}
+        attributes:
+          faktas_kwh: >
+            {{ states('sensor.solis_inverter_1033300254190112_solis_energy_today') | float(0) | round(2) }}
+          tiketasi_iki_dabar_kwh: >
+            {% set total = states('sensor.solcast_pv_forecast_forecast_today') | float(0) %}
+            {% set remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0) %}
+            {{ ([total - remaining, 0] | max * states('sensor.solcast_correction_factor_eimo') | float(1)) | round(2) }}
+
       # Realus eksportuojamas perteklius (kWh) — kiek likusios dienos saulės
       # NETURĖS kur dėtis, tik į tinklą (Modbus energy_manager_surplus analogas).
       #
       #   perteklius = pv_liko − namų_liko − baterijos_vieta_iki_100%
       #
       #   pv_liko   = Solcast „liko šiandien" × solcast_correction_factor_eimo
+      #               × intradienos santykis (solcast_intraday_ratio_eimo) —
+      #               dinamiškai seka realią dieną (2026-07-11)
       #   namų_liko = consumption_remaining_today_eimo (AppDaemon vartojimo
       #               modelis — lygesnis nei momentinė apkrova × valandos,
       #               todėl mažiau blaško dienos iškrovimo histerezę)
@@ -85,7 +122,8 @@ template:
         state: >
           {% set per = 0.1434 %}
           {% set pv_remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)
-                                * states('sensor.solcast_correction_factor_eimo') | float(1) %}
+                                * states('sensor.solcast_correction_factor_eimo') | float(1)
+                                * states('sensor.solcast_intraday_ratio_eimo') | float(1) %}
           {% set house_remaining = [states('sensor.consumption_remaining_today_eimo') | float(0), 0] | max %}
           {% set soc = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(100) %}
           {% set battery_headroom = [(100 - soc) * per, 0] | max %}
@@ -97,7 +135,10 @@ template:
         attributes:
           pv_remaining_kwh: >
             {{ (states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)
-                * states('sensor.solcast_correction_factor_eimo') | float(1)) | round(2) }}
+                * states('sensor.solcast_correction_factor_eimo') | float(1)
+                * states('sensor.solcast_intraday_ratio_eimo') | float(1)) | round(2) }}
+          intraday_ratio: >
+            {{ states('sensor.solcast_intraday_ratio_eimo') | float(1) }}
           house_remaining_kwh: >
             {{ [states('sensor.consumption_remaining_today_eimo') | float(0), 0] | max | round(2) }}
           battery_headroom_kwh: >
