@@ -1,17 +1,21 @@
 title: Eimo SE energija
 views:
-  # Išdėstymo logika (2026-07-12 vizualinė pertvarka, veidrodinė Modbus dashboard'ui):
-  # 1) DABAR (kairė) — galios srautai (button-card su kryptinėmis ikonomis),
-  #    SOC vs tikslas, balansas/sprendimas, naktinis planas,
-  # 2) VALDYMAS (dešinė) — audros tile, nustatymai/kainos, Slot1 registrai, būsena,
-  # 3) PROGNOZĖS (kairė apačioje) — šiandienos rezultatai, Solcast + korekcijos,
-  # 4) GRAFIKAI — per visą plotį.
+  # Išdėstymo logika (2026-07-12 kompaktinė pertvarka): DVI kolonos be
+  # tarpinių sekcijų — trečia sekcija sukurdavo naują eilutę žemiau
+  # aukštesnės kolonos ir palikdavo tuščią tarpą. Dabar:
+  # 1) KAIRĖ — galios srautai, SOC vs tikslas, balansas/sprendimas,
+  #    naktinis planas, šiandienos rezultatai,
+  # 2) DEŠINĖ — audros tile, nustatymai/kainos, Slot1 registrai, būsena,
+  #    Solcast prognozė ir korekcijos,
+  # 3) GRAFIKAI — per visą plotį.
+  # Atskirų heading kortelių nėra (kortelių title pakanka) — taupo vietą.
   # Stilius sąmoningai identiškas energijos_valdymas.yaml (spalvos, šriftai,
   # button-card šablonai), kad abu dashboard'ai atrodytų kaip viena sistema.
   - title: Eimo SE
     path: eimo
     type: sections
     max_columns: 2
+    dense_section_placement: true
     sections:
       # ── 1. DABAR ─────────────────────────────────────────────────────
       - type: grid
@@ -70,11 +74,6 @@ views:
           # energy_manager_eimo.py): grid_total_power + = eksportas, − =
           # importas (ATVIRKŠČIAI nei Modbus!); battery_power + = iškrauna,
           # − = kraunasi.
-          - type: heading
-            heading: Dabartinė galia
-            heading_style: subtitle
-            icon: mdi:flash
-
           - type: horizontal-stack
             cards:
               # Saulė
@@ -302,14 +301,34 @@ views:
               - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta_eimo') }}**
               - Ryto įjungimas: **{{ states('sensor.inverter_morning_on_time_eimo') | as_timestamp(none) | timestamp_custom('%H:%M', true, '—') }}**
 
-      # ── 2. VALDYMAS ──────────────────────────────────────────────────
+          # Šiandienos rezultatai — kairės kolonos apačioje (kolonų aukščio
+          # balansui; atskira „Prognozių" sekcija palikdavo tuščią tarpą).
+          - type: glance
+            title: Šiandien
+            entities:
+              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
+                name: Pagaminta
+                icon: mdi:solar-power-variant
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used
+                name: Suvartota
+                icon: mdi:home-lightning-bolt
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy
+                name: Parduota
+                icon: mdi:transmission-tower-import
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased
+                name: Pirkta
+                icon: mdi:transmission-tower-export
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_charged
+                name: Į bateriją
+                icon: mdi:battery-plus
+              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_discharged
+                name: Iš baterijos
+                icon: mdi:battery-minus
+            show_state: true
+
+      # ── 2. VALDYMAS IR PROGNOZĖS (dešinė kolona) ─────────────────────
       - type: grid
         cards:
-          - type: heading
-            heading: Valdymas
-            heading_style: title
-            icon: mdi:tune
-
           # Audros režimas — tile viršuje, kaip Modbus rankinio valdymo tiles:
           # svarbiausias jungiklis matomas ir perjungiamas vienu paspaudimu.
           - type: tile
@@ -383,39 +402,8 @@ views:
                 name: Inverteris (on/off)
                 icon: mdi:power
 
-      # ── 3. PROGNOZĖS IR REZULTATAI ───────────────────────────────────
-      - type: grid
-        cards:
-          - type: heading
-            heading: Prognozės ir rezultatai
-            heading_style: title
-            icon: mdi:weather-partly-cloudy
-
-          - type: glance
-            title: Šiandien
-            entities:
-              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
-                name: Pagaminta
-                icon: mdi:solar-power-variant
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used
-                name: Suvartota
-                icon: mdi:home-lightning-bolt
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy
-                name: Parduota
-                icon: mdi:transmission-tower-import
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased
-                name: Pirkta
-                icon: mdi:transmission-tower-export
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_charged
-                name: Į bateriją
-                icon: mdi:battery-plus
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_discharged
-                name: Iš baterijos
-                icon: mdi:battery-minus
-            show_state: true
-
-          # Solcast + korekcijos rodikliai vienoje vietoje (perkelta iš
-          # „Balansas ir automatika" — tema prognozės, ne valdymas).
+          # Solcast + korekcijos rodikliai vienoje vietoje (dešinės kolonos
+          # apačioje — kolonų aukščio balansui).
           - type: entities
             title: Saulės prognozė ir korekcija
             entities:
