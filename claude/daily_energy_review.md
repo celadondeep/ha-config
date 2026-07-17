@@ -86,6 +86,7 @@ Pagrindiniai entities:
 - **ESP32 boileris (kai bus pajungtas):** SOC > 95 % perteklius į vandenį —
   energy_manager boilerio logika jau yra (SOC_HIGH_THRESHOLD).
 | Banko rankinė korekcija (normaliai 0) | input_number.eso_bankas_pradzia |
+| ESO savitarnos pranešimai (naujausias + 5 sąrašas atributuose; nauji kelia eso_new_message įvykį, planuojamas atjungimas automatiškai planuoja rezervą — žr. packages/eso_pranesimai.yaml) | sensor.eso_pranesimai, input_boolean.eso_rezervo_planas, input_datetime.eso_atjungimas_nuo/_iki |
 
 **ESO oficialūs įvado duomenys (Modbus elektrinė, obj. 220588):** integracija
 `custom_components/eso` kasdien 5:10–6:40 atsisiunčia vakarykštės paros
