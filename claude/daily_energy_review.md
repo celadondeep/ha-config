@@ -70,6 +70,8 @@ Pagrindiniai entities:
 | Oficialus ESO banko likutis (paskutinio uždaryto mėn., iš savitarnos) | sensor.eso_bankas_220588 |
 | Banko biudžetas iki kovo 31 (atributai: pritruks_kwh, pirmas_deficito_men, verdiktas). SVARBU: mėnesių lentelės pakete PRELIMINARIOS — mėnesiui užsidarius pakeisk jo įvertį faktu eso_bankas.yaml lentelėse (exp/imp) | sensor.eso_bankas_prognoze |
 | Baterijos ciklo nuostolis vs bankas 1:1 (kol bankas >20 kWh, savanoriškas ciklas nuostolingas; ciklas teisėtas tik perpildymo buferiui). Žiemos politika: bankui išsisėmus (prognozė ~lapkritis) vakaro iškrovimas vėl tampa vertingas | sensor.baterijos_ciklo_nuostolis |
+| Banko rankinė korekcija (normaliai 0) | input_number.eso_bankas_pradzia |
+| ESO savitarnos pranešimai (naujausias + 5 sąrašas atributuose; nauji kelia eso_new_message įvykį, planuojamas atjungimas automatiškai planuoja rezervą — žr. packages/eso_pranesimai.yaml) | sensor.eso_pranesimai, input_boolean.eso_rezervo_planas, input_datetime.eso_atjungimas_nuo/_iki |
 
 **Baterijos tausojimo politika (7 punktas, 2026-07-18)** — audituojant vertink:
 - **Viršūnės skutimas:** SOC ≥ 91 % dieną → iškrovimo slotas su cut-off 90 %
@@ -85,8 +87,6 @@ Pagrindiniai entities:
   churn ties dugnu.
 - **ESP32 boileris (kai bus pajungtas):** SOC > 95 % perteklius į vandenį —
   energy_manager boilerio logika jau yra (SOC_HIGH_THRESHOLD).
-| Banko rankinė korekcija (normaliai 0) | input_number.eso_bankas_pradzia |
-| ESO savitarnos pranešimai (naujausias + 5 sąrašas atributuose; nauji kelia eso_new_message įvykį, planuojamas atjungimas automatiškai planuoja rezervą — žr. packages/eso_pranesimai.yaml) | sensor.eso_pranesimai, input_boolean.eso_rezervo_planas, input_datetime.eso_atjungimas_nuo/_iki |
 
 **ESO oficialūs įvado duomenys (Modbus elektrinė, obj. 220588):** integracija
 `custom_components/eso` kasdien 5:10–6:40 atsisiunčia vakarykštės paros
