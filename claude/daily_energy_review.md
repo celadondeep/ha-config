@@ -62,6 +62,7 @@ Pagrindiniai entities:
 | Sistemos efektyvumas (lifetime) | sensor.system_efficiency |
 | Baterijos round-trip efektyvumas | sensor.battery_roundtrip_efficiency |
 | Baterijos ciklų odometrai (atributai: ciklai_per_diena, prognoze_ciklu_per_metus, metai_iki_6000_ciklu, bms_soh) | sensor.battery_equivalent_cycles / sensor.battery_equivalent_cycles_eimo |
+| BMS sveikata netiesiogiai (temperatūros registras miręs — visada 0): fault registrai PRIVALO būti 0; BMS srovės limitai — derating žemiau ~150 A esant SOC < 90 % įtartinas (prie pilno SOC tapering natūralus) | sensor.solis_s6_eh3p_battery_fault_status_1_bms / _2_bms, battery_charge/discharge_current_limitation_bms |
 | Baterijos / inverterio nuostoliai (kWh) | sensor.battery_losses_total / sensor.inverter_losses_total |
 | Kabelio nuostoliai | sensor.cable_loss_power / sensor.kabelio_nuostoliai_siandien |
 | ESO įvado eksportas/importas (einamųjų banko metų, nuo bal. 1) | sensor.eso_ivado_eksportas / sensor.eso_ivado_importas |

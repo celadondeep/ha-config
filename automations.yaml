@@ -839,3 +839,54 @@
           galią. Patikrinkite vėdinimą / užtemdymą. PV galia:
           {{ states('sensor.solis_s6_eh3p_total_pv_power') }} W.
   mode: single
+
+- id: solis_bms_fault_alert
+  alias: "Solis - Baterijos BMS gedimo įspėjimas"
+  description: >
+    BMS temperatūros baterija neperduoda (registras visada 0), todėl
+    sveikata stebima netiesiogiai: fault_status_1/2 registrai privalo būti
+    0 — bet kokia kita reikšmė yra BMS aliarmas (per aukšta/žema celių
+    įtampa, temperatūra, srovė). Trigeris kertant 0 ribą.
+  trigger:
+    - platform: numeric_state
+      entity_id:
+        - sensor.solis_s6_eh3p_battery_fault_status_1_bms
+        - sensor.solis_s6_eh3p_battery_fault_status_2_bms
+      above: 0
+  condition: []
+  action:
+    - service: notify.persistent_notification
+      data:
+        title: "Solis - Baterijos BMS aliarmas ⚠️"
+        message: >
+          BMS fault registrai: status_1 =
+          {{ states('sensor.solis_s6_eh3p_battery_fault_status_1_bms') }},
+          status_2 =
+          {{ states('sensor.solis_s6_eh3p_battery_fault_status_2_bms') }}.
+          SOC: {{ states('sensor.solis_s6_eh3p_battery_soc') }} %,
+          baterijos galia: {{ states('sensor.solis_s6_eh3p_battery_power') }} W,
+          BMS įtampa: {{ states('sensor.solis_s6_eh3p_battery_voltage_bms') }} V.
+          Patikrink baterijos būseną — nenulinis fault = BMS apsauga.
+  mode: single
+
+- id: eimo_inverter_temp_alert
+  alias: "Eimo - Inverterio temperatūros įspėjimas (>70°C)"
+  description: >
+    Solis Modbus analogo kopija Eimo elektrinei (cloud temperatūros
+    sensorius): 10 min virš 70°C — artėja galios ribojimo zona.
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.solis_inverter_1033300254190112_solis_temperature
+      above: 70
+      for: "00:10:00"
+  condition: []
+  action:
+    - service: notify.persistent_notification
+      data:
+        title: "Eimo - Aukšta inverterio temperatūra 🌡️"
+        message: >
+          Eimo inverterio temperatūra
+          {{ states('sensor.solis_inverter_1033300254190112_solis_temperature') }}°C
+          jau 10 min viršija 70°C. Artėjant ~75°C inverteris pradės riboti
+          galią. Patikrinkite vėdinimą / užtemdymą.
+  mode: single
