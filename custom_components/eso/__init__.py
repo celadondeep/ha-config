@@ -1,5 +1,7 @@
+import json
 import logging
 import random
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -36,6 +38,8 @@ from .const import (
     ATTR_CONFIG_ENTRY_ID,
     ATTR_DATE_FROM,
     ATTR_DATE_TO,
+    EVENT_NEW_MESSAGE,
+    SEEN_MESSAGES_FILE,
     CONF_CONSUMED,
     CONF_COST,
     CONF_IMAP,
@@ -58,6 +62,7 @@ from .const import (
     SERVICE_IMPORT_NOW,
     SESSION_FILE,
     SUBENTRY_TYPE_OBJECT,
+    signal_messages_updated,
     signal_stored_updated,
 )
 from .eso_client import ESOClient
@@ -81,6 +86,8 @@ class ESORuntimeData:
     async_import: Callable[[datetime], Awaitable[None]]
     # Latest storage-bank series per object id: {"YYYY-MM": kWh at month end}
     stored: dict[str, dict[str, float]] = field(default_factory=dict)
+    # Latest inbox messages (see ESOClient.fetch_messages)
+    messages: list[dict] = field(default_factory=list)
 
 
 type ESOConfigEntry = ConfigEntry[ESORuntimeData]
@@ -138,6 +145,46 @@ def _random_daily_import_time(now: datetime) -> datetime:
     if now >= start:
         start += timedelta(days=1)
     return start + timedelta(seconds=random.randint(0, DAILY_IMPORT_WINDOW_SECONDS))
+
+
+# „Numatomas elektros atjungimų laikotarpis: 2026-06-02 nuo 09:00 iki 17:00 val."
+OUTAGE_WINDOW_RE = re.compile(
+    r"laikotarpis:\s*(\d{4}-\d{2}-\d{2})\s*nuo\s*(\d{1,2}:\d{2})\s*iki\s*(\d{1,2}:\d{2})"
+)
+
+
+def _classify_message(title: str, body: str) -> dict:
+    """Priskiria pranešimo tipą ir, jei rastas, atjungimo langą."""
+    low = title.lower()
+    result: dict = {"tipas": "kita"}
+    if "atjungim" in low:
+        result["tipas"] = "planuojamas_atjungimas"
+    if "baigti" in low or "pašalintas" in low or "atstatyt" in low:
+        result["tipas"] = "atjungimas_baigtas"
+    m = OUTAGE_WINDOW_RE.search(body)
+    if m:
+        result["atjungimas_nuo"] = f"{m.group(1)} {m.group(2)}"
+        result["atjungimas_iki"] = f"{m.group(1)} {m.group(3)}"
+    return result
+
+
+def _load_seen(path: str) -> list[str] | None:
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return None
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.warning("ESO: could not load seen-messages file: %s", e)
+        return None
+
+
+def _save_seen(path: str, seen: list[str]) -> None:
+    try:
+        with open(path, "w") as fh:
+            json.dump(seen[-200:], fh)
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.warning("ESO: could not save seen-messages file: %s", e)
 
 
 def _entry_objects(entry: ESOConfigEntry) -> list[dict]:
@@ -251,6 +298,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
                             hass, signal_stored_updated(entry.entry_id)
                         )
             _LOGGER.info("Import completed for %s", obj[CONF_NAME])
+        # Pranešimai — paskyros lygio (ne objekto), vienas kvietimas per importą.
+        # Pirmas paleidimas TIK užsėja matytų sąrašą (be įvykių) — kitaip visa
+        # istorinė dėžutė iššautų kaip „nauji" ir suplanuotų seniai praėjusius
+        # atjungimus.
+        if not all_failed:
+            try:
+                messages = await hass.async_add_executor_job(client.fetch_messages)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error("ESO messages fetch error: %s", err)
+            else:
+                if messages:
+                    entry.runtime_data.messages = messages
+                    async_dispatcher_send(
+                        hass, signal_messages_updated(entry.entry_id)
+                    )
+                    seen_path = hass.config.path(SEEN_MESSAGES_FILE)
+                    seen = await hass.async_add_executor_job(_load_seen, seen_path)
+                    ids = [m["id"] for m in messages]
+                    if seen is None:
+                        _LOGGER.info(
+                            "ESO: seen-messages seed (%d pranešimų, be įvykių)",
+                            len(ids),
+                        )
+                    else:
+                        for msg in reversed(messages):  # seniausi pirmi
+                            if msg["id"] in seen:
+                                continue
+                            data_ = {
+                                "id": msg["id"],
+                                "tema": msg["title"],
+                                "tekstas": msg["body"],
+                                "data": msg["date"],
+                                **_classify_message(msg["title"], msg["body"]),
+                            }
+                            _LOGGER.info(
+                                "ESO: naujas pranešimas [%s] %s",
+                                data_["tipas"],
+                                msg["title"],
+                            )
+                            hass.bus.async_fire(EVENT_NEW_MESSAGE, data_)
+                        ids = list(dict.fromkeys((seen + ids)))
+                    await hass.async_add_executor_job(_save_seen, seen_path, ids)
         # Range (backfill) imports are user-invoked one-offs — no silent retry.
         if all_failed and not retry and date_from is None:
             _LOGGER.warning("Fetch failed, will retry later")

@@ -21,13 +21,19 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_RETURNED, SUBENTRY_TYPE_OBJECT, signal_stored_updated
+from .const import (
+    CONF_RETURNED,
+    SUBENTRY_TYPE_OBJECT,
+    signal_messages_updated,
+    signal_stored_updated,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
-    """Add a bank sensor for every object that exports to the grid."""
+    """Add a bank sensor per exporting object and one account messages sensor."""
+    async_add_entities([ESOMessagesSensor(entry)])
     for subentry in entry.subentries.values():
         if subentry.subentry_type != SUBENTRY_TYPE_OBJECT:
             continue
@@ -37,6 +43,60 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> N
             [ESOStoredBankSensor(entry, subentry)],
             config_subentry_id=subentry.subentry_id,
         )
+
+
+class ESOMessagesSensor(RestoreSensor):
+    """Newest self-service inbox message; recent list in attributes."""
+
+    _attr_should_poll = False
+    _attr_icon = "mdi:email-alert"
+
+    def __init__(self, entry) -> None:
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_messages"
+        self._attr_name = "ESO pranešimai"
+        self._attr_extra_state_attributes = {}
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            self._attr_native_value = last.native_value
+        if (state := await self.async_get_last_state()) is not None:
+            self._attr_extra_state_attributes = {
+                key: state.attributes[key]
+                for key in ("data", "neperskaityti", "pranesimai")
+                if key in state.attributes
+            }
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                signal_messages_updated(self._entry.entry_id),
+                self._handle_update,
+            )
+        )
+        self._handle_update()
+
+    @callback
+    def _handle_update(self) -> None:
+        messages = self._entry.runtime_data.messages
+        if not messages:
+            return
+        newest = messages[0]
+        # Sensoriaus būsena ribojama 255 simbolių — tema visada telpa.
+        self._attr_native_value = newest["title"][:250]
+        self._attr_extra_state_attributes = {
+            "data": newest.get("date"),
+            "neperskaityti": sum(1 for m in messages if m.get("unread")),
+            "pranesimai": [
+                {
+                    "tema": m["title"],
+                    "data": m.get("date"),
+                    "tekstas": (m.get("body") or "")[:300],
+                }
+                for m in messages[:5]
+            ],
+        }
+        self.async_write_ha_state()
 
 
 class ESOStoredBankSensor(RestoreSensor):

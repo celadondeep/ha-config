@@ -396,6 +396,21 @@ views:
               - entity: input_number.electricity_price_sell
                 name: Pardavimo kaina
 
+          # ESO savitarnos pranešimai + automatinis rezervo planavimas
+          # planuotiems atjungimams (packages/eso_pranesimai.yaml).
+          - type: entities
+            title: ESO pranešimai
+            entities:
+              - entity: sensor.eso_pranesimai
+                name: Naujausias pranešimas
+                secondary_info: last-updated
+              - entity: input_boolean.eso_rezervo_planas
+                name: Rezervo planas (atjungimui)
+              - entity: input_datetime.eso_atjungimas_nuo
+                name: Atjungimas nuo
+              - entity: input_datetime.eso_atjungimas_iki
+                name: Atjungimas iki
+
       # ── 3. ESO PASAUGOJIMO BANKAS (kairė kolona po „Dabar" sekcijos) ──
       # ESO oficialūs įvado duomenys — TIK Modbus elektrinė (obj. 220588,
       # Šeškinių įvadas); Eimo įvado ESO paskyra dar nepajungta.

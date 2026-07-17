@@ -47,6 +47,17 @@ def signal_stored_updated(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_stored_updated"
 
 
+# Dispatcher signal fired after the inbox messages are refreshed
+def signal_messages_updated(entry_id: str) -> str:
+    return f"{DOMAIN}_{entry_id}_messages_updated"
+
+
+# Event fired on the HA bus for every message not seen before
+EVENT_NEW_MESSAGE = "eso_new_message"
+# Matytų pranešimų id sąrašas (kad įvykiai nešaudytų pakartotinai)
+SEEN_MESSAGES_FILE = "eso_seen_messages.json"
+
+
 # Service to trigger an on-demand import
 SERVICE_IMPORT_NOW = "import_now"
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
