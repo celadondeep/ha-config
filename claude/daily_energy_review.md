@@ -63,9 +63,9 @@ Pagrindiniai entities:
 | Baterijos round-trip efektyvumas | sensor.battery_roundtrip_efficiency |
 | Baterijos / inverterio nuostoliai (kWh) | sensor.battery_losses_total / sensor.inverter_losses_total |
 | Kabelio nuostoliai | sensor.cable_loss_power / sensor.kabelio_nuostoliai_siandien |
-| ESO įvado eksportas/importas (kaupiamieji nuo 2026-07-10) | sensor.eso_ivado_eksportas / sensor.eso_ivado_importas |
+| ESO įvado eksportas/importas (einamųjų banko metų, nuo bal. 1) | sensor.eso_ivado_eksportas / sensor.eso_ivado_importas |
 | ESO pasaugojimo banko likutis / vertė | sensor.eso_bankas_likutis / sensor.eso_bankas_verte |
-| Banko likutis stebėjimo pradžioje (rankinis) | input_number.eso_bankas_pradzia |
+| Banko rankinė korekcija (normaliai 0) | input_number.eso_bankas_pradzia |
 
 **ESO oficialūs įvado duomenys (Modbus elektrinė, obj. 220588):** integracija
 `custom_components/eso` kasdien 5:10–6:40 atsisiunčia vakarykštės paros
@@ -77,7 +77,9 @@ valandinius įvado skaitiklio duomenis į ilgalaikes statistikas
 **Jei vakarykštės paros taškų dar nėra** (importas nepavyko):
 `POST /api/services/eso/import_now` body `{}`, palauk ~60 s ir pertikrink;
 jei vis tiek nėra — pažymėk duomenų spragą ir vertink be ESO (integracija
-pati pakartos po 3 val.).
+pati pakartos po 3 val.). Ilgesnę spragą (kelios dienos) užpildyk tuo pačiu
+servisu su `{"date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD"}` —
+atsisiunčia po savaitę ir perrašo kaupiamąsias sumas nuosekliai.
 
 Eimo SE (2-a elektrinė) entities:
 
@@ -171,12 +173,15 @@ ml_model.py, weekly_report.py, battery_health.py), /config/automations.yaml.
       nuokrypį tik užrašyk; jei skirtumas sistemingai auga ar šokteli —
       flaguok kaip apskaitos klaidą (skaitiklio dreifas, sensoriaus defektas).
     - **Bankas:** ataskaitos skaičiuose užrašyk sensor.eso_bankas_likutis
-      (+ atributai: sukaupta / atsiimta nuo 2026-07-10) ir eso_bankas_verte.
+      (+ atributai: sukaupta / atsiimta banko metais) ir eso_bankas_verte.
+      Sensoriai skaičiuoja einamųjų banko metų (bal. 1 – kov. 31) langą
+      automatiškai — balandžio 1 nieko perstatinėti nereikia, tik patikrink,
+      kad likutis persijungė į naują langą, o input_number.eso_bankas_pradzia
+      (rankinė korekcija) liktų 0, nebent ESO savitarna rodo kitokį likutį.
       Sezoninis kontekstas: vasarą bankas PRIVALO augti — jei kelias dienas
       iš eilės nekyla, tai realizavimo problema (žr. REALIZAVIMO prioritetą).
       Banko kaupimo metai baigiasi kovo 31 (nepanaudotas kreditas nudega) —
-      nuo vasario ataskaitose vertink, ar liks neišnaudoto kredito, ir
-      balandžio 1 priminti perstatyti input_number.eso_bankas_pradzia.
+      nuo vasario ataskaitose vertink, ar liks neišnaudoto kredito.
     - **Atsipirkimas:** ESO eksporto faktas — nepriklausomas
       pv_sutaupyta_viso prielaidų (kWh vertė 0.25 €) patikrinimas; jei ESO
       duomenys rodo, kad reali eksporto/suvartojimo proporcija ženkliai
