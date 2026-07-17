@@ -68,6 +68,8 @@ Pagrindiniai entities:
 | ESO įvado eksportas/importas (einamųjų banko metų, nuo bal. 1) | sensor.eso_ivado_eksportas / sensor.eso_ivado_importas |
 | ESO pasaugojimo banko likutis / vertė | sensor.eso_bankas_likutis / sensor.eso_bankas_verte |
 | Oficialus ESO banko likutis (paskutinio uždaryto mėn., iš savitarnos) | sensor.eso_bankas_220588 |
+| Banko biudžetas iki kovo 31 (atributai: pritruks_kwh, pirmas_deficito_men, verdiktas). SVARBU: mėnesių lentelės pakete PRELIMINARIOS — mėnesiui užsidarius pakeisk jo įvertį faktu eso_bankas.yaml lentelėse (exp/imp) | sensor.eso_bankas_prognoze |
+| Baterijos ciklo nuostolis vs bankas 1:1 (kol bankas >20 kWh, savanoriškas ciklas nuostolingas; ciklas teisėtas tik perpildymo buferiui). Žiemos politika: bankui išsisėmus (prognozė ~lapkritis) vakaro iškrovimas vėl tampa vertingas | sensor.baterijos_ciklo_nuostolis |
 | Banko rankinė korekcija (normaliai 0) | input_number.eso_bankas_pradzia |
 
 **ESO oficialūs įvado duomenys (Modbus elektrinė, obj. 220588):** integracija

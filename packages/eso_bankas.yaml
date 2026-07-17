@@ -113,6 +113,103 @@ template:
           atsiimta_banko_metais: "{{ states('sensor.eso_ivado_importas') | float(0) | round(1) }}"
           korekcija: "{{ states('input_number.eso_bankas_pradzia') | float(0) }}"
 
+      # =====================================================================
+      # Banko biudžetas iki kovo 31 (banko metų pabaigos).
+      #
+      # Trajektorija: dabartinis likutis + likusių mėnesių (eksportas −
+      # importas), su mėnesio grindimis ties 0 (deficitinis mėnuo banko
+      # nenusuka į minusą — ESO taisyklė, patvirtinta 2026-04 faktu).
+      #
+      # MĖNESIŲ LENTELĖS — PRELIMINARIOS (2026-07-17): geg./birž. — faktas,
+      # liepa — ekstrapoliuota iš 16 d., kiti mėnesiai — įverčiai pagal LT
+      # sezoniškumą ir NE-elektrinį šildymą (importas žiemą ~10-13 kWh/d).
+      # Kasdienis auditas, mėnesiui užsidarius, turi pakeisti to mėnesio
+      # įvertį faktu ir pertikrinti likusius.
+      #
+      # Interpretacija: prognozė >0 kovo 31 = tiek kWh NUDEGS (per didelis
+      # kaupimas — vasaros pabaigoje galima drąsiau vartoti/mažiau saugoti);
+      # pritruks_kwh >0 = žiemą bankas išsisems ir tiek kWh reikės pirkti
+      # (kaupimas kritiškai svarbus, realizavimo prioritetas teisingas).
+      # =====================================================================
+      - name: "eso_bankas_prognoze"
+        unique_id: eso_bankas_prognoze
+        unit_of_measurement: "kWh"
+        icon: mdi:chart-sankey
+        state: >
+          {% set exp = {4:200, 5:194, 6:302, 7:210, 8:180, 9:120, 10:60, 11:15, 12:5, 1:10, 2:40, 3:120} %}
+          {% set imp = {4:150, 5:128, 6:98, 7:145, 8:110, 9:130, 10:200, 11:300, 12:380, 1:380, 2:300, 3:250} %}
+          {% set m0 = now().month %}
+          {% set likusi = 1 - (now().day / 30.4) %}
+          {% set men_sarasas = (range(m0, 13) | list) + [1, 2, 3] if m0 >= 4 else (range(m0, 4) | list) %}
+          {% set ns = namespace(bal = states('sensor.eso_bankas_likutis') | float(0)) %}
+          {% for m in men_sarasas %}
+            {% set frac = likusi if loop.first else 1.0 %}
+            {% set ns.bal = [ns.bal + (exp[m] - imp[m]) * frac, 0] | max %}
+          {% endfor %}
+          {{ ns.bal | round(0) }}
+        availability: >
+          {{ has_value('sensor.eso_bankas_likutis') }}
+        attributes:
+          pritruks_kwh: >-
+            {% set exp = {4:200, 5:194, 6:302, 7:210, 8:180, 9:120, 10:60, 11:15, 12:5, 1:10, 2:40, 3:120} %}
+            {% set imp = {4:150, 5:128, 6:98, 7:145, 8:110, 9:130, 10:200, 11:300, 12:380, 1:380, 2:300, 3:250} %}
+            {% set m0 = now().month %}
+            {% set likusi = 1 - (now().day / 30.4) %}
+            {% set men_sarasas = (range(m0, 13) | list) + [1, 2, 3] if m0 >= 4 else (range(m0, 4) | list) %}
+            {% set ns = namespace(bal = states('sensor.eso_bankas_likutis') | float(0), trukumas = 0.0) %}
+            {% for m in men_sarasas %}
+              {% set frac = likusi if loop.first else 1.0 %}
+              {% set naujas = ns.bal + (exp[m] - imp[m]) * frac %}
+              {% if naujas < 0 %}{% set ns.trukumas = ns.trukumas - naujas %}{% endif %}
+              {% set ns.bal = [naujas, 0] | max %}
+            {% endfor %}
+            {{ ns.trukumas | round(0) }}
+          pirmas_deficito_men: >-
+            {% set exp = {4:200, 5:194, 6:302, 7:210, 8:180, 9:120, 10:60, 11:15, 12:5, 1:10, 2:40, 3:120} %}
+            {% set imp = {4:150, 5:128, 6:98, 7:145, 8:110, 9:130, 10:200, 11:300, 12:380, 1:380, 2:300, 3:250} %}
+            {% set m0 = now().month %}
+            {% set likusi = 1 - (now().day / 30.4) %}
+            {% set men_sarasas = (range(m0, 13) | list) + [1, 2, 3] if m0 >= 4 else (range(m0, 4) | list) %}
+            {% set ns = namespace(bal = states('sensor.eso_bankas_likutis') | float(0), men = 0) %}
+            {% for m in men_sarasas %}
+              {% set frac = likusi if loop.first else 1.0 %}
+              {% set naujas = ns.bal + (exp[m] - imp[m]) * frac %}
+              {% if naujas < 0 and ns.men == 0 %}{% set ns.men = m %}{% endif %}
+              {% set ns.bal = [naujas, 0] | max %}
+            {% endfor %}
+            {{ ns.men if ns.men > 0 else 'nėra' }}
+          verdiktas: >-
+            {% set p = states('sensor.eso_bankas_prognoze') | float(-1) %}
+            {% if p > 50 %}NUDEGS ~{{ p | round(0) }} kWh kovo 31 — kaupiama per daug
+            {% elif p >= 0 and state_attr('sensor.eso_bankas_prognoze', 'pritruks_kwh') | float(0) < 50 %}Subalansuota
+            {% else %}DEFICITAS — banko pritrūks, kaupimas kritiškai svarbus{% endif %}
+
+      # Baterijos ciklo ekonomika esant pasaugojimo schemai: kol banko
+      # likutis > 0, kiekviena per bateriją apsukta kWh pralaimi prieš
+      # kelią „eksportas į banką → importas 1:1“ — praranda round-trip
+      # nuostolį (1−η)×kWh_vertė + nusidėvėjimą (~0.04 €/kWh: 6000 ciklų
+      # LFP, ~3500 € baterijos dalis / (6000 × 14.4 kWh)). Ciklas lieka
+      # BŪTINAS kaip perpildymo buferis (1 kW eksporto lubos) — čia
+      # vertinamas tik savanoriškas ciklas (vakaro iškrovimas į namus,
+      # krovimas žiemą). Žiemos politikai: kai bankas > 0 ir nėra
+      # perpildymo, baterijos geriau nesukti.
+      - name: "baterijos_ciklo_nuostolis"
+        unique_id: baterijos_ciklo_nuostolis
+        unit_of_measurement: "ct/kWh"
+        icon: mdi:battery-minus-outline
+        state: >
+          {% set rt = states('sensor.battery_roundtrip_efficiency') | float(90) / 100 %}
+          {% set verte = states('input_number.pv_kwh_verte') | float(0.25) %}
+          {{ (((1 - rt) * verte + 0.04) * 100) | round(1) }}
+        availability: >
+          {{ has_value('sensor.battery_roundtrip_efficiency') }}
+        attributes:
+          round_trip: "{{ states('sensor.battery_roundtrip_efficiency') }} %"
+          nusidevejimas_ct_kwh: "4.0"
+          verdiktas: >-
+            {% if states('sensor.eso_bankas_likutis') | float(0) > 20 %}Bankas dengia importą 1:1 — savanoriškas ciklas nuostolingas ({{ states('sensor.baterijos_ciklo_nuostolis') }} ct/kWh); ciklas pateisinamas tik perpildymo buferiui
+            {% else %}Bankas beveik tuščias — baterijos ciklas dengia realų pirkimą, apsimoka{% endif %}
+
       # Banko vertė eurais — kiekviena banko kWh atstoja pirkimą už pv_kwh_verte.
       - name: "eso_bankas_verte"
         unique_id: eso_bankas_verte

@@ -439,6 +439,10 @@ views:
                 name: Oficialus ESO likutis (uždaryto mėn.)
               - entity: sensor.eso_bankas_verte
                 name: Banko vertė
+              - entity: sensor.eso_bankas_prognoze
+                name: Prognozė kovo 31 (biudžetas)
+              - entity: sensor.baterijos_ciklo_nuostolis
+                name: Baterijos ciklo nuostolis
               - entity: sensor.eso_ivado_eksportas
                 name: Eksportuota banko metais (nuo bal. 1)
               - entity: sensor.eso_ivado_importas
