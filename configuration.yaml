@@ -42,7 +42,7 @@ lovelace:
       filename: lovelace/energijos_valdymas.yaml
     eimo-energija:
       mode: yaml
-      title: Eimo SE energija
+      title: Eimo SE
       icon: mdi:solar-power-variant
       show_in_sidebar: true
       filename: lovelace/eimo.yaml
