@@ -348,6 +348,20 @@ automation:
       # Tikslinis SOC iš AppDaemon (energy_manager_eimo). Clamp į slot SOC min 6%.
       target_soc: "{{ [states('sensor.energy_manager_eimo_target_soc') | float(100) | round(0) | int, 6] | max }}"
       discharge_current: 100   # A, slot iškrovimo srovė (max 220) — derinama pagal poreikį
+      # 7 punktas (2026-07-18): iškrovimo PABAIGA taikoma į saulėtekį (Eimo
+      # neturi morning_on sensoriaus — naudojamas sun.sun next_rising), kad
+      # baterija kuo trumpiau stovėtų ties minimumu. Sparta ~1 kWh/val +
+      # 0.5 val atsarga; itin saulėtai dienai (>22 kWh) baigiama ~1 val
+      # anksčiau. Startas ne ankstesnis nei 21:00. 1% SOC ≈ 0.1434 kWh.
+      discharge_start: >-
+        {% set m = as_datetime(state_attr('sun.sun', 'next_rising')) %}
+        {% set morning = m.astimezone() if m is not none
+           else (now() + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0) %}
+        {% set hours = ((current_soc - target_soc) * 0.1434 / 1.0) + 0.5
+           + (1.0 if forecast_tomorrow > 22 else 0.0) %}
+        {% set start = morning - timedelta(hours=hours) %}
+        {% set earliest = now().replace(hour=21, minute=0, second=0, microsecond=0) %}
+        {{ (start if start > earliest else earliest).strftime('%H:%M') }}
     action:
       - choose:
           # 1) Audros/ESO režimas — neiškrauti, baterija rezervas namams
@@ -389,7 +403,7 @@ automation:
                 target:
                   entity_id: text.inverter_control_1033300254190112_slot1_discharge_time
                 data:
-                  value: "21:00-07:30"
+                  value: "{{ discharge_start }}-07:30"
               - service: switch.turn_on
                 target:
                   entity_id: switch.inverter_control_1033300254190112_slot1_discharge
@@ -404,7 +418,8 @@ automation:
                   message: >
                     Rytojaus prognozė: {{ forecast_tomorrow }} kWh.
                     Iškraunam: SOC {{ current_soc }}% → {{ target_soc }}%.
-                    Slot1 21:00–07:30, srovė {{ discharge_current }}A, cut-off {{ target_soc }}%.
+                    Slot1 {{ discharge_start }}–07:30 (pabaiga taikoma į
+                    saulėtekį), srovė {{ discharge_current }}A, cut-off {{ target_soc }}%.
         # 3) SOC jau ≤ tikslo — iškrauti nereikia, baterija lieka namams
         default:
           - service: switch.turn_off
@@ -538,15 +553,21 @@ automation:
         {{ is_state('switch.inverter_control_1033300254190112_slot1_discharge', 'on')
            and is_state('text.inverter_control_1033300254190112_slot1_discharge_time', '07:00-19:30')
            and is_state('select.inverter_control_1033300254190112_storage_mode', 'Self-Use') }}
+      # Dabartinis sloto cut-off: ≥90 = „viršūnės skutimo" variantas
+      # (7 punktas), <90 = pertekliaus (floor) variantas.
+      slot_cutoff: "{{ states('number.inverter_control_1033300254190112_slot1_discharge_soc') | float(0) }}"
     action:
       - choose:
-          # 1) Yra perteklius (>1 kWh netilps) ir yra ką atiduoti (SOC ≥
-          #    floor+1) — įjungti dienos iškrovimą, jei dar nesukonfigūruotas
-          #    (cloud neperrašinėjam kas 15 min).
+          # 1) Yra perteklius (>1 kWh netilps) ir yra ką atiduoti — įjungti
+          #    dienos iškrovimą, jei dar nesukonfigūruotas (cloud
+          #    neperrašinėjam kas 15 min). Gali perimti viršūnės skutimo
+          #    slotą (slot_cutoff >= 90). Re-arm slenkstis floor+5
+          #    (7 punktas): nuo dugno pirma pakylama ~5 pp iš saulės.
           - conditions:
               - condition: template
                 value_template: >
-                  {{ surplus > 1 and soc >= floor + 1 and not daytime_slot_active }}
+                  {{ surplus > 1 and soc >= floor + 5
+                     and (not daytime_slot_active or slot_cutoff >= 90) }}
             sequence:
               - service: number.set_value
                 target:
@@ -579,13 +600,69 @@ automation:
                     (baterija + namai + 1 kW eksportas). Baterija {{ soc }}%.
                     Self-Use + slot: iškraunama į tinklą
                     iki ~{{ floor }}% (slot 07:00–19:30, 150A).
-          # 2) Pertekliaus nebėra (<0.2 kWh) — išjungti dienos slotą, baterija
-          #    kaupia PV link target_soc (Self-Use be sloto neeksportuoja iš
-          #    baterijos). Vakare 20:00 logika perima kaip įprasta.
+          # 2) VIRŠŪNĖS SKUTIMAS (7 punktas, 2026-07-18): SOC ≥ 91% — laikyti
+          #    slotą aktyvų su cut-off 90, net jei pertekliaus kriterijus jo
+          #    neplanavo. Mažina laiką ties 100% ir sugeria debesų
+          #    susitelkimų svyravimus.
           - conditions:
               - condition: template
                 value_template: >
-                  {{ surplus < 0.2 and daytime_slot_active }}
+                  {{ soc >= 91 and not daytime_slot_active }}
+            sequence:
+              - service: number.set_value
+                target:
+                  entity_id: number.inverter_control_1033300254190112_slot1_discharge_soc
+                data:
+                  value: 90
+              - service: number.set_value
+                target:
+                  entity_id: number.inverter_control_1033300254190112_slot1_discharge_current
+                data:
+                  value: 150
+              - service: text.set_value
+                target:
+                  entity_id: text.inverter_control_1033300254190112_slot1_discharge_time
+                data:
+                  value: "07:00-19:30"
+              - service: switch.turn_on
+                target:
+                  entity_id: switch.inverter_control_1033300254190112_slot1_discharge
+              - service: select.select_option
+                target:
+                  entity_id: select.inverter_control_1033300254190112_storage_mode
+                data:
+                  option: "Self-Use"
+              - service: notify.persistent_notification
+                data:
+                  title: "Eimo - Viršūnės skutimas 90–100% ✂️🔋"
+                  message: >
+                    Baterija {{ soc }}% — slotas aktyvuotas su cut-off 90%:
+                    viršum 90% laikomas kiekis skutamas į tinklą.
+          # 3) DUGNO ATSISTATYMAS (7 punktas): floor variantas pasiekė dugną
+          #    — išjungti slotą, kad saulė pirma pakeltų SOC ~5 pp (re-arm
+          #    šakoje 1 reikalauja floor+5); tik tada vėl eksportas.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ daytime_slot_active and slot_cutoff < 90 and soc <= floor }}
+            sequence:
+              - service: switch.turn_off
+                target:
+                  entity_id: switch.inverter_control_1033300254190112_slot1_discharge
+              - service: notify.persistent_notification
+                data:
+                  title: "Eimo - Dugnas pasiektas, kaupiam 🔋"
+                  message: >
+                    Baterija {{ soc }}% ties dugnu {{ floor }}%. Slotas
+                    išjungtas — saulė pirma pakels iki {{ floor + 5 }}%,
+                    tada iškrovimas atsinaujins.
+          # 4) Pertekliaus nebėra (<0.2 kWh) — išjungti floor slotą, baterija
+          #    kaupia PV link target_soc. Viršūnės skutimo varianto
+          #    (cut-off 90) NELIEČIA. Vakare 20:00 logika perima kaip įprasta.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ surplus < 0.2 and daytime_slot_active and slot_cutoff < 90 }}
             sequence:
               - service: switch.turn_off
                 target:

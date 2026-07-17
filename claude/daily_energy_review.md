@@ -70,6 +70,21 @@ Pagrindiniai entities:
 | Oficialus ESO banko likutis (paskutinio uždaryto mėn., iš savitarnos) | sensor.eso_bankas_220588 |
 | Banko biudžetas iki kovo 31 (atributai: pritruks_kwh, pirmas_deficito_men, verdiktas). SVARBU: mėnesių lentelės pakete PRELIMINARIOS — mėnesiui užsidarius pakeisk jo įvertį faktu eso_bankas.yaml lentelėse (exp/imp) | sensor.eso_bankas_prognoze |
 | Baterijos ciklo nuostolis vs bankas 1:1 (kol bankas >20 kWh, savanoriškas ciklas nuostolingas; ciklas teisėtas tik perpildymo buferiui). Žiemos politika: bankui išsisėmus (prognozė ~lapkritis) vakaro iškrovimas vėl tampa vertingas | sensor.baterijos_ciklo_nuostolis |
+
+**Baterijos tausojimo politika (7 punktas, 2026-07-18)** — audituojant vertink:
+- **Viršūnės skutimas:** SOC ≥ 91 % dieną → iškrovimo slotas su cut-off 90 %
+  (abi elektrinės, `solis_daytime_feedin_tou` 2 šaka / `solis_daytime_discharge_eimo`
+  2 šaka). Tikrink, kiek valandų per dieną SOC buvo 95–100 % — turi mažėti.
+- **Naktinio iškrovimo taikymas į gamybos pradžią:** slot startas skaičiuojamas,
+  kad pabaiga sutaptų su morning_on (Solis) / saulėtekiu (Eimo); itin saulėtai
+  dienai (>22 kWh) ~1 val anksčiau. Tikrink: ar SOC min pasiekiamas likus <1 val
+  iki gamybos (ne 23:00 vakare). Laukimo metu Solis inverteris išjungiamas
+  (night_shutdown „waiting" šaka), pažadinamas ties slot startu.
+- **Dugno atsistatymas:** pasiekus floor slotas išjungiamas, saulė kelia +5 pp
+  (re-arm floor+5; Solis eksporto resume riba 15 %). Tikrink, kad nebūtų
+  churn ties dugnu.
+- **ESP32 boileris (kai bus pajungtas):** SOC > 95 % perteklius į vandenį —
+  energy_manager boilerio logika jau yra (SOC_HIGH_THRESHOLD).
 | Banko rankinė korekcija (normaliai 0) | input_number.eso_bankas_pradzia |
 
 **ESO oficialūs įvado duomenys (Modbus elektrinė, obj. 220588):** integracija
