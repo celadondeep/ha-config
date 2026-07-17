@@ -63,6 +63,21 @@ Pagrindiniai entities:
 | Baterijos round-trip efektyvumas | sensor.battery_roundtrip_efficiency |
 | Baterijos / inverterio nuostoliai (kWh) | sensor.battery_losses_total / sensor.inverter_losses_total |
 | Kabelio nuostoliai | sensor.cable_loss_power / sensor.kabelio_nuostoliai_siandien |
+| ESO įvado eksportas/importas (kaupiamieji nuo 2026-07-10) | sensor.eso_ivado_eksportas / sensor.eso_ivado_importas |
+| ESO pasaugojimo banko likutis / vertė | sensor.eso_bankas_likutis / sensor.eso_bankas_verte |
+| Banko likutis stebėjimo pradžioje (rankinis) | input_number.eso_bankas_pradzia |
+
+**ESO oficialūs įvado duomenys (Modbus elektrinė, obj. 220588):** integracija
+`custom_components/eso` kasdien 5:10–6:40 atsisiunčia vakarykštės paros
+valandinius įvado skaitiklio duomenis į ilgalaikes statistikas
+`eso:energy_consumed_220588` (P+, importas) ir `eso:energy_returned_220588`
+(P-, eksportas). Jų nėra kaip entities — skaityk tiesiai iš
+`home-assistant_v2.db` (TIK read-only): `statistics_meta.statistic_id` →
+`statistics` (state = valandos kWh, sum = kaupiamoji). Laikai UTC.
+**Jei vakarykštės paros taškų dar nėra** (importas nepavyko):
+`POST /api/services/eso/import_now` body `{}`, palauk ~60 s ir pertikrink;
+jei vis tiek nėra — pažymėk duomenų spragą ir vertink be ESO (integracija
+pati pakartos po 3 val.).
 
 Eimo SE (2-a elektrinė) entities:
 
@@ -147,6 +162,27 @@ ml_model.py, weekly_report.py, battery_health.py), /config/automations.yaml.
    (~3 kWh/d įjungtam inverteriui) — flaguok. battery_health dienos
    efektyvumas (iškrauta/įkrauta per dieną) iškreiptas SOC pokyčio —
    lifetime sensoriai patikimesni.
+10. **ESO apskaitos kryžminė patikra ir pasaugojimo bankas (Modbus įvadas).**
+    - **Kryžminė patikra:** vakarykštės paros ESO sumos (Σ valandų iš
+      statistikų) vs inverterio skaitikliai: ESO P+ vs
+      `today_energy_imported_from_grid`, ESO P- vs `today_energy_fed_into_grid`
+      (paskutinės vakarykštės reikšmės iš istorijos). Tolerancija ~5 % arba
+      0.3 kWh (skaitikliai skirtingose vietose, kabelio nuostoliai). Vienkartinį
+      nuokrypį tik užrašyk; jei skirtumas sistemingai auga ar šokteli —
+      flaguok kaip apskaitos klaidą (skaitiklio dreifas, sensoriaus defektas).
+    - **Bankas:** ataskaitos skaičiuose užrašyk sensor.eso_bankas_likutis
+      (+ atributai: sukaupta / atsiimta nuo 2026-07-10) ir eso_bankas_verte.
+      Sezoninis kontekstas: vasarą bankas PRIVALO augti — jei kelias dienas
+      iš eilės nekyla, tai realizavimo problema (žr. REALIZAVIMO prioritetą).
+      Banko kaupimo metai baigiasi kovo 31 (nepanaudotas kreditas nudega) —
+      nuo vasario ataskaitose vertink, ar liks neišnaudoto kredito, ir
+      balandžio 1 priminti perstatyti input_number.eso_bankas_pradzia.
+    - **Atsipirkimas:** ESO eksporto faktas — nepriklausomas
+      pv_sutaupyta_viso prielaidų (kWh vertė 0.25 €) patikrinimas; jei ESO
+      duomenys rodo, kad reali eksporto/suvartojimo proporcija ženkliai
+      skiriasi nuo prielaidų, pasiūlyk koreguoti atsipirkimo parametrus.
+    - Pastaba: ESO objektas dengia TIK Modbus elektrinės įvadą; Eimo įvado
+      ESO paskyra dar nepajungta — Eimo pusėje šios patikros nedaryk.
 
 ## Patobulinimų įgyvendinimas
 

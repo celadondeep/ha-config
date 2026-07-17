@@ -1,5 +1,6 @@
 # Jautrūs failai — niekada neversionuoti (auth tokenai, slaptažodžiai)
 secrets.yaml
+eso_session.json
 .storage/
 .cloud/
 .claude/

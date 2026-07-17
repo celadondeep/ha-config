@@ -60,9 +60,11 @@ from .eso_client import ESOClient
 
 _LOGGER = logging.getLogger(__name__)
 
+# Langas 5:10–6:40 — kasdienis energijos auditas startuoja 7:10 ir tikisi
+# jau importuotų vakarykštės paros ESO duomenų.
 DAILY_IMPORT_WINDOW_START_HOUR = 5
 DAILY_IMPORT_WINDOW_START_MINUTE = 10
-DAILY_IMPORT_WINDOW_SECONDS = 2 * 3600
+DAILY_IMPORT_WINDOW_SECONDS = 90 * 60
 
 
 @dataclass

@@ -1,0 +1,80 @@
+# =============================================================================
+#  ESO pasaugojimo bankas — Šeškinių (Modbus) elektrinės įvadas, obj. 220588.
+#  Duomenų šaltinis: custom_components/eso ilgalaikės statistikos
+#  (eso:energy_consumed_220588 / eso:energy_returned_220588), kaupiamos nuo
+#  2026-07-10. Ankstesnė banko istorija įvedama ranka per
+#  input_number.eso_bankas_pradzia (likutis 2026-07-10, iš ESO savitarnos).
+#
+#  Pasaugojimo schema: eksportuotos kWh keliauja į banką, importas dengiamas
+#  iš banko 1:1 (mokamas tik mėnesinis abonentas). Kaupimo metai — bal. 1 iki
+#  kov. 31: kasmet balandžio 1 d. reikia perstatyti eso_bankas_pradzia į
+#  naują likutį (nepanaudotas kreditas nudega) — primena kasdienis auditas.
+# =============================================================================
+
+input_number:
+  eso_bankas_pradzia:
+    name: "ESO banko likutis stebėjimo pradžioje (2026-07-10)"
+    min: 0
+    max: 20000
+    step: 0.1
+    mode: box
+    unit_of_measurement: "kWh"
+    icon: mdi:bank
+
+sql:
+  # Paskutinė kaupiamoji suma iš ESO ilgalaikių statistikų (nuo 2026-07-10).
+  - name: "eso_ivado_eksportas"
+    unique_id: eso_ivado_eksportas
+    query: >-
+      SELECT ROUND(s.sum, 2) AS suma FROM statistics s
+      JOIN statistics_meta m ON s.metadata_id = m.id
+      WHERE m.statistic_id = 'eso:energy_returned_220588'
+      ORDER BY s.start_ts DESC LIMIT 1;
+    column: "suma"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total
+    icon: mdi:transmission-tower-import
+
+  - name: "eso_ivado_importas"
+    unique_id: eso_ivado_importas
+    query: >-
+      SELECT ROUND(s.sum, 2) AS suma FROM statistics s
+      JOIN statistics_meta m ON s.metadata_id = m.id
+      WHERE m.statistic_id = 'eso:energy_consumed_220588'
+      ORDER BY s.start_ts DESC LIMIT 1;
+    column: "suma"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total
+    icon: mdi:transmission-tower-export
+
+template:
+  - sensor:
+      # Banko likutis = pradinis likutis + eksportuota − atsiimta (nuo 2026-07-10).
+      - name: "eso_bankas_likutis"
+        unique_id: eso_bankas_likutis
+        unit_of_measurement: "kWh"
+        icon: mdi:bank
+        state: >
+          {% set pradzia = states('input_number.eso_bankas_pradzia') | float(0) %}
+          {% set eksp = states('sensor.eso_ivado_eksportas') | float(0) %}
+          {% set imp = states('sensor.eso_ivado_importas') | float(0) %}
+          {{ ([pradzia + eksp - imp, 0] | max) | round(1) }}
+        availability: >
+          {{ has_value('sensor.eso_ivado_importas') }}
+        attributes:
+          sukaupta_nuo_2026_07_10: "{{ states('sensor.eso_ivado_eksportas') | float(0) | round(1) }}"
+          atsiimta_nuo_2026_07_10: "{{ states('sensor.eso_ivado_importas') | float(0) | round(1) }}"
+          pradinis_likutis: "{{ states('input_number.eso_bankas_pradzia') | float(0) }}"
+
+      # Banko vertė eurais — kiekviena banko kWh atstoja pirkimą už pv_kwh_verte.
+      - name: "eso_bankas_verte"
+        unique_id: eso_bankas_verte
+        unit_of_measurement: "€"
+        icon: mdi:cash-lock
+        state: >
+          {{ (states('sensor.eso_bankas_likutis') | float(0)
+              * states('input_number.pv_kwh_verte') | float(0.25)) | round(0) }}
+        availability: >
+          {{ has_value('sensor.eso_bankas_likutis') }}
