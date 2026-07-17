@@ -39,6 +39,7 @@ from .const import (
     ATTR_DATE_FROM,
     ATTR_DATE_TO,
     EVENT_NEW_MESSAGE,
+    EVENT_PLANNED_OUTAGE,
     SEEN_MESSAGES_FILE,
     CONF_CONSUMED,
     CONF_COST,
@@ -88,6 +89,8 @@ class ESORuntimeData:
     stored: dict[str, dict[str, float]] = field(default_factory=dict)
     # Latest inbox messages (see ESOClient.fetch_messages)
     messages: list[dict] = field(default_factory=list)
+    # Latest planned outages from the dashboard (see fetch_planned_outages)
+    outages: dict = field(default_factory=dict)
 
 
 type ESOConfigEntry = ConfigEntry[ESORuntimeData]
@@ -340,6 +343,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
                             hass.bus.async_fire(EVENT_NEW_MESSAGE, data_)
                         ids = list(dict.fromkeys((seen + ids)))
                     await hass.async_add_executor_job(_save_seen, seen_path, ids)
+            # Planuojami atjungimai — PIRMINIS šaltinis rezervo planavimui
+            # (dashboardo blokas; pranešimų tekstai lieka atsarginiu keliu).
+            try:
+                outages = await hass.async_add_executor_job(
+                    client.fetch_planned_outages
+                )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error("ESO outages fetch error: %s", err)
+            else:
+                entry.runtime_data.outages = outages
+                async_dispatcher_send(
+                    hass, signal_messages_updated(entry.entry_id)
+                )
+                if outages.get("windows"):
+                    seen_path = hass.config.path(SEEN_MESSAGES_FILE)
+                    seen = await hass.async_add_executor_job(_load_seen, seen_path) or []
+                    new_ids = []
+                    for w in outages["windows"]:
+                        key = f"outage:{w['nuo']}"
+                        if key in seen:
+                            continue
+                        _LOGGER.info(
+                            "ESO: dashboarde rastas planuojamas atjungimas %s – %s",
+                            w["nuo"],
+                            w["iki"],
+                        )
+                        hass.bus.async_fire(
+                            EVENT_PLANNED_OUTAGE,
+                            {
+                                "atjungimas_nuo": w["nuo"],
+                                "atjungimas_iki": w["iki"],
+                                "tekstas": outages.get("raw", ""),
+                            },
+                        )
+                        new_ids.append(key)
+                    if new_ids:
+                        await hass.async_add_executor_job(
+                            _save_seen, seen_path, seen + new_ids
+                        )
         # Range (backfill) imports are user-invoked one-offs — no silent retry.
         if all_failed and not retry and date_from is None:
             _LOGGER.warning("Fetch failed, will retry later")

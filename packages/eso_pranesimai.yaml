@@ -39,6 +39,47 @@ input_datetime:
     icon: mdi:transmission-tower
 
 automation:
+  # PIRMINIS atjungimų šaltinis (2026-07-18, vartotojo pageidavimas):
+  # savitarnos dashboardo blokas „Planuojami elektros atjungimai" —
+  # integracija jį tikrina per kasdienį importą ir naujam langui kelia
+  # eso_planned_outage įvykį. Pranešimų tekstų kelias (žemiau) lieka
+  # atsarginis — abu nustato tą patį langą, konflikto nėra.
+  - id: eso_atjungimas_is_dashboardo
+    alias: "ESO - Planuojamas atjungimas (dashboardo blokas)"
+    trigger:
+      - platform: event
+        event_type: eso_planned_outage
+    condition:
+      - condition: template
+        value_template: >
+          {{ as_timestamp(trigger.event.data.atjungimas_nuo ~ ':00', 0)
+             > as_timestamp(now()) }}
+    action:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.eso_atjungimas_nuo
+        data:
+          datetime: "{{ trigger.event.data.atjungimas_nuo }}:00"
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.eso_atjungimas_iki
+        data:
+          datetime: "{{ trigger.event.data.atjungimas_iki }}:00"
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.eso_rezervo_planas
+      - service: notify.persistent_notification
+        data:
+          title: "ESO atjungimas suplanuotas (dashboardas) — rezervas paruoštas 📅⚡"
+          message: >
+            Savitarnos dashboarde rastas planuojamas atjungimas
+            {{ trigger.event.data.atjungimas_nuo }} –
+            {{ trigger.event.data.atjungimas_iki }}.
+            Rezervo režimas įsijungs automatiškai likus ~14 val. —
+            atjungimo dienai baterija bus kaupiama pilna.
+    mode: queued
+    max: 5
+
   - id: eso_naujas_pranesimas
     alias: "ESO - Naujas savitarnos pranešimas"
     description: >

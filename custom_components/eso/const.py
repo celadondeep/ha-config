@@ -54,6 +54,8 @@ def signal_messages_updated(entry_id: str) -> str:
 
 # Event fired on the HA bus for every message not seen before
 EVENT_NEW_MESSAGE = "eso_new_message"
+# Event fired for every planned-outage window newly seen on the dashboard
+EVENT_PLANNED_OUTAGE = "eso_planned_outage"
 # Matytų pranešimų id sąrašas (kad įvykiai nešaudytų pakartotinai)
 SEEN_MESSAGES_FILE = "eso_seen_messages.json"
 

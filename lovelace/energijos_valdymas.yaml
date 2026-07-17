@@ -401,9 +401,11 @@ views:
           - type: entities
             title: ESO pranešimai
             entities:
+              - entity: sensor.eso_atjungimai
+                name: Planuojami atjungimai
+                secondary_info: last-updated
               - entity: sensor.eso_pranesimai
                 name: Naujausias pranešimas
-                secondary_info: last-updated
               - entity: input_boolean.eso_rezervo_planas
                 name: Rezervo planas (atjungimui)
               - entity: input_datetime.eso_atjungimas_nuo

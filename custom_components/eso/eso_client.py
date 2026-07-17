@@ -21,6 +21,7 @@ GENERATION_URL = "https://mano.eso.lt/consumption?ajax_form=1&_wrapper_format=dr
 # rodo lazyLoadTableListReload.url=/messages?reload=1, kuris grąžina Drupal
 # AJAX komandas su sąrašo HTML "insert" komandoje.
 MESSAGES_URL = "https://mano.eso.lt/messages?reload=1"
+DASHBOARD_URL = "https://mano.eso.lt/dashboard"
 TFA_FORM_ID = "gpc_tfa_login_auth_form"
 CONSUMPTION_FORM_ID = "eso_consumption_history_form"
 
@@ -569,6 +570,49 @@ class ESOClient:
             if len(messages) >= limit:
                 break
         return messages
+
+    def fetch_planned_outages(self) -> dict:
+        """Return planned outages from the dashboard block.
+
+        {"raw": block text, "windows": [{"nuo": "YYYY-MM-DD HH:MM", "iki": ...}]}
+        The empty state shows „nenumatoma"; the populated markup is unknown
+        until a real outage appears, so parsing is deliberately tolerant:
+        any date found becomes a window (with 08:00–18:00 fallback when the
+        times are missing)."""
+        if not self.cookies:
+            return {"raw": "", "windows": []}
+        try:
+            response = self.session.get(DASHBOARD_URL, allow_redirects=True)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            _LOGGER.error("ESO dashboard fetch error: %s", e)
+            return {"raw": "", "windows": []}
+        html = response.text
+        i = html.find("planned_disconnects_block")
+        if i < 0:
+            _LOGGER.warning("ESO: dashboard has no planned-disconnects block")
+            return {"raw": "", "windows": []}
+        segment = html[i:]
+        j = segment.find("block-content-box", 100)
+        segment = segment[:j] if j > 0 else segment[:8000]
+        text = re.sub(r"<script.*?</script>", " ", segment, flags=re.DOTALL)
+        text = unescape(re.sub(r"<[^>]+>", " ", text))
+        text = re.sub(r"\s+", " ", text).strip()
+        windows: list[dict] = []
+        if "nenumatoma" not in text.lower():
+            for m in re.finditer(
+                r"(\d{4}-\d{2}-\d{2})"
+                r"(?:\D{0,40}?(\d{1,2}:\d{2})\D{0,20}?(\d{1,2}:\d{2}))?",
+                text,
+            ):
+                date = m.group(1)
+                windows.append(
+                    {
+                        "nuo": f"{date} {m.group(2) or '08:00'}",
+                        "iki": f"{date} {m.group(3) or '18:00'}",
+                    }
+                )
+        return {"raw": text[:600], "windows": windows}
 
     def get_dataset(self, obj: str) -> dict | None:
         if obj not in self.dataset:
