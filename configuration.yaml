@@ -36,7 +36,7 @@ lovelace:
   dashboards:
     energijos-valdymas:
       mode: yaml
-      title: Energijos valdymas
+      title: Šeškiniai SE
       icon: mdi:solar-power
       show_in_sidebar: true
       filename: lovelace/energijos_valdymas.yaml
