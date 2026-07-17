@@ -450,6 +450,115 @@ views:
               - entity: input_number.eso_bankas_pradzia
                 name: Rankinė korekcija (normaliai 0)
 
+          # Banko metų trajektorija: faktiniai ESO mėnesių likučiai +
+          # prognozė iki kovo 31 + kumuliacinis trūkumas (kiek teks pirkti
+          # bankui išsisėmus). EXP/IMP lentelės TURI SUTAPTI su
+          # packages/eso_bankas.yaml (eso_bankas_prognoze) — auditas,
+          # atnaujinęs paketo lenteles faktu, atnaujina ir čia.
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Banko metai — likutis ir žiemos trūkumas
+            graph_span: 1y
+            span:
+              start: year
+              offset: +3month
+            update_interval: 1h
+            now:
+              show: true
+              label: šiandien
+            apex_config:
+              chart:
+                height: 260
+                animations:
+                  enabled: false
+              legend:
+                show: true
+            yaxis:
+              - id: kwh
+                min: 0
+                decimals: 0
+                apex_config:
+                  title:
+                    text: 'kWh'
+            series:
+              # Faktiniai ESO uždarytų mėnesių likučiai (serija atribute).
+              - entity: sensor.eso_bankas_220588
+                name: Faktas (ESO)
+                yaxis_id: kwh
+                color: '#4caf50'
+                stroke_width: 3
+                extend_to: false
+                show:
+                  extremas: false
+                data_generator: |
+                  const s = entity.attributes.serija || {};
+                  const now = new Date();
+                  const bankStart = (now.getMonth() + 1 >= 4)
+                    ? `${now.getFullYear()}-04`
+                    : `${now.getFullYear() - 1}-04`;
+                  const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                  return Object.keys(s).sort()
+                    .filter(k => k >= bankStart && k < cur)
+                    .map(k => {
+                      const [y, m] = k.split('-').map(Number);
+                      return [new Date(y, m, 1).getTime(), s[k]];
+                    });
+              # Prognozė nuo dabar iki kovo 31 (lentelės = eso_bankas.yaml).
+              - entity: sensor.eso_bankas_likutis
+                name: Prognozė
+                yaxis_id: kwh
+                color: '#2196f3'
+                stroke_width: 2
+                extend_to: false
+                show:
+                  extremas: false
+                data_generator: |
+                  const EXP = {4:200,5:194,6:302,7:210,8:180,9:120,10:60,11:15,12:5,1:10,2:40,3:120};
+                  const IMP = {4:150,5:128,6:98,7:145,8:110,9:130,10:200,11:300,12:380,1:380,2:300,3:250};
+                  const now = new Date();
+                  let bal = Number(entity.state) || 0;
+                  let y = now.getFullYear(), m = now.getMonth() + 1;
+                  const endY = (m >= 4) ? y + 1 : y;
+                  let frac = Math.max(0, 1 - now.getDate() / 30.4);
+                  const pts = [[now.getTime(), bal]];
+                  while (!(y === endY && m === 4)) {
+                    bal = Math.max(0, bal + (EXP[m] - IMP[m]) * frac);
+                    frac = 1;
+                    m += 1; if (m === 13) { m = 1; y += 1; }
+                    pts.push([new Date(y, m - 1, 1).getTime(), bal]);
+                  }
+                  return pts;
+              # Kumuliacinis trūkumas — kiek kWh teks pirkti iš tinklo.
+              - entity: sensor.eso_bankas_likutis
+                name: Trūkumas (pirkimas)
+                yaxis_id: kwh
+                color: '#e53935'
+                stroke_width: 2
+                curve: stepline
+                extend_to: false
+                show:
+                  extremas: false
+                data_generator: |
+                  const EXP = {4:200,5:194,6:302,7:210,8:180,9:120,10:60,11:15,12:5,1:10,2:40,3:120};
+                  const IMP = {4:150,5:128,6:98,7:145,8:110,9:130,10:200,11:300,12:380,1:380,2:300,3:250};
+                  const now = new Date();
+                  let bal = Number(entity.state) || 0;
+                  let trukumas = 0;
+                  let y = now.getFullYear(), m = now.getMonth() + 1;
+                  const endY = (m >= 4) ? y + 1 : y;
+                  let frac = Math.max(0, 1 - now.getDate() / 30.4);
+                  const pts = [[now.getTime(), 0]];
+                  while (!(y === endY && m === 4)) {
+                    const naujas = bal + (EXP[m] - IMP[m]) * frac;
+                    if (naujas < 0) { trukumas += -naujas; }
+                    bal = Math.max(0, naujas);
+                    frac = 1;
+                    m += 1; if (m === 13) { m = 1; y += 1; }
+                    pts.push([new Date(y, m - 1, 1).getTime(), Math.round(trukumas)]);
+                  }
+                  return pts;
+
       # Grafikai per visą puslapio plotį (abu stulpeliai).
       - type: grid
         column_span: 2
