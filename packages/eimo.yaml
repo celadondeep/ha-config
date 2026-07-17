@@ -233,6 +233,22 @@ template:
           {{ (states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) | round(1) }}
         availability: >
           {{ states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') not in ['unavailable', 'unknown', ''] }}
+        # Nusidėvėjimo tempas nuo paleidimo ~2026-02-01 ir projekcija iki
+        # 6000 ciklų (tipinis LFP resursas iki 80 % SOH).
+        attributes:
+          ikrauta_kwh: "{{ states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) | round(0) }}"
+          dienos_nuo_pajungimo: "{{ ((as_timestamp(now()) - as_timestamp('2026-02-01 12:00:00+02:00')) / 86400) | round(0) }}"
+          ciklai_per_diena: >-
+            {% set d = (as_timestamp(now()) - as_timestamp('2026-02-01 12:00:00+02:00')) / 86400 %}
+            {{ ((states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) / d) | round(2) if d > 1 else 'unknown' }}
+          prognoze_ciklu_per_metus: >-
+            {% set d = (as_timestamp(now()) - as_timestamp('2026-02-01 12:00:00+02:00')) / 86400 %}
+            {{ ((states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) / d * 365) | round(0) if d > 1 else 'unknown' }}
+          metai_iki_6000_ciklu: >-
+            {% set d = (as_timestamp(now()) - as_timestamp('2026-02-01 12:00:00+02:00')) / 86400 %}
+            {% set per_metus = (states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) / d * 365 if d > 1 else 0 %}
+            {{ ((6000 - states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) / per_metus) | round(0) if per_metus > 1 else 'unknown' }}
+          bms_soh: "{{ states('sensor.solis_inverter_1033300254190112_solis_battery_state_of_health') }}"
 
       # Realus eksportuojamas perteklius (kWh) — kiek likusios dienos saulės
       # NETURĖS kur dėtis, tik į tinklą (Modbus energy_manager_surplus analogas).

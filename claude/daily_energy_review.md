@@ -61,6 +61,7 @@ Pagrindiniai entities:
 | Audros režimas | input_boolean.storm_mode |
 | Sistemos efektyvumas (lifetime) | sensor.system_efficiency |
 | Baterijos round-trip efektyvumas | sensor.battery_roundtrip_efficiency |
+| Baterijos ciklų odometrai (atributai: ciklai_per_diena, prognoze_ciklu_per_metus, metai_iki_6000_ciklu, bms_soh) | sensor.battery_equivalent_cycles / sensor.battery_equivalent_cycles_eimo |
 | Baterijos / inverterio nuostoliai (kWh) | sensor.battery_losses_total / sensor.inverter_losses_total |
 | Kabelio nuostoliai | sensor.cable_loss_power / sensor.kabelio_nuostoliai_siandien |
 | ESO įvado eksportas/importas (einamųjų banko metų, nuo bal. 1) | sensor.eso_ivado_eksportas / sensor.eso_ivado_importas |

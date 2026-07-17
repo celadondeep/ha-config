@@ -474,6 +474,37 @@ template:
         availability: >
           {{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') not in ['unavailable', 'unknown', ''] }}
 
+      # Ekvivalentiniai baterijos ciklai = bendra įkrovos energija /
+      # naudingoji talpa (14.4 kWh = 16 × 90 %, ruožas 10–100 % —
+      # BATTERY_USABLE_KWH iš energy_manager.py). Eimo analogas —
+      # sensor.battery_equivalent_cycles_eimo (packages/eimo.yaml).
+      # Atributuose — nusidėvėjimo tempas nuo pajungimo į tinklą
+      # 2026-05-09 (data nustatyta iš ESO valandinės istorijos) ir
+      # projekcija iki 6000 ciklų (tipinis LFP resursas iki 80 % SOH).
+      - name: "battery_equivalent_cycles"
+        unique_id: battery_equivalent_cycles
+        state_class: total_increasing
+        icon: mdi:battery-sync
+        state: >
+          {{ (states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) / 14.4) | round(1) }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') not in ['unavailable', 'unknown', ''] }}
+        attributes:
+          ikrauta_kwh: "{{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) | round(0) }}"
+          iskrautas_kwh: "{{ states('sensor.solis_s6_eh3p_total_battery_discharge_energy') | float(0) | round(0) }}"
+          dienos_nuo_pajungimo: "{{ ((as_timestamp(now()) - as_timestamp('2026-05-09 15:00:00+03:00')) / 86400) | round(0) }}"
+          ciklai_per_diena: >-
+            {% set d = (as_timestamp(now()) - as_timestamp('2026-05-09 15:00:00+03:00')) / 86400 %}
+            {{ ((states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) / 14.4) / d) | round(2) if d > 1 else 'unknown' }}
+          prognoze_ciklu_per_metus: >-
+            {% set d = (as_timestamp(now()) - as_timestamp('2026-05-09 15:00:00+03:00')) / 86400 %}
+            {{ ((states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) / 14.4) / d * 365) | round(0) if d > 1 else 'unknown' }}
+          metai_iki_6000_ciklu: >-
+            {% set d = (as_timestamp(now()) - as_timestamp('2026-05-09 15:00:00+03:00')) / 86400 %}
+            {% set per_metus = (states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) / 14.4) / d * 365 if d > 1 else 0 %}
+            {{ ((6000 - states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) / 14.4) / per_metus) | round(0) if per_metus > 1 else 'unknown' }}
+          bms_soh: "{{ states('sensor.solis_s6_eh3p_battery_soh') }}"
+
       # Visos sistemos efektyvumas: naudinga energija (namai + backup +
       # eksportas) / įvestis (PV + importas − baterijoje likusi). Skirtumas
       # nuo 100% = visi nuostoliai: baterijos round-trip, inverterio
