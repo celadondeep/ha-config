@@ -29,10 +29,15 @@
         threshold: 22
         soc_now: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) | round(0) }}"
         consumption_today: "{{ states('sensor.consumption_remaining_today') | float(0) | round(1) }}"
-    # Išjungti TOU discharge slot → naktinis iškrovimas sustabdomas
-    - service: switch.turn_off
-      target:
-        entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+        target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 5] | max }}"
+        # Naktinė iškrova dar nebaigta: slotas ON ir SOC virš tikslo. Tokiu
+        # atveju 06:00 nesikiša — morning_room_check (05:30/06:15/06:45) dar
+        # žemina target, langas iki 07:30, recalc atnaujina cut-off iki 07:00.
+        # (Iki 2026-07-17 slotas būdavo išjungiamas besąlygiškai ir vietos
+        # darymas nutrūkdavo 06:00, nors ryto patikros jo dar tikėjosi.)
+        night_discharge_active: >-
+          {{ is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on')
+             and soc_now > target_soc + 1 }}
     # Nustatyti dienos režimą
     - choose:
         - conditions:
@@ -40,6 +45,7 @@
               entity_id: input_boolean.storm_mode
               state: "on"
           sequence:
+            # Iškrovimo slotą išjungia pats script.solis_storm_reserve_apply
             - service: script.solis_storm_reserve_apply
             - service: notify.persistent_notification
               data:
@@ -51,8 +57,23 @@
                   Baterija: {{ soc_now }}%.
         - conditions:
             - condition: template
+              value_template: "{{ night_discharge_active }}"
+          sequence:
+            - service: notify.persistent_notification
+              data:
+                title: "Solis - Naktinė iškrova tęsiasi 🔋→⚡"
+                message: >
+                  06:00 režimas nekeičiamas: baterija {{ soc_now }}% dar virš
+                  tikslo {{ target_soc }}% — TOU iškrova toliau daro vietą
+                  šiandienos saulei (langas iki 07:30, cut-off atnaujinamas
+                  iki 07:00). Prognozė: {{ forecast_today }} kWh.
+        - conditions:
+            - condition: template
               value_template: "{{ forecast_today > threshold }}"
           sequence:
+            - service: switch.turn_off
+              target:
+                entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
             - service: select.select_option
               target:
                 entity_id: select.solis_s6_eh3p_work_mode
@@ -69,6 +90,9 @@
                   Baterija: {{ soc_now }}%.
                   Režimas: Feed-In Priority — perteklius parduodamas į tinklą.
       default:
+        - service: switch.turn_off
+          target:
+            entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
         - service: select.select_option
           target:
             entity_id: select.solis_s6_eh3p_work_mode
@@ -89,12 +113,15 @@
 - id: solis_evening_discharge
   alias: "Solis - Vakaro iškrovimas pagal rytojaus prognozę"
   description: >
-    20:00: tiksliai apskaičiuoja kiek kWh reikia iškrauti į tinklą, kad rytoj
-    baterijoje liktų lygiai tiek laisvos vietos, kiek prognozuojama gamyba.
-    1% SOC = 0.16 kWh (16 kWh nominalas / 100; naudinga 5–100% = 15.2 kWh). Dugnas 5%.
-    Tikslinis SOC = dugnas + (talpa − min(prognozė,talpa)) / 0.16. Jei esamas SOC
-    viršija tikslą — aktyvuoja TOU naktinį iškrovimą (21:00–07:30, srovė 150A) su
-    cut-off ties apskaičiuotu tiksliniu SOC. Kitaip — Self-Use, baterija namams.
+    20:00: REALIZAVIMO kriterijus (2026-07-14) — baterijoje turi likti tiek
+    vietos, kad visa rytojaus saulė, netelpanti į namų apkrovą ir 1 kW ESO
+    eksportą, tilptų be nukirpimo. Tikslinį SOC skaičiuoja AppDaemon
+    (energy_manager.battery_room_needed: Solcast 30 min periodai × korekcija ×
+    PLAN_MARGIN 1.15; ryte 05:30/06:15/06:45 dar pažeminamas pagal intradienos
+    santykį). 1% SOC = 0.16 kWh (naudinga 10–100% = 14.4 kWh — BMS fizinis
+    dugnas 10%, žemiau iškrauti neįmanoma). Jei esamas SOC viršija tikslą —
+    aktyvuoja TOU naktinį iškrovimą (21:00–07:30, srovė 150A) su cut-off ties
+    tiksliniu SOC. Kitaip — Self-Use, baterija namams.
   trigger:
     - platform: time
       at: "20:00:00"
@@ -116,10 +143,10 @@
           {{ (states('sensor.solcast_pv_forecast_forecast_tomorrow') | float(0)
               * states('sensor.solcast_correction_factor') | float(1)) | round(1) }}
         current_soc: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) }}"
-        # Tikslinis SOC — iš AppDaemon (energy_manager.py). Apsauga: niekada
-        # nenaudoti reikšmės žemiau baterijos dugno 5% (pvz. jei sensorius
-        # po restarto dar nepaskelbtas ar klaidingas). 5% = inverterio
-        # overdischarge riba; force-charge ties 4%.
+        # Tikslinis SOC — iš AppDaemon (energy_manager.py). Clamp ≥5% — tik
+        # apsauga nuo klaidingų reikšmių (pvz. sensorius po restarto dar
+        # nepaskelbtas); 5% = inverterio overdischarge riba, bet faktinis BMS
+        # dugnas 10% (žemiau iškrauti neįmanoma); force-charge ties 4%.
         target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 5] | max }}"
         discharge_needed: "{{ states('sensor.energy_manager_discharge_needed') | float(0) }}"
     - choose:
@@ -254,7 +281,7 @@
   action:
     # 1) Tikslinį SOC publikuoja AppDaemon (energy_manager.py) kas 5–30 min —
     #    update_entity nebereikalingas (tai nebe template sensorius).
-    #    Apsauga: niekada nenaudoti reikšmės žemiau baterijos dugno 5%;
+    #    Clamp ≥5% — apsauga nuo klaidingų reikšmių (faktinis BMS dugnas 10%);
     #    jei sensorius nepasiekiamas — 100% (= neiškrauti nieko).
     - variables:
         target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 5] | max }}"
@@ -284,18 +311,20 @@
                 entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
               data:
                 value: 0
-            # Po iškrovos: jei RYTOJUI prognozuojama daug saulės (koreguota > 22 kWh,
-            # ta pati riba kaip ryto režime) — likti Feed-in Priority, kad rytinis
-            # perteklius eitų į tinklą nuo pirmų watų. Kitaip — Self-Use namams.
+            # Po iškrovos: jei ATEINANČIAI dienai prognozuojama daug saulės
+            # (koreguota > 22 kWh, ta pati riba kaip ryto režime) — likti
+            # Feed-in Priority, kad rytinis perteklius eitų į tinklą nuo pirmų
+            # watų. Kitaip — Self-Use namams. Po vidurnakčio (00:00–07:00)
+            # ateinanti diena = forecast_TODAY; forecast_tomorrow tuo metu jau
+            # rodo porytdienį (iki 2026-07-17 čia visada buvo tomorrow —
+            # po vidurnakčio režimas rinkosi pagal ne tos dienos prognozę).
             - variables:
-                forecast_tomorrow: >-
-                  {{ (states('sensor.solcast_pv_forecast_forecast_tomorrow') | float(0)
+                coming_day_kwh: >-
+                  {{ ((states('sensor.solcast_pv_forecast_forecast_today')
+                       if now().hour < 12
+                       else states('sensor.solcast_pv_forecast_forecast_tomorrow')) | float(0)
                       * states('sensor.solcast_correction_factor') | float(1)) | round(1) }}
-                next_mode: >-
-                  {{ 'Feed-in Priority'
-                     if (states('sensor.solcast_pv_forecast_forecast_tomorrow') | float(0)
-                         * states('sensor.solcast_correction_factor') | float(1)) > 22
-                     else 'Self-Use' }}
+                next_mode: "{{ 'Feed-in Priority' if coming_day_kwh > 22 else 'Self-Use' }}"
             - service: select.select_option
               target:
                 entity_id: select.solis_s6_eh3p_work_mode
@@ -306,21 +335,22 @@
                 title: "Solis - TOU išjungtas: SOC tikslas pasiektas 🔋"
                 message: >
                   Baterija: {{ current_soc }}%. Tikslinis SOC: {{ target_soc }}%.
-                  Rytojaus prognozė: {{ forecast_tomorrow }} kWh →
+                  Ateinančios dienos prognozė: {{ coming_day_kwh }} kWh →
                   TOU slotas išjungtas, režimas: {{ next_mode }}{{ ' (rytinis eksportas)' if next_mode == 'Feed-in Priority' else ' — baterija tiekia namams' }}.
   mode: single
 
 - id: solis_daytime_battery_protect
-  alias: "Solis - Baterija < 6%: stabdyti eksportą"
+  alias: "Solis - Baterija < 11%: stabdyti eksportą"
   description: >
-    Dienos metu: jei baterija nukrinta iki 6% → keisti į Self-Use.
+    Dienos metu: jei baterija nukrinta iki 11% → keisti į Self-Use.
     Taip stabdomas eksportas iš baterijos. Debesėlio epizodai čia
     NESUREAGUOJA — triggeris tik į faktinį SOC, ne į saulės kritimą.
-    6% — eksporto dugnas, 1% virš operacinio dugno 5% (kaip Eimo pusėje).
+    11% — 1% virš BMS fizinio dugno 10% (rodmuo 10 ≈ tikras 0, žemiau
+    neįmanoma; ankstesnis slenkstis 6% buvo nepasiekiamas = apsauga mirusi).
   trigger:
     - platform: numeric_state
       entity_id: sensor.solis_s6_eh3p_battery_soc
-      below: 6
+      below: 11
   condition:
     - condition: time
       after: "07:00:00"
@@ -383,9 +413,22 @@
     - condition: state
       entity_id: input_boolean.manual_tou_override
       state: "off"
-    - condition: state
-      entity_id: select.solis_s6_eh3p_work_mode
-      state: "Self-Use"
+    # Modbus select po „Self-Use" nustatymo rodo „Self-Use + TOU" (TOU bitas —
+    # atvaizdavimo artefaktas), todėl vien state: "Self-Use" niekada nesutapdavo
+    # ir perjungimas į Feed-in Priority neveikė (2026-07-14 pastebėta: eksportas
+    # prasidėtų tik baterijai prisipildžius → vėlyvas saulės nukirpimas).
+    - condition: template
+      value_template: >
+        {{ states('select.solis_s6_eh3p_work_mode')
+           in ['Self-Use', 'Self-Use + TOU'] }}
+    # Perjungti tik kai PV jau dengia namus: deficito valandomis Feed-in
+    # Priority tik perkeltų namus ant tinklo (baterija stovėtų), eksportuoti
+    # vis tiek nebūtų ko (2026-07-14, vartotojo pastaba dėl vartojimo iš
+    # baterijos).
+    - condition: template
+      value_template: >
+        {{ states('sensor.solis_s6_eh3p_total_pv_power') | float(0)
+           > states('sensor.solis_s6_eh3p_household_load_power') | float(999999) }}
     - condition: numeric_state
       entity_id: sensor.solcast_pv_forecast_forecast_remaining_today
       above: 2
@@ -407,17 +450,18 @@
 - id: solis_daytime_feedin_tou
   alias: "Solis - Dienos tolygus eksportas (Feed-in + TOU, pagal perteklių)"
   description: >
-    Saulėtą pertekliaus dieną, kai prognozuojama, kad ne visa saulė tilps
-    baterijoje (sensor.energy_manager_surplus > 1 kWh) ir baterija pasiekė
-    ribą+1% (SOC ≥ daytime_export_floor + 1%), įjungia Feed-in + TOU:
-    baterija laikoma ~ties riba (TOU cut-off = floor, srovė 150A, langas
-    07:00–19:30), perteklius tolygiai į tinklą. HISTEREZĖ kaip Eimo pusėje
-    (2026-07-08): pertekliui iškritus <0.2 kWh — grąžinamas Self-Use ir
-    slotas išjungiamas, baterija kaupia link target_soc. Iki šiol OFF šakos
-    nebuvo: 2026-07-08 rytą trumpalaikis fiktyvus perteklius įjungė eksportą
-    ir tamsią dieną baterija nudrenuota 26→10% bei laikyta prie dugno.
-    Langas iki 19:30, kad nesikirstų su naktiniu solis_tou_recalc_5min
-    (20:05–07:00) ir solis_evening_discharge (20:00).
+    Saulėtą dieną, kai REALIZAVIMO kriterijus rodo, kad likusi saulė netilps
+    į laisvą baterijos vietą + namus + 1 kW eksportą
+    (sensor.energy_manager_room_shortfall > 1 kWh; AppDaemon, su marža ir
+    intradienos santykiu) ir baterija pasiekė ribą+1%
+    (SOC ≥ daytime_export_floor + 1%), įjungia Feed-in + TOU: baterija
+    laikoma ~ties riba (TOU cut-off = floor, srovė 150A, langas 07:00–19:30),
+    perteklius tolygiai į tinklą. HISTEREZĖ (2026-07-08): trūkumui iškritus
+    <0.2 kWh — grąžinamas Self-Use ir slotas išjungiamas, baterija kaupia.
+    2026-07-14 perjungta nuo energy_manager_surplus (be vartojimo/eksporto
+    narių — armuodavo eksportą, kai vietos ir taip užtenka) prie
+    room_shortfall. Langas iki 19:30, kad nesikirstų su naktiniu
+    solis_tou_recalc_5min (20:05–07:00) ir solis_evening_discharge (20:00).
   trigger:
     - platform: time_pattern
       minutes: "/15"
@@ -437,8 +481,10 @@
       entity_id: input_boolean.manual_soc_override
       state: "off"
   variables:
-    floor: "{{ [states('input_number.daytime_export_floor') | float(6) | round(0) | int, 6] | max }}"
-    surplus: "{{ states('sensor.energy_manager_surplus') | float(0) }}"
+    # Floor ≥ 12: BMS fizinis dugnas 10 % — 2026-07-14 inverteris ATMETĖ
+    # cut-off 6 įrašą (liko senas 57, baterija užšalo aktyviame slote).
+    floor: "{{ [states('input_number.daytime_export_floor') | float(12) | round(0) | int, 12] | max }}"
+    surplus: "{{ states('sensor.energy_manager_room_shortfall') | float(0) }}"
     soc: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) }}"
     # Reali sloto būsena (jungiklis + langas + režimas), ne vien režimo
     # etiketė: 2026-07-01 užstrigo „Feed-in + TOU su išjungtu slotu" ir vien
@@ -489,8 +535,8 @@
               data:
                 title: "Solis - Dienos tolygus eksportas ☀️→⚡"
                 message: >
-                  Perteklius: {{ surplus }} kWh netilps baterijoje.
-                  Baterija: {{ soc }}%.
+                  Vietos trūkumas saulei: {{ surplus }} kWh netilps
+                  (baterija + namai + 1 kW eksportas). Baterija: {{ soc }}%.
                   Feed-in + TOU: baterija laikoma ~{{ floor }}%, perteklius
                   tolygiai į tinklą (TOU 07:00–19:30, 150A).
         # 2) Pertekliaus nebėra (<0.2 kWh) — išjungti slotą ir grąžinti
@@ -513,8 +559,8 @@
               data:
                 title: "Solis - Dienos eksportas sustabdytas 🔋"
                 message: >
-                  Perteklius {{ surplus }} kWh — likusi saulė tilps baterijoje.
-                  Baterija {{ soc }}% kaupia link
+                  Vietos trūkumo nebėra ({{ surplus }} kWh) — likusi saulė
+                  tilps. Baterija {{ soc }}% kaupia link
                   {{ states('sensor.energy_manager_target_soc') }}% tikslo.
   mode: single
 

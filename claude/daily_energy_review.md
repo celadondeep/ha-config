@@ -25,7 +25,10 @@ patobulinimus.
    mandato):** AppDaemon tik skaičiuoja (target_soc, prognozės), inverterius
    valdo tik automations.yaml / packages. Iškrovimas — tik per
    charge/discharge slotus; **overdischarge parametro NIEKADA neliesti**;
-   iškrovimo dugnas ≥5 %. Dvi elektrinės, entities **NEMAIŠYTI**:
+   iškrovimo dugnas: Solis (Modbus) **≥10 %** — tai BMS fizinis dugnas
+   (rodmuo 10 % atitinka kitų baterijų 0 %, žemiau iškrauti neįmanoma;
+   NIEKADA nesiūlyti žeminti), Eimo ≥5 %. Dvi elektrinės, entities
+   **NEMAIŠYTI**:
    - 1-a (lokali Modbus): tik `solis_s6_eh3p_*` entities, automations.yaml,
      energy_manager.py.
    - 2-a (Eimo SE cloud, 1033300254190112): tik `*_eimo` /

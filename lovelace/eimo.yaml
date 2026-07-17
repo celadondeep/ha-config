@@ -71,9 +71,10 @@ views:
 
           # Dabartinė galia — button-card eilė su krypčiai jautriomis ikonomis
           # (identiška Modbus dashboard'ui). Ženklai (Eimo cloud, patikrinta
-          # energy_manager_eimo.py): grid_total_power + = eksportas, − =
-          # importas (ATVIRKŠČIAI nei Modbus!); battery_power + = iškrauna,
-          # − = kraunasi.
+          # pagal 2026-07-13 istoriją: naktį namai iš baterijos = neigiamas,
+          # rytą PV krauna + SOC kyla = teigiamas): grid_total_power + =
+          # eksportas, − = importas; battery_power + = KRAUNASI, − = IŠKRAUNA
+          # (ABU atvirkščiai nei Modbus!).
           - type: horizontal-stack
             cards:
               # Saulė
@@ -167,8 +168,8 @@ views:
                 name: |
                   [[[
                     var p = parseFloat(entity.state);
-                    if (p < -20) return 'Kraunasi';
-                    if (p > 20) return 'Iškrauna';
+                    if (p > 20) return 'Kraunasi';
+                    if (p < -20) return 'Iškrauna';
                     return 'Baterija';
                   ]]]
                 icon: |
@@ -177,7 +178,7 @@ views:
                     var s = states['sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity'];
                     var soc = s ? parseFloat(s.state) : 0;
                     var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
-                    if (p < -20) return lvl <= 0 ? 'mdi:battery-charging-outline' : 'mdi:battery-charging-' + lvl;
+                    if (p > 20) return lvl <= 0 ? 'mdi:battery-charging-outline' : 'mdi:battery-charging-' + lvl;
                     if (lvl >= 100) return 'mdi:battery';
                     if (lvl <= 0) return 'mdi:battery-outline';
                     return 'mdi:battery-' + lvl;
@@ -197,8 +198,8 @@ views:
                     - color: |
                         [[[
                           var p = parseFloat(entity.state);
-                          if (p < -20) return '#00C853';
-                          if (p > 20) return '#FF9800';
+                          if (p > 20) return '#00C853';
+                          if (p < -20) return '#FF9800';
                           return 'var(--secondary-text-color)';
                         ]]]
 
@@ -309,6 +310,15 @@ views:
               - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
                 name: Pagaminta
                 icon: mdi:solar-power-variant
+              - entity: sensor.solar_today_expected_eimo
+                name: Numatoma
+                icon: mdi:chart-bell-curve-cumulative
+              - entity: sensor.self_sufficiency_today_eimo
+                name: Savarankiškumas
+                icon: mdi:home-percent
+              - entity: sensor.energy_savings_today_eimo
+                name: Sutaupyta
+                icon: mdi:piggy-bank
               - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used
                 name: Suvartota
                 icon: mdi:home-lightning-bolt
@@ -395,6 +405,12 @@ views:
               - entity: sensor.solis_inverter_1033300254190112_solis_battery_state_of_health
                 name: Baterijos sveikata (SOH)
                 icon: mdi:battery-heart-variant
+              - entity: sensor.battery_roundtrip_efficiency_eimo
+                name: Round-trip efektyvumas
+                icon: mdi:battery-sync
+              - entity: sensor.battery_equivalent_cycles_eimo
+                name: Ekvivalentiniai ciklai
+                icon: mdi:counter
               - entity: sensor.solis_inverter_1033300254190112_solis_state
                 name: Inverterio būsena
                 icon: mdi:information-outline
@@ -408,8 +424,14 @@ views:
             title: Saulės prognozė ir korekcija
             entities:
               - entity: sensor.solcast_pv_forecast_forecast_remaining_today
-                name: Liko šiandien
+                name: Liko šiandien (žalias Solcast)
                 icon: mdi:timer-sand
+              - type: attribute
+                entity: sensor.solar_today_expected_eimo
+                attribute: liko_koreguota_kwh
+                name: Liko šiandien (Eimo koreguota)
+                suffix: kWh
+                icon: mdi:timer-sand-complete
               - entity: sensor.solcast_pv_forecast_forecast_tomorrow
                 name: Rytoj
                 icon: mdi:weather-partly-cloudy

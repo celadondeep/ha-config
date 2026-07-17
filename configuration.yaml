@@ -115,10 +115,13 @@ input_number:
   # 6% — eksportas iki 6%, TOU įsijungia ties 7% (riba+1).
   daytime_export_floor:
     name: Dienos eksporto apatinė riba
-    min: 6
+    # Solis BMS fizinis dugnas 10 % (rodmuo 10 ≈ tikras 0, žemiau neįmanoma;
+    # 2026-07-14 inverteris atmetė cut-off 6 įrašą ir liko senas 57 —
+    # baterija užšalo aktyviame slote). Min 12 = dugnas + 2 % atsarga.
+    min: 12
     max: 50
     step: 1
-    initial: 6
+    initial: 12
     unit_of_measurement: "%"
     icon: mdi:battery-arrow-down
     mode: box
@@ -132,6 +135,16 @@ sensor:
     unit_prefix: k
     round: 3
     method: trapezoidal
+
+  # Inverterio savivartos iš baterijos (W) integravimas į kWh. Signalas
+  # laiptuotas (0/140 W), todėl metodas left, ne trapezoidal.
+  - platform: integration
+    source: sensor.inverter_self_power_from_battery
+    name: inverter_self_energy_from_battery
+    unique_id: inverter_self_energy_from_battery
+    unit_prefix: k
+    round: 3
+    method: left
 
 # Savaitiniai energijos skaitliukai weekly_report.py ataskaitai.
 # Šaltiniai — Solis Modbus total skaitliukai; resetinasi pirmadienį 00:00.
@@ -156,6 +169,12 @@ utility_meter:
   energy_cable_loss_today:
     name: Kabelio nuostoliai šiandien
     source: sensor.cable_loss_energy
+    cycle: daily
+  # Inverterio savivarta iš baterijos per dieną — battery_health.py dienos
+  # efektyvumo korekcijai.
+  inverter_self_from_battery_today:
+    name: Inverterio savivarta iš baterijos šiandien
+    source: sensor.inverter_self_energy_from_battery
     cycle: daily
 
 template:
@@ -250,9 +269,11 @@ template:
             {{ [(100 - soc) * per, 0] | max | round(2) }}
 
       # --- Baterijos energetika ---------------------------------------------
-      # 1% SOC = 0.16 kWh (16 kWh nominalas / 100). Naudingoji talpa 5–100%
-      # ruože = 95 × 0.16 = 15.2 kWh. Operacinis iškrovimo dugnas = 5%
-      # (clamp'ai; inverterio overdischarge riba), dienos eksporto dugnas = 6%.
+      # 1% SOC = 0.16 kWh (16 kWh nominalas / 100). BMS fizinis dugnas = 10%
+      # (rodmuo 10% atitinka kitų baterijų 0%, žemiau neiškrauna) → naudingoji
+      # talpa 10–100% ruože = 90 × 0.16 = 14.4 kWh. Clamp'ai ≥5% (inverterio
+      # overdischarge riba) — tik apsauga nuo klaidingų reikšmių, ne pasiekiamas
+      # SOC; dienos eksporto dugnas = 6%.
       # ----------------------------------------------------------------------
 
       # PASTABA: energy_manager_target_soc skaičiuojamas AppDaemon'e
@@ -267,9 +288,9 @@ template:
       # tiesiai iš inverterio cut-off slot registro (jį vartotojas keičia ranka
       # „TOU slotai" kortelėje), o automacijos į tą registrą NEBERAŠO (žr.
       # guard'us automations.yaml). Kitaip — AppDaemon paskelbtas
-      # sensor.energy_manager_target_soc. Visada clamp ≥ 5% (baterijos dugnas =
-      # inverterio overdischarge riba); jei šaltinis nepasiekiamas — 100%
-      # (= neiškrauti nieko).
+      # sensor.energy_manager_target_soc. Visada clamp ≥ 5% (apsauga nuo
+      # klaidingų reikšmių; faktinis BMS dugnas 10% — žemiau iškrauti neįmanoma);
+      # jei šaltinis nepasiekiamas — 100% (= neiškrauti nieko).
       - name: "target_soc_effective"
         unique_id: target_soc_effective
         unit_of_measurement: "%"
@@ -414,9 +435,30 @@ template:
           {{ states('sensor.cable_loss_power') not in ['unavailable', 'unknown', ''] }}
 
       # --- Sistemos efektyvumas ir nuostoliai (lifetime skaitliukai) ---------
+      # Inverterio savivarta iš baterijos: kai PV gamyba nepadengia apkrovos
+      # ir inverterio ~140 W poreikio, inverteris maitinasi iš baterijos.
+      # Iškrovimo skaitliukas šios energijos pilnai neužregistruoja, todėl
+      # be korekcijos ji klaidingai virsta „baterijos" nuostoliu.
+      - name: "inverter_self_power_from_battery"
+        unique_id: inverter_self_power_from_battery
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:battery-arrow-down
+        state: >
+          {% set batt = states('sensor.solis_s6_eh3p_battery_power') | float(0) %}
+          {% set pv = states('sensor.solis_s6_eh3p_total_pv_power') | float(0) %}
+          {% set load = states('sensor.solis_s6_eh3p_household_load_power') | float(0)
+                      + states('sensor.solis_s6_eh3p_backup_load_power') | float(0) %}
+          {{ 140 if batt > 20 and pv < load + 140 else 0 }}
+        availability: >
+          {{ states('sensor.solis_s6_eh3p_battery_power') not in ['unavailable', 'unknown', ''] }}
+
       # Baterijos round-trip efektyvumas DC pusėje: iškrauta / įkrauta,
       # atėmus šiuo metu baterijoje likusią energiją (SOC × 16 kWh), kad
-      # dabartinis įkrovos lygis neiškreiptų santykio.
+      # dabartinis įkrovos lygis neiškreiptų santykio. Prie iškrautos
+      # energijos pridedama inverterio savivarta iš baterijos — tai
+      # inverterio, ne baterijos nuostolis.
       - name: "battery_roundtrip_efficiency"
         unique_id: battery_roundtrip_efficiency
         unit_of_measurement: "%"
@@ -425,9 +467,10 @@ template:
         state: >
           {% set chg = states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) %}
           {% set dis = states('sensor.solis_s6_eh3p_total_battery_discharge_energy') | float(0) %}
+          {% set inv = states('sensor.inverter_self_energy_from_battery') | float(0) %}
           {% set stored = states('sensor.solis_s6_eh3p_battery_soc') | float(0) / 100 * 16 %}
           {% set denom = chg - stored %}
-          {{ (dis / denom * 100) | round(1) if denom > 50 else 'unknown' }}
+          {{ ((dis + inv) / denom * 100) | round(1) if denom > 50 else 'unknown' }}
         availability: >
           {{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') not in ['unavailable', 'unknown', ''] }}
 
@@ -453,7 +496,8 @@ template:
           {{ states('sensor.solis_s6_eh3p_pv_total_energy_generation') not in ['unavailable', 'unknown', ''] }}
 
       # Baterijos round-trip nuostoliai kWh (lifetime): įkrauta − iškrauta −
-      # šiuo metu baterijoje likusi energija.
+      # šiuo metu baterijoje likusi energija − inverterio savivarta iš
+      # baterijos (pastaroji priskiriama inverterio nuostoliams).
       - name: "battery_losses_total"
         unique_id: battery_losses_total
         unit_of_measurement: kWh
@@ -463,8 +507,9 @@ template:
         state: >
           {% set chg = states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) %}
           {% set dis = states('sensor.solis_s6_eh3p_total_battery_discharge_energy') | float(0) %}
+          {% set inv = states('sensor.inverter_self_energy_from_battery') | float(0) %}
           {% set stored = states('sensor.solis_s6_eh3p_battery_soc') | float(0) / 100 * 16 %}
-          {{ ([chg - dis - stored, 0] | max) | round(1) }}
+          {{ ([chg - dis - inv - stored, 0] | max) | round(1) }}
         availability: >
           {{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') not in ['unavailable', 'unknown', ''] }}
 
@@ -485,9 +530,10 @@ template:
           {% set exp = states('sensor.solis_s6_eh3p_total_energy_fed_into_grid') | float(0) %}
           {% set chg = states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) %}
           {% set dis = states('sensor.solis_s6_eh3p_total_battery_discharge_energy') | float(0) %}
+          {% set inv = states('sensor.inverter_self_energy_from_battery') | float(0) %}
           {% set stored = states('sensor.solis_s6_eh3p_battery_soc') | float(0) / 100 * 16 %}
           {% set total_loss = pv + imp - home - bkp - exp - stored %}
-          {% set batt_loss = [chg - dis - stored, 0] | max %}
+          {% set batt_loss = [chg - dis - inv - stored, 0] | max %}
           {{ ([total_loss - batt_loss, 0] | max) | round(1) }}
         availability: >
           {{ states('sensor.solis_s6_eh3p_pv_total_energy_generation') not in ['unavailable', 'unknown', ''] }}
@@ -499,7 +545,7 @@ template:
         state_class: total_increasing
         icon: mdi:battery-sync
         state: >
-          {{ (states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) / 15.2) | round(1) }}
+          {{ (states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) / 14.4) | round(1) }}
         availability: >
           {{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') not in ['unavailable', 'unknown', ''] }}
 
@@ -527,10 +573,10 @@ template:
           {% set pv   = states('sensor.solis_s6_eh3p_pv_today_energy_generation') | float(0) %}
           {% set sell = states('sensor.solis_s6_eh3p_today_energy_fed_into_grid') | float(0) %}
           {% set buy  = states('sensor.solis_s6_eh3p_today_energy_imported_from_grid') | float(0) %}
+          {# 0 — TEISĖTA kaina (ESO pasaugojimo schema: buy=0.0/sell=0.25);
+             fallback taikomas tik kai input_number nepasiekiamas (float default). #}
           {% set p_buy  = states('input_number.electricity_price_buy') | float(0.18) %}
           {% set p_sell = states('input_number.electricity_price_sell') | float(0.08) %}
-          {% set p_buy  = p_buy if p_buy > 0.001 else 0.18 %}
-          {% set p_sell = p_sell if p_sell > 0.001 else 0.08 %}
           {{ (([pv - sell, 0] | max) * p_buy + sell * p_sell - buy * p_buy) | round(2) }}
         availability: >
           {{ states('sensor.solis_s6_eh3p_pv_today_energy_generation') not in ['unavailable', 'unknown', ''] }}
