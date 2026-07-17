@@ -23,7 +23,7 @@ views:
             entity: sensor.solis_s6_eh3p_last_modbus_success
             update_timer: 1000
             icon: mdi:satellite-variant
-            name: ☀️ Energijos valdymas
+            name: ☀️ Šeškiniai SE
             show_name: true
             show_icon: true
             show_label: true
@@ -236,6 +236,7 @@ views:
           # Ką automatika suskaičiavo ir kur link veda bateriją.
           - type: glance
             title: Balansas ir tikslai
+            columns: 3
             entities:
               - entity: sensor.energy_manager_balance
                 name: Balansas
@@ -342,44 +343,12 @@ views:
                 name: Dienos eksporto riba (floor)
 
       # ── 3. FAZĖS (techninė) ──────────────────────────────────────────
-      - type: grid
-        cards:
-          # Fazės: įtampa ir tinklo mainai iš smart meter (registrai per
-          # lokalų Modbus kaip meter_*), inverterio paduodama galia į fazes
-          # — U×I iš inverterio AC gnybtų (fazinės galios registro nėra).
-          - type: glance
-            title: Fazės L1 / L2 / L3
-            columns: 3
-            entities:
-              - entity: sensor.solis_s6_eh3p_meter_ac_voltage_a
-                name: Įtampa L1
-              - entity: sensor.solis_s6_eh3p_meter_ac_voltage_b
-                name: Įtampa L2
-              - entity: sensor.solis_s6_eh3p_meter_ac_voltage_c
-                name: Įtampa L3
-              - entity: sensor.solis_s6_eh3p_meter_active_power_a
-                name: Tinklas L1
-                icon: mdi:transmission-tower
-              - entity: sensor.solis_s6_eh3p_meter_active_power_b
-                name: Tinklas L2
-                icon: mdi:transmission-tower
-              - entity: sensor.solis_s6_eh3p_meter_active_power_c
-                name: Tinklas L3
-                icon: mdi:transmission-tower
-              - entity: sensor.inverter_phase_power_l1
-                name: Inverteris L1
-              - entity: sensor.inverter_phase_power_l2
-                name: Inverteris L2
-              - entity: sensor.inverter_phase_power_l3
-                name: Inverteris L3
-            show_state: true
-
-      # ── 4. PROGNOZĖS IR REZULTATAI ───────────────────────────────────
-      - type: grid
-        cards:
+          # Prognozės po valdymo blokų — dešinė kolona (fazės iškeltos į
+          # Analizę: diagnostika, ne kasdienis valdymas; 2026-07-18
+          # perbalansavimas — kolonos buvo stipriai nelygios).
           - type: heading
             heading: Prognozės ir rezultatai
-            heading_style: title
+            heading_style: subtitle
             icon: mdi:weather-partly-cloudy
 
           - type: glance
@@ -427,10 +396,17 @@ views:
               - entity: input_number.electricity_price_sell
                 name: Pardavimo kaina
 
-          # ESO oficialūs įvado duomenys — TIK Modbus elektrinė (obj. 220588,
-          # Šeškinių įvadas); Eimo įvado ESO paskyra dar nepajungta.
+      # ── 3. ESO PASAUGOJIMO BANKAS (kairė kolona po „Dabar" sekcijos) ──
+      # ESO oficialūs įvado duomenys — TIK Modbus elektrinė (obj. 220588,
+      # Šeškinių įvadas); Eimo įvado ESO paskyra dar nepajungta.
+      - type: grid
+        cards:
+          - type: heading
+            heading: ESO pasaugojimo bankas (įvadas 220588)
+            heading_style: title
+            icon: mdi:bank
+
           - type: entities
-            title: ESO pasaugojimo bankas (įvadas 220588)
             entities:
               - entity: sensor.eso_bankas_likutis
                 name: Banko likutis
@@ -667,6 +643,37 @@ views:
               - entity: sensor.consumption_forecast_tomorrow
                 name: Rytoj
                 icon: mdi:calendar-arrow-right
+            show_state: true
+
+          # Fazės: įtampa ir tinklo mainai iš smart meter (registrai per
+          # lokalų Modbus kaip meter_*), inverterio paduodama galia į fazes
+          # — U×I iš inverterio AC gnybtų (fazinės galios registro nėra).
+          # 2026-07-18 perkelta iš Energijos view — diagnostika, ne valdymas.
+          - type: glance
+            title: Fazės L1 / L2 / L3
+            columns: 3
+            entities:
+              - entity: sensor.solis_s6_eh3p_meter_ac_voltage_a
+                name: Įtampa L1
+              - entity: sensor.solis_s6_eh3p_meter_ac_voltage_b
+                name: Įtampa L2
+              - entity: sensor.solis_s6_eh3p_meter_ac_voltage_c
+                name: Įtampa L3
+              - entity: sensor.solis_s6_eh3p_meter_active_power_a
+                name: Tinklas L1
+                icon: mdi:transmission-tower
+              - entity: sensor.solis_s6_eh3p_meter_active_power_b
+                name: Tinklas L2
+                icon: mdi:transmission-tower
+              - entity: sensor.solis_s6_eh3p_meter_active_power_c
+                name: Tinklas L3
+                icon: mdi:transmission-tower
+              - entity: sensor.inverter_phase_power_l1
+                name: Inverteris L1
+              - entity: sensor.inverter_phase_power_l2
+                name: Inverteris L2
+              - entity: sensor.inverter_phase_power_l3
+                name: Inverteris L3
             show_state: true
 
       - type: grid
