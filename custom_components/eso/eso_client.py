@@ -372,6 +372,7 @@ class ESOClient:
         obj: str,
         date: datetime,
         date_range: tuple[datetime, datetime] | None = None,
+        stored: bool = False,
     ) -> dict:
         if not self.cookies:
             _LOGGER.error("Cookies are empty. Check your credentials.")
@@ -408,6 +409,13 @@ class ESOClient:
             data["period"] = "other"
             data["other_start"] = date_range[0].strftime("%Y-%m-%d")
             data["other_end"] = date_range[1].strftime("%Y-%m-%d")
+        if stored:
+            # The "Rodyti sukauptos energijos kiekį" checkbox only renders in
+            # the monthly view; it adds a `stored` dataset to the response.
+            data["display_type"] = "monthly"
+            data["period"] = "year"
+            data["stored_energy"] = 1
+            data["_triggering_element_name"] = "stored_energy"
         try:
             response = self.session.post(
                 GENERATION_URL,
@@ -450,6 +458,38 @@ class ESOClient:
         for consumption_type, series in self.dataset[obj].items():
             self.dataset[obj][consumption_type] = dict(sorted(series.items()))
         return self.dataset[obj]
+
+    def fetch_stored(self, obj: str) -> dict[str, float]:
+        """Return the storage-bank balance ESO reports for each month.
+
+        Keys are ``YYYY-MM`` strings, values are the bank balance (kWh) at that
+        month's end as shown by the portal's "Rodyti sukauptos energijos
+        kiekį" toggle. The balance never goes below zero (a deficit month
+        drains the bank at most to 0) and the current, still-open month is
+        always reported as 0 until ESO closes it."""
+        series: dict[str, float] = {}
+        for d in self.fetch(obj, datetime.now(), stored=True):
+            if d.get("command") == "update_build_id":
+                self.form_parser.set("form_build_id", d["new"])
+                continue
+            if d.get("command") != "settings":
+                continue
+            form = d["settings"].get("eso_consumption_history_form")
+            if not form:
+                continue
+            for dataset in form["graphics_data"]["datasets"]:
+                if dataset.get("key") != "stored":
+                    continue
+                for record in dataset.get("record", []):
+                    if record.get("value") is None:
+                        continue
+                    try:
+                        series[record["date"]] = float(record["value"])
+                    except (TypeError, ValueError):
+                        _LOGGER.warning(
+                            "ESO: unparsable stored record %s", record
+                        )
+        return series
 
     def _merge_response(self, obj: str, data: dict) -> None:
         for d in data:

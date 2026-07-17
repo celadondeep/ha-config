@@ -65,6 +65,7 @@ Pagrindiniai entities:
 | Kabelio nuostoliai | sensor.cable_loss_power / sensor.kabelio_nuostoliai_siandien |
 | ESO įvado eksportas/importas (einamųjų banko metų, nuo bal. 1) | sensor.eso_ivado_eksportas / sensor.eso_ivado_importas |
 | ESO pasaugojimo banko likutis / vertė | sensor.eso_bankas_likutis / sensor.eso_bankas_verte |
+| Oficialus ESO banko likutis (paskutinio uždaryto mėn., iš savitarnos) | sensor.eso_bankas_220588 |
 | Banko rankinė korekcija (normaliai 0) | input_number.eso_bankas_pradzia |
 
 **ESO oficialūs įvado duomenys (Modbus elektrinė, obj. 220588):** integracija
@@ -173,11 +174,17 @@ ml_model.py, weekly_report.py, battery_health.py), /config/automations.yaml.
       nuokrypį tik užrašyk; jei skirtumas sistemingai auga ar šokteli —
       flaguok kaip apskaitos klaidą (skaitiklio dreifas, sensoriaus defektas).
     - **Bankas:** ataskaitos skaičiuose užrašyk sensor.eso_bankas_likutis
-      (+ atributai: sukaupta / atsiimta banko metais) ir eso_bankas_verte.
-      Sensoriai skaičiuoja einamųjų banko metų (bal. 1 – kov. 31) langą
-      automatiškai — balandžio 1 nieko perstatinėti nereikia, tik patikrink,
-      kad likutis persijungė į naują langą, o input_number.eso_bankas_pradzia
-      (rankinė korekcija) liktų 0, nebent ESO savitarna rodo kitokį likutį.
+      (+ atributai: oficialus_eso, men_eksportas/men_importas, sukaupta /
+      atsiimta banko metais) ir eso_bankas_verte. Likutis = oficialus ESO
+      savitarnos skaičius (sensor.eso_bankas_220588, paskutinio uždaryto
+      mėnesio galo likutis, atnaujinamas per kasdienį importą) + einamojo
+      mėnesio eksportas − importas. Bankas niekada nelenda į minusą —
+      deficitinis mėnuo jį nusausina daugiausiai iki 0. Naujo mėnesio
+      pradžioje patikrink, kad oficialus_menuo pasistūmė ir oficialus_eso
+      atitinka (praėjusio mėn. oficialus + mėn. net srautas, su ESO
+      apvalinimu iki sveiko kWh). Balandžio 1 (banko metų riba) sensorius
+      persijungia automatiškai; input_number.eso_bankas_pradzia (rankinė
+      korekcija) liktų 0, nebent ESO savitarna rodo kitokį likutį.
       Sezoninis kontekstas: vasarą bankas PRIVALO augti — jei kelias dienas
       iš eilės nekyla, tai realizavimo problema (žr. REALIZAVIMO prioritetą).
       Banko kaupimo metai baigiasi kovo 31 (nepanaudotas kreditas nudega) —

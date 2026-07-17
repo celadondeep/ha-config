@@ -1,17 +1,22 @@
 # =============================================================================
 #  ESO pasaugojimo bankas — Šeškinių (Modbus) elektrinės įvadas, obj. 220588.
-#  Duomenų šaltinis: custom_components/eso ilgalaikės statistikos
-#  (eso:energy_consumed_220588 / eso:energy_returned_220588), pilna valandinė
-#  istorija atsisiųsta atgaline data (eso.import_now su date_from/date_to).
 #
 #  Pasaugojimo schema: eksportuotos kWh keliauja į banką, importas dengiamas
 #  iš banko 1:1 (mokamas tik mėnesinis abonentas). Kaupimo metai — bal. 1 iki
-#  kov. 31 (nepanaudotas kreditas nudega). SQL sumos skaičiuojamos einamųjų
-#  banko metų lange, kurio pradžią SQLite išsiveda pati (balandžio 1 d.:
-#  now −3 mėn. → metų pradžia → +3 mėn.), tad balandžio 1 niekas
-#  neperstatinėjama — sensoriai persijungia automatiškai.
-#  eso_bankas_pradzia lieka tik rankinei korekcijai, jei ESO savitarnos
-#  likutis skirtųsi nuo suskaičiuoto (normaliai 0).
+#  kov. 31 (nepanaudotas kreditas nudega). SVARBU: bankas niekada nelenda į
+#  minusą — deficitinis mėnuo (importas > eksportas) banką nusausina daugiausiai
+#  iki 0, todėl metinės sumos „eksportas − importas“ likutį NUVERTINA, jei
+#  banko metuose buvo deficitinių mėnesių (2026-04: −274 kWh, ESO banke = 0).
+#
+#  Likutis = oficialus ESO skaičius + einamojo mėnesio srautai:
+#   - sensor.eso_bankas_220588 (custom_components/eso sensorius) — ESO
+#     savitarnos „Rodyti sukauptos energijos kiekį“ serija: banko likutis
+#     paskutinio UŽDARYTO mėnesio gale, atnaujinamas per kasdienį importą;
+#   - einamojo mėnesio eksportas/importas iš eso:energy_* statistikų (ESO
+#     einamąjį mėnesį serijoje visada rodo 0, kol mėnuo neuždarytas).
+#  Metiniai eso_ivado_eksportas/importas lieka informacijai (dashboarde ir
+#  audite), bet likučio formulėje nebenaudojami.
+#  eso_bankas_pradzia lieka tik rankinei korekcijai (normaliai 0).
 # =============================================================================
 
 input_number:
@@ -53,22 +58,57 @@ sql:
     state_class: total
     icon: mdi:transmission-tower-export
 
+  # Einamojo mėnesio sumos — „gyvajai“ likučio daliai virš oficialaus ESO
+  # skaičiaus (ESO einamąjį mėnesį uždaro tik jam pasibaigus).
+  - name: "eso_ivado_eksportas_men"
+    unique_id: eso_ivado_eksportas_men
+    query: >-
+      SELECT ROUND(COALESCE(SUM(s.state), 0), 2) AS suma FROM statistics s
+      JOIN statistics_meta m ON s.metadata_id = m.id
+      WHERE m.statistic_id = 'eso:energy_returned_220588'
+      AND s.start_ts >= strftime('%s', date('now', '+3 hours', 'start of month')) - 10800;
+    column: "suma"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total
+    icon: mdi:transmission-tower-import
+
+  - name: "eso_ivado_importas_men"
+    unique_id: eso_ivado_importas_men
+    query: >-
+      SELECT ROUND(COALESCE(SUM(s.state), 0), 2) AS suma FROM statistics s
+      JOIN statistics_meta m ON s.metadata_id = m.id
+      WHERE m.statistic_id = 'eso:energy_consumed_220588'
+      AND s.start_ts >= strftime('%s', date('now', '+3 hours', 'start of month')) - 10800;
+    column: "suma"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total
+    icon: mdi:transmission-tower-export
+
 template:
   - sensor:
-      # Banko likutis = eksportuota − atsiimta einamaisiais banko metais
-      # (+ rankinė korekcija, normaliai 0).
+      # Banko likutis = oficialus ESO likutis (paskutinio uždaryto mėnesio
+      # gale) + einamojo mėnesio eksportas − importas (+ rankinė korekcija,
+      # normaliai 0). Bankas negali būti neigiamas.
       - name: "eso_bankas_likutis"
         unique_id: eso_bankas_likutis
         unit_of_measurement: "kWh"
         icon: mdi:bank
         state: >
           {% set korekcija = states('input_number.eso_bankas_pradzia') | float(0) %}
-          {% set eksp = states('sensor.eso_ivado_eksportas') | float(0) %}
-          {% set imp = states('sensor.eso_ivado_importas') | float(0) %}
-          {{ ([korekcija + eksp - imp, 0] | max) | round(1) }}
+          {% set oficialus = states('sensor.eso_bankas_220588') | float(0) %}
+          {% set eksp_men = states('sensor.eso_ivado_eksportas_men') | float(0) %}
+          {% set imp_men = states('sensor.eso_ivado_importas_men') | float(0) %}
+          {{ ([oficialus + eksp_men - imp_men + korekcija, 0] | max) | round(1) }}
         availability: >
-          {{ has_value('sensor.eso_ivado_importas') }}
+          {{ has_value('sensor.eso_bankas_220588')
+             and has_value('sensor.eso_ivado_importas_men') }}
         attributes:
+          oficialus_eso: "{{ states('sensor.eso_bankas_220588') | float(0) | round(1) }}"
+          oficialus_menuo: "{{ state_attr('sensor.eso_bankas_220588', 'menuo') }}"
+          men_eksportas: "{{ states('sensor.eso_ivado_eksportas_men') | float(0) | round(1) }}"
+          men_importas: "{{ states('sensor.eso_ivado_importas_men') | float(0) | round(1) }}"
           sukaupta_banko_metais: "{{ states('sensor.eso_ivado_eksportas') | float(0) | round(1) }}"
           atsiimta_banko_metais: "{{ states('sensor.eso_ivado_importas') | float(0) | round(1) }}"
           korekcija: "{{ states('input_number.eso_bankas_pradzia') | float(0) }}"
