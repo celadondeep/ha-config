@@ -517,9 +517,16 @@
       {{ is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on')
          and states('time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1') == '07:00:00'
          and is_state('select.solis_s6_eh3p_work_mode', 'Feed-in + TOU') }}
-    # Dabartinis sloto cut-off: ≥90 = „viršūnės skutimo" variantas (7 punktas),
-    # <90 = pertekliaus (floor) variantas — šakos pagal tai atskiriamos.
+    # Dabartinis sloto cut-off: ≥80 = „viršūnės skutimo" variantas (7 punktas),
+    # <80 = pertekliaus (floor) variantas — šakos pagal tai atskiriamos.
     cutoff_now: "{{ states('number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1') | float(0) }}"
+    # SVEIKATOS ZONA (2026-07-18): nuosaikią dieną viršūnė skutama ties 80 %
+    # (kaupiklis 20–80 % ruože), aukštos gamybos dieną (koreguota prognozė
+    # > 28 kWh) — ties 90 % (realizavimui pilnas diapazonas iki 100).
+    shave_cutoff: >-
+      {{ 90 if (states('sensor.solcast_pv_forecast_forecast_today') | float(0)
+                * states('sensor.solcast_correction_factor') | float(1)) > 28
+         else 80 }}
   action:
     - choose:
         # 1) Yra perteklius ir yra ką atiduoti — įjungti dienos eksportą,
@@ -532,7 +539,7 @@
             - condition: template
               value_template: >
                 {{ surplus > 1 and soc >= floor + 5
-                   and (not daytime_slot_active or cutoff_now >= 90) }}
+                   and (not daytime_slot_active or cutoff_now >= 80) }}
           sequence:
             - service: number.set_value
               target:
@@ -570,22 +577,21 @@
                   (baterija + namai + 1 kW eksportas). Baterija: {{ soc }}%.
                   Feed-in + TOU: baterija laikoma ~{{ floor }}%, perteklius
                   tolygiai į tinklą (TOU 07:00–19:30, 150A).
-        # 2) VIRŠŪNĖS SKUTIMAS (7 punktas, 2026-07-18): SOC ≥ 91% — laikyti
-        #    iškrovimo slotą aktyvų su cut-off 90, net jei pertekliaus
-        #    kriterijus jo neplanavo. Mažina laiką ties 100% (kalendorinis
-        #    LFP senėjimas) ir sugeria debesų susitelkimų svyravimus: viršum
-        #    90% atsiradęs kiekis nuskutamas į tinklą. Slotas lieka armuotas
-        #    visai dienai — inverteris pats nieko nedaro žemiau cut-off.
+        # 2) VIRŠŪNĖS SKUTIMAS (7 punktas + sveikatos zona): SOC pasiekus
+        #    lubas (nuosaikią dieną 80%, aukštos gamybos — 90%) — laikyti
+        #    iškrovimo slotą aktyvų su cut-off ties lubomis. Mažina laiką
+        #    aukštame SOC (kalendorinis LFP senėjimas) ir sugeria debesų
+        #    susitelkimų svyravimus. Slotas lieka armuotas visai dienai.
         - conditions:
             - condition: template
               value_template: >
-                {{ soc >= 91 and not daytime_slot_active }}
+                {{ soc >= shave_cutoff + 1 and not daytime_slot_active }}
           sequence:
             - service: number.set_value
               target:
                 entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
               data:
-                value: 90
+                value: "{{ shave_cutoff }}"
             - service: number.set_value
               target:
                 entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
@@ -611,18 +617,18 @@
                 option: "Feed-in + TOU"
             - service: notify.persistent_notification
               data:
-                title: "Solis - Viršūnės skutimas 90–100% ✂️🔋"
+                title: "Solis - Viršūnės skutimas ✂️🔋"
                 message: >
                   Baterija {{ soc }}% — iškrovimo slotas aktyvuotas su
-                  cut-off 90%: viršum 90% laikomas kiekis skutamas į tinklą,
-                  mažinamas laikas ties 100%.
+                  cut-off {{ shave_cutoff }}%: viršum laikomas kiekis
+                  skutamas į tinklą (sveikatos zona / debesų buferis).
         # 3) DUGNO ATSISTATYMAS (7 punktas): floor variantas pasiekė dugną —
         #    išjungti slotą ir Self-Use, kad saulė pirma pakeltų SOC ~5 pp
         #    (re-arm šakoje 1 reikalauja floor+5); tik tada vėl eksportas.
         - conditions:
             - condition: template
               value_template: >
-                {{ daytime_slot_active and cutoff_now < 90 and soc <= floor }}
+                {{ daytime_slot_active and cutoff_now < 80 and soc <= floor }}
           sequence:
             - service: switch.turn_off
               target:
@@ -646,7 +652,7 @@
         - conditions:
             - condition: template
               value_template: >
-                {{ surplus < 0.2 and daytime_slot_active and cutoff_now < 90 }}
+                {{ surplus < 0.2 and daytime_slot_active and cutoff_now < 80 }}
           sequence:
             - service: switch.turn_off
               target:

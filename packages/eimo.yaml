@@ -553,9 +553,16 @@ automation:
         {{ is_state('switch.inverter_control_1033300254190112_slot1_discharge', 'on')
            and is_state('text.inverter_control_1033300254190112_slot1_discharge_time', '07:00-19:30')
            and is_state('select.inverter_control_1033300254190112_storage_mode', 'Self-Use') }}
-      # Dabartinis sloto cut-off: ≥90 = „viršūnės skutimo" variantas
-      # (7 punktas), <90 = pertekliaus (floor) variantas.
+      # Dabartinis sloto cut-off: ≥80 = „viršūnės skutimo" variantas
+      # (7 punktas), <80 = pertekliaus (floor) variantas.
       slot_cutoff: "{{ states('number.inverter_control_1033300254190112_slot1_discharge_soc') | float(0) }}"
+      # SVEIKATOS ZONA (2026-07-18): nuosaikią dieną viršūnė skutama ties
+      # 80 % (kaupiklis 20–80 % ruože), aukštos gamybos dieną (koreguota
+      # prognozė > 26 kWh) — ties 90 % (pilnas diapazonas realizavimui).
+      shave_cutoff: >-
+        {{ 90 if (states('sensor.solcast_pv_forecast_forecast_today') | float(0)
+                  * states('sensor.solcast_correction_factor_eimo') | float(1)) > 26
+           else 80 }}
     action:
       - choose:
           # 1) Yra perteklius (>1 kWh netilps) ir yra ką atiduoti — įjungti
@@ -567,7 +574,7 @@ automation:
               - condition: template
                 value_template: >
                   {{ surplus > 1 and soc >= floor + 5
-                     and (not daytime_slot_active or slot_cutoff >= 90) }}
+                     and (not daytime_slot_active or slot_cutoff >= 80) }}
             sequence:
               - service: number.set_value
                 target:
@@ -600,20 +607,20 @@ automation:
                     (baterija + namai + 1 kW eksportas). Baterija {{ soc }}%.
                     Self-Use + slot: iškraunama į tinklą
                     iki ~{{ floor }}% (slot 07:00–19:30, 150A).
-          # 2) VIRŠŪNĖS SKUTIMAS (7 punktas, 2026-07-18): SOC ≥ 91% — laikyti
-          #    slotą aktyvų su cut-off 90, net jei pertekliaus kriterijus jo
-          #    neplanavo. Mažina laiką ties 100% ir sugeria debesų
-          #    susitelkimų svyravimus.
+          # 2) VIRŠŪNĖS SKUTIMAS (7 punktas + sveikatos zona): SOC pasiekus
+          #    lubas (nuosaikią dieną 80%, aukštos gamybos — 90%) — laikyti
+          #    slotą aktyvų su cut-off ties lubomis. Mažina laiką aukštame
+          #    SOC ir sugeria debesų susitelkimų svyravimus.
           - conditions:
               - condition: template
                 value_template: >
-                  {{ soc >= 91 and not daytime_slot_active }}
+                  {{ soc >= shave_cutoff + 1 and not daytime_slot_active }}
             sequence:
               - service: number.set_value
                 target:
                   entity_id: number.inverter_control_1033300254190112_slot1_discharge_soc
                 data:
-                  value: 90
+                  value: "{{ shave_cutoff }}"
               - service: number.set_value
                 target:
                   entity_id: number.inverter_control_1033300254190112_slot1_discharge_current
@@ -634,17 +641,18 @@ automation:
                   option: "Self-Use"
               - service: notify.persistent_notification
                 data:
-                  title: "Eimo - Viršūnės skutimas 90–100% ✂️🔋"
+                  title: "Eimo - Viršūnės skutimas ✂️🔋"
                   message: >
-                    Baterija {{ soc }}% — slotas aktyvuotas su cut-off 90%:
-                    viršum 90% laikomas kiekis skutamas į tinklą.
+                    Baterija {{ soc }}% — slotas aktyvuotas su cut-off
+                    {{ shave_cutoff }}%: viršum laikomas kiekis skutamas
+                    į tinklą (sveikatos zona / debesų buferis).
           # 3) DUGNO ATSISTATYMAS (7 punktas): floor variantas pasiekė dugną
           #    — išjungti slotą, kad saulė pirma pakeltų SOC ~5 pp (re-arm
           #    šakoje 1 reikalauja floor+5); tik tada vėl eksportas.
           - conditions:
               - condition: template
                 value_template: >
-                  {{ daytime_slot_active and slot_cutoff < 90 and soc <= floor }}
+                  {{ daytime_slot_active and slot_cutoff < 80 and soc <= floor }}
             sequence:
               - service: switch.turn_off
                 target:
@@ -662,7 +670,7 @@ automation:
           - conditions:
               - condition: template
                 value_template: >
-                  {{ surplus < 0.2 and daytime_slot_active and slot_cutoff < 90 }}
+                  {{ surplus < 0.2 and daytime_slot_active and slot_cutoff < 80 }}
             sequence:
               - service: switch.turn_off
                 target:
