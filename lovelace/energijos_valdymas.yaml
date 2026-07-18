@@ -253,6 +253,7 @@ views:
             show_state: true
 
           - type: entities
+            show_header_toggle: false
             title: Automacijos būsena
             entities:
               - entity: sensor.energy_manager_status
@@ -311,6 +312,7 @@ views:
               action: toggle
 
           - type: entities
+            show_header_toggle: false
             title: Inverterio režimas
             entities:
               - entity: select.solis_s6_eh3p_work_mode
@@ -323,6 +325,7 @@ views:
           # Ką inverteris REALIAI turi nustatyta TOU slotuose — automacijos
           # juos valdo, bet iki šiol dashboard'e nesimatė.
           - type: entities
+            show_header_toggle: false
             title: TOU slotai (inverterio registrai)
             entities:
               - entity: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
@@ -383,6 +386,7 @@ views:
             show_state: true
 
           - type: entities
+            show_header_toggle: false
             title: Prognozė ir kainos
             entities:
               - entity: sensor.solcast_correction_factor
@@ -404,6 +408,7 @@ views:
           # „tekstas"). Automatika: packages/eso_pranesimai.yaml +
           # solis_storm_mode_toggle.
           - type: entities
+            show_header_toggle: false
             title: Audros / ESO rezervas
             entities:
               - entity: sensor.eso_atjungimai
@@ -448,6 +453,7 @@ views:
             icon: mdi:bank
 
           - type: entities
+            show_header_toggle: false
             entities:
               - entity: sensor.eso_bankas_likutis
                 name: Banko likutis
@@ -922,6 +928,7 @@ views:
       - type: grid
         cards:
           - type: entities
+            show_header_toggle: false
             title: Įvestis (pildyk ranka)
             entities:
               - entity: input_number.pv_investicija

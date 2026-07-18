@@ -264,6 +264,7 @@ views:
           # Sprendimas — pirmoje eilėje (svarbiausia); Solcast korekcijos
           # rodikliai perkelti į Prognozių skiltį (grupavimas pagal temą).
           - type: entities
+            show_header_toggle: false
             title: Balansas ir automatika
             entities:
               - entity: sensor.energy_manager_eimo_decision
@@ -350,6 +351,7 @@ views:
               action: toggle
 
           - type: entities
+            show_header_toggle: false
             title: Nustatymai ir kainos
             entities:
               - entity: input_select.energy_season_eimo
@@ -369,6 +371,7 @@ views:
           # Slot1 — vienintelis automatikos naudojamas; slot2–6 palikti seni
           # rankiniai įrašai su OFF jungikliais.
           - type: entities
+            show_header_toggle: false
             title: Slot1 (inverterio registrai)
             entities:
               - entity: select.inverter_control_1033300254190112_storage_mode
@@ -397,6 +400,7 @@ views:
                 icon: mdi:transmission-tower-import
 
           - type: entities
+            show_header_toggle: false
             title: Inverterio būsena
             entities:
               - entity: sensor.solis_inverter_1033300254190112_solis_temperature
@@ -421,6 +425,7 @@ views:
           # Solcast + korekcijos rodikliai vienoje vietoje (dešinės kolonos
           # apačioje — kolonų aukščio balansui).
           - type: entities
+            show_header_toggle: false
             title: Saulės prognozė ir korekcija
             entities:
               - entity: sensor.solcast_pv_forecast_forecast_remaining_today
