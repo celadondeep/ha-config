@@ -37,6 +37,11 @@ patobulinimus.
      Self-Use + discharge slot (Feed-In Priority baterijos NEiškrauna —
      dieną tik kaupia).
 3. Ataskaitą rašyk lietuviškai.
+4. **Dokumentacija (/config/docs/) — gyva.** Jei keiti logiką, slenksčius
+   ar taisykles — TAME PAČIAME commit'e atnaujink atitinkamą docs failą
+   (valdymo_logika.md / taisykles.md / eso.md / prognozes.md) ir pridėk
+   įrašą docs/zurnalas.md (data, kas, kodėl, skaičiai). Jei pastebi, kad
+   dokumentacija neatitinka realybės — pataisyk ir pažymėk žurnale.
 
 ## Duomenų šaltiniai
 
