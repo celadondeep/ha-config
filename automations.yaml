@@ -26,7 +26,11 @@
         # Adaptyvi korekcija — AppDaemon mokosi iš faktas/prognozė santykio
         factor: "{{ states('sensor.solcast_correction_factor') | float(1) }}"
         forecast_today: "{{ (forecast_raw * factor) | round(1) }}"
-        threshold: 22
+        # 10 (buvo 22; 2026-07-18 vartotojo logika: „100% saulės turi tilpti"
+        # → eksportas nuo pirmų vatų, baterija pildosi tik iš >1 kW pertekliaus
+        # ir lieka tuščia ilgiausiai). Self-Use lieka tik silpnoms dienoms,
+        # kur viskas telpa trivialiai ir baterijai reikia kiekvienos kWh.
+        threshold: 10
         soc_now: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) | round(0) }}"
         consumption_today: "{{ states('sensor.consumption_remaining_today') | float(0) | round(1) }}"
         target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 5] | max }}"
@@ -331,20 +335,19 @@
                 entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
               data:
                 value: 0
-            # Po iškrovos: jei ATEINANČIAI dienai prognozuojama daug saulės
-            # (koreguota > 22 kWh, ta pati riba kaip ryto režime) — likti
-            # Feed-in Priority, kad rytinis perteklius eitų į tinklą nuo pirmų
-            # watų. Kitaip — Self-Use namams. Po vidurnakčio (00:00–07:00)
-            # ateinanti diena = forecast_TODAY; forecast_tomorrow tuo metu jau
-            # rodo porytdienį (iki 2026-07-17 čia visada buvo tomorrow —
-            # po vidurnakčio režimas rinkosi pagal ne tos dienos prognozę).
+            # Po iškrovos: jei ATEINANČIAI dienai prognozuojama normali saulė
+            # (koreguota > 10 kWh, ta pati riba kaip ryto režime; buvo 22 —
+            # 2026-07-18 nuleista pagal vartotojo „eksportas nuo pirmų vatų"
+            # logiką) — likti Feed-in Priority. Kitaip — Self-Use namams.
+            # Po vidurnakčio (00:00–07:00) ateinanti diena = forecast_TODAY;
+            # forecast_tomorrow tuo metu jau rodo porytdienį.
             - variables:
                 coming_day_kwh: >-
                   {{ ((states('sensor.solcast_pv_forecast_forecast_today')
                        if now().hour < 12
                        else states('sensor.solcast_pv_forecast_forecast_tomorrow')) | float(0)
                       * states('sensor.solcast_correction_factor') | float(1)) | round(1) }}
-                next_mode: "{{ 'Feed-in Priority' if coming_day_kwh > 22 else 'Self-Use' }}"
+                next_mode: "{{ 'Feed-in Priority' if coming_day_kwh > 10 else 'Self-Use' }}"
             - service: select.select_option
               target:
                 entity_id: select.solis_s6_eh3p_work_mode
