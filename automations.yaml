@@ -26,13 +26,15 @@
         # Adaptyvi korekcija — AppDaemon mokosi iš faktas/prognozė santykio
         factor: "{{ states('sensor.solcast_correction_factor') | float(1) }}"
         forecast_today: "{{ (forecast_raw * factor) | round(1) }}"
-        # 10 (buvo 22; 2026-07-18 vartotojo logika: „100% saulės turi tilpti"
-        # → eksportas nuo pirmų vatų, baterija pildosi tik iš >1 kW pertekliaus
-        # ir lieka tuščia ilgiausiai). Self-Use lieka tik silpnoms dienoms,
-        # kur viskas telpa trivialiai ir baterijai reikia kiekvienos kWh.
-        threshold: 10
         soc_now: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) | round(0) }}"
         consumption_today: "{{ states('sensor.consumption_remaining_today') | float(0) | round(1) }}"
+        # DINAMINIS slenkstis (2026-07-18, vartotojo logika): Self-Use teisėtas
+        # tik jei visa dienos saulė tilptų į LAISVĄ baterijos vietą + namų
+        # šviesaus meto vartojimą (~50 % paros) be eksporto. Tuščiam kaupikliui
+        # tai ~14.4 + ~7.5 ≈ 22 kWh (sutampa su senu statiniu slenksčiu),
+        # pusiau pilnam — ~15 kWh. Viršijus → Feed-in Priority: eksportas nuo
+        # pirmų vatų, baterija pildosi tik iš >1 kW pertekliaus.
+        threshold: "{{ ((100 - soc_now) * 0.16 + consumption_today * 0.5) | round(1) }}"
         target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 5] | max }}"
         # Naktinė iškrova dar nebaigta: slotas ON ir SOC virš tikslo. Tokiu
         # atveju 06:00 nesikiša — morning_room_check (05:30/06:15/06:45) dar
@@ -335,19 +337,22 @@
                 entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
               data:
                 value: 0
-            # Po iškrovos: jei ATEINANČIAI dienai prognozuojama normali saulė
-            # (koreguota > 10 kWh, ta pati riba kaip ryto režime; buvo 22 —
-            # 2026-07-18 nuleista pagal vartotojo „eksportas nuo pirmų vatų"
-            # logiką) — likti Feed-in Priority. Kitaip — Self-Use namams.
-            # Po vidurnakčio (00:00–07:00) ateinanti diena = forecast_TODAY;
-            # forecast_tomorrow tuo metu jau rodo porytdienį.
+            # Po iškrovos: DINAMINIS slenkstis kaip ryto režime (2026-07-18) —
+            # jei ateinančios dienos saulė netilptų į laisvą baterijos vietą +
+            # namų šviesaus meto vartojimą, likti Feed-in Priority (eksportas
+            # nuo pirmų vatų). Kitaip — Self-Use namams. Po vidurnakčio
+            # (00:00–07:00) ateinanti diena = forecast_TODAY; forecast_tomorrow
+            # tuo metu jau rodo porytdienį.
             - variables:
                 coming_day_kwh: >-
                   {{ ((states('sensor.solcast_pv_forecast_forecast_today')
                        if now().hour < 12
                        else states('sensor.solcast_pv_forecast_forecast_tomorrow')) | float(0)
                       * states('sensor.solcast_correction_factor') | float(1)) | round(1) }}
-                next_mode: "{{ 'Feed-in Priority' if coming_day_kwh > 10 else 'Self-Use' }}"
+                dyn_threshold: >-
+                  {{ ((100 - current_soc) * 0.16
+                      + states('sensor.consumption_forecast_tomorrow') | float(14) * 0.5) | round(1) }}
+                next_mode: "{{ 'Feed-in Priority' if coming_day_kwh > dyn_threshold else 'Self-Use' }}"
             - service: select.select_option
               target:
                 entity_id: select.solis_s6_eh3p_work_mode
