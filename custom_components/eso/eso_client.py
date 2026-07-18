@@ -92,6 +92,11 @@ class ESOClient:
             if self._open_consumption():
                 self._save_session()
                 _LOGGER.info("ESO: full login successful, session saved")
+                # Iškart išvalyti VISUS likusius OTP laiškus: nepavykę /
+                # lygiagretūs prisijungimai palieka pasenusių kodų, kurie
+                # kitąkart gali būti sugriebti vietoj šviežio (kodai
+                # vienkartiniai — naujas prisijungimas anuliuoja senus).
+                self._cleanup_otp_mails()
             else:
                 _LOGGER.error("ESO login did not reach the consumption page")
         except requests.exceptions.RequestException as e:
@@ -280,6 +285,44 @@ class ESOClient:
                 conn.logout()
             except Exception:  # noqa: BLE001
                 pass
+
+    def _cleanup_otp_mails(self) -> None:
+        """Ištrina visus dar likusius OTP kodų laiškus iš pašto dėžutės.
+
+        Trinami TIK laiškai, kuriuose atpažįstamas kodo šablonas
+        („kodas … 6 skaitmenys") — to paties siuntėjo informaciniai laiškai
+        paliekami. Best-effort: klaida čia niekada neblokuoja prisijungimo."""
+        if not self.imap_config:
+            return
+        cfg = self.imap_config
+        try:
+            conn = imaplib.IMAP4_SSL(cfg["host"], cfg.get("port", 993))
+            try:
+                conn.login(cfg["username"], cfg["password"])
+                conn.select(cfg.get("folder", "INBOX"))
+                typ, data = conn.search(None, f'(FROM "{cfg["sender"]}")')
+                if typ != "OK" or not data or not data[0]:
+                    return
+                deleted = 0
+                for msg_id in data[0].split():
+                    typ, msg_data = conn.fetch(msg_id, "(RFC822)")
+                    if typ != "OK" or not msg_data or not msg_data[0]:
+                        continue
+                    msg = email.message_from_bytes(msg_data[0][1])
+                    plain = re.sub(r"<[^>]+>", " ", self._message_text(msg) or "")
+                    if re.search(r"kodas\D{0,40}?\d{6}", plain, re.IGNORECASE):
+                        conn.store(msg_id, "+FLAGS", "\\Deleted")
+                        deleted += 1
+                if deleted:
+                    conn.expunge()
+                    _LOGGER.info("ESO: išvalyta %d OTP laiškų", deleted)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.warning("ESO: OTP laiškų valymas nepavyko: %s", e)
 
     @staticmethod
     def _delete_message(conn, msg_id) -> None:
