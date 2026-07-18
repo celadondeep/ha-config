@@ -947,7 +947,13 @@ views:
             columns: 3
             entities:
               - entity: sensor.pv_pagaminta_viso
-                name: Pagaminta
+                name: Pagaminta (abi)
+              - entity: sensor.solis_s6_eh3p_pv_total_energy_generation
+                name: Šeškiniai
+                icon: mdi:solar-panel
+              - entity: sensor.solis_inverter_1033300254190112_solis_energy_total
+                name: Eimo
+                icon: mdi:solar-panel
               - entity: sensor.pv_sutaupyta_viso
                 name: Sutaupyta
               - entity: sensor.pv_gryna_investicija
@@ -1012,9 +1018,15 @@ views:
                   const a = entity.attributes;
                   const annual = Number(a.metine_gamyba) || 11000;
                   const price = Number(a.kwh_verte) || 0.25;
+                  // Naudingumo koef.: sutaupoma tik naudinga energija
+                  // (pagaminta − nuostoliai) — sinchronizuota su
+                  // pv_sutaupyta_viso (2026-07-18 korekcija).
+                  const ratio = Number(a.naudingumo_koef) || 0.85;
                   const fee = Number(a.men_mokestis) || 10;
                   const eimoStart = new Date(2026, 1, 1);
-                  const modbusStart = new Date(2026, 3, 1);
+                  // Modbus į tinklą pajungtas 2026-05-09 (iš ESO istorijos;
+                  // ankstesnis 04-01 buvo spėjimas — balandį gamybos nebuvo).
+                  const modbusStart = new Date(2026, 4, 9);
                   const eimoShare = 0.46;
                   const pts = [];
                   let cum = 0;
@@ -1024,7 +1036,7 @@ views:
                     pts.push([d.getTime(), cum]);
                     const share = d < modbusStart ? eimoShare : 1;
                     const mFee = (d >= eimoStart ? fee / 2 : 0) + (d >= modbusStart ? fee / 2 : 0);
-                    cum += annual * W[d.getMonth()] * share * price - mFee;
+                    cum += annual * W[d.getMonth()] * share * price * ratio - mFee;
                     d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
                   }
                   const now = Date.now();
@@ -1067,7 +1079,7 @@ views:
                 data_generator: |
                   const W = [0.02, 0.04, 0.08, 0.12, 0.14, 0.14, 0.14, 0.12, 0.09, 0.06, 0.03, 0.02];
                   const annual = Number(entity.attributes.metine_gamyba) || 11000;
-                  const modbusStart = new Date(2026, 3, 1);
+                  const modbusStart = new Date(2026, 4, 9);
                   const eimoShare = 0.46;
                   const pts = [];
                   let cum = 0;

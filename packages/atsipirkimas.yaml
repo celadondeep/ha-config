@@ -1,10 +1,22 @@
 # =============================================================================
-#  Elektrinių atsipirkimas — ABI elektrinės kartu (Šeškinių Modbus + Eimo SE).
+#  Elektrinių atsipirkimas — ABI elektrinės kartu (Šeškinių Modbus + Eimo SE);
+#  investicija ir parama yra bendros sumos, todėl atsipirkimas skaičiuojamas
+#  bendrai, bet gamyba matoma ir po vieną (dashboardo Rezultatas + atributai).
 #  Investicija įvedama ranka dashboard'e; parama (APVA) — 5012 €.
-#  Sutaupymas: kiekviena pagaminta kWh vertinama pasaugojimo schemos kaina
-#  (pagaminta kWh galiausiai atstoja pirkimą iš tinklo), minus pasaugojimo
-#  mėnesinis mokestis abiem objektams nuo paleidimo datų.
-#  Paleidimo datos (patvirtinta 2026-07-08): Eimo ~2026-02-01, Modbus ~2026-04-01.
+#
+#  Sutaupymas (2026-07-18 korekcija): vertinama tik NAUDINGA energija —
+#  pagaminta × naudingumo koeficientas × kWh vertė − pasaugojimo mokesčiai.
+#  Naudingumo koeficientas skaičiuojamas GYVAI iš Modbus lifetime skaitliukų:
+#  (namai + backup + eksportas − importas) / PV gamyba (≈0.80 dabar; augs
+#  gerėjant nakties optimizacijoms ir pajungus boilerį). Iki korekcijos
+#  kiekviena pagaminta kWh buvo vertinama pilna kaina — sutaupymas buvo
+#  pervertintas ~20 % (nuostoliai: baterijos round-trip, inverterio idle,
+#  konversija). Eimo taikomas tas pats koeficientas (prielaida; cloud
+#  lifetime import/eksporto skaitliukų nepakanka atskiram).
+#
+#  Paleidimo datos: Eimo ~2026-02-01 (patvirtinta 2026-07-08), Modbus
+#  TIKSLIAI 2026-05-09 (nustatyta 2026-07-17 iš ESO valandinės istorijos —
+#  ankstesnis ~04-01 buvo apytikris spėjimas; gamybos balandį NEBUVO).
 #  Metinės gamybos prognozė kalibruota pagal 2026-06 faktą (~1540 kWh/mėn abi
 #  kartu ≈ 14 % metinės) → ~11 000 kWh/metus. Tikslinti per input_number.
 # =============================================================================
@@ -76,8 +88,10 @@ template:
           eimo_kwh: "{{ states('sensor.solis_inverter_1033300254190112_solis_energy_total') | float(0) | round(0) }}"
           metine_gamyba: "{{ states('input_number.pv_metine_gamyba') | float(11000) }}"
 
-      # Sutaupyta nuo paleidimo: gamyba × kWh vertė − pasaugojimo mokesčiai.
+      # Sutaupyta nuo paleidimo: NAUDINGA energija × kWh vertė − mokesčiai.
       # Mokestis dalinamas pusiau abiem objektams nuo jų paleidimo datų.
+      # Naudingumo koeficientas ribojamas [0.6, 1.0] (apsauga nuo skaitliukų
+      # anomalijų); kol Modbus PV < 200 kWh — atsarginis 0.85.
       - name: "pv_sutaupyta_viso"
         unique_id: pv_sutaupyta_viso
         unit_of_measurement: "€"
@@ -86,15 +100,30 @@ template:
           {% set pv = states('sensor.pv_pagaminta_viso') | float(0) %}
           {% set verte = states('input_number.pv_kwh_verte') | float(0.25) %}
           {% set fee = states('input_number.pv_men_mokestis') | float(10) %}
+          {% set home = states('sensor.solis_s6_eh3p_household_load_total_energy') | float(0) %}
+          {% set bkp = states('sensor.solis_s6_eh3p_backup_load_total_energy') | float(0) %}
+          {% set exp = states('sensor.solis_s6_eh3p_total_energy_fed_into_grid') | float(0) %}
+          {% set imp = states('sensor.solis_s6_eh3p_total_energy_imported_from_grid') | float(0) %}
+          {% set pvm = states('sensor.solis_s6_eh3p_pv_total_energy_generation') | float(0) %}
+          {% set ratio = ((home + bkp + exp - imp) / pvm) if pvm > 200 else 0.85 %}
+          {% set ratio = [([ratio, 1.0] | min), 0.6] | max %}
           {% set eimo_men = (now().date() - strptime('2026-02-01', '%Y-%m-%d').date()).days / 30.44 %}
-          {% set modbus_men = (now().date() - strptime('2026-04-01', '%Y-%m-%d').date()).days / 30.44 %}
-          {{ (pv * verte - ([eimo_men, 0] | max) * fee / 2 - ([modbus_men, 0] | max) * fee / 2) | round(0) }}
+          {% set modbus_men = (now().date() - strptime('2026-05-09', '%Y-%m-%d').date()).days / 30.44 %}
+          {{ (pv * ratio * verte - ([eimo_men, 0] | max) * fee / 2 - ([modbus_men, 0] | max) * fee / 2) | round(0) }}
         availability: >
           {{ has_value('sensor.pv_pagaminta_viso') }}
         attributes:
           metine_gamyba: "{{ states('input_number.pv_metine_gamyba') | float(11000) }}"
           kwh_verte: "{{ states('input_number.pv_kwh_verte') | float(0.25) }}"
           men_mokestis: "{{ states('input_number.pv_men_mokestis') | float(10) }}"
+          naudingumo_koef: >-
+            {% set home = states('sensor.solis_s6_eh3p_household_load_total_energy') | float(0) %}
+            {% set bkp = states('sensor.solis_s6_eh3p_backup_load_total_energy') | float(0) %}
+            {% set exp = states('sensor.solis_s6_eh3p_total_energy_fed_into_grid') | float(0) %}
+            {% set imp = states('sensor.solis_s6_eh3p_total_energy_imported_from_grid') | float(0) %}
+            {% set pvm = states('sensor.solis_s6_eh3p_pv_total_energy_generation') | float(0) %}
+            {% set ratio = ((home + bkp + exp - imp) / pvm) if pvm > 200 else 0.85 %}
+            {{ ([([ratio, 1.0] | min), 0.6] | max) | round(3) }}
 
       - name: "pv_gryna_investicija"
         unique_id: pv_gryna_investicija
@@ -116,16 +145,17 @@ template:
           {{ has_value('sensor.pv_sutaupyta_viso') and states('sensor.pv_gryna_investicija') | float(0) > 0 }}
 
       # Linijinė prognozė: kiek liko / kada atsipirks pagal metinį sutaupymą
-      # (metinė gamyba × vertė − 12 mėn. mokesčių). Sezoniškumo nevertina —
-      # tikslumo ~±2 mėn. pakanka.
+      # (metinė gamyba × naudingumo koef. × vertė − 12 mėn. mokesčių).
+      # Sezoniškumo nevertina — tikslumo ~±2 mėn. pakanka.
       - name: "pv_atsipirkimo_prognoze"
         unique_id: pv_atsipirkimo_prognoze
         icon: mdi:calendar-check
         state: >
           {% set gryna = states('sensor.pv_gryna_investicija') | float(0) %}
           {% set sutaupyta = states('sensor.pv_sutaupyta_viso') | float(0) %}
+          {% set ratio = state_attr('sensor.pv_sutaupyta_viso', 'naudingumo_koef') | float(0.85) %}
           {% set metinis = states('input_number.pv_metine_gamyba') | float(11000)
-             * states('input_number.pv_kwh_verte') | float(0.25)
+             * ratio * states('input_number.pv_kwh_verte') | float(0.25)
              - states('input_number.pv_men_mokestis') | float(10) * 12 %}
           {% if gryna <= 0 %} įvesk investiciją
           {% elif sutaupyta >= gryna %} atsipirko 🎉
