@@ -46,12 +46,6 @@ lovelace:
       icon: mdi:solar-power-variant
       show_in_sidebar: true
       filename: lovelace/eimo.yaml
-    dokumentacija:
-      mode: yaml
-      title: Dokumentacija
-      icon: mdi:book-open-page-variant
-      show_in_sidebar: true
-      filename: lovelace/dokumentacija.yaml
 
 input_boolean:
   storm_mode:
