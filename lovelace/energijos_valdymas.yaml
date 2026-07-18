@@ -396,16 +396,17 @@ views:
               - entity: input_number.electricity_price_sell
                 name: Pardavimo kaina
 
-          # ESO savitarnos pranešimai + automatinis rezervo planavimas
-          # planuotiems atjungimams (packages/eso_pranesimai.yaml).
+          # ESO planuojami atjungimai — originalus savitarnos dashboardo
+          # bloko tekstas + automatinis rezervo planavimas
+          # (packages/eso_pranesimai.yaml).
+          - type: markdown
+            title: Planuojami elektros atjungimai
+            content: >-
+              {{ state_attr('sensor.eso_atjungimai', 'tekstas')
+                 or 'Duomenų dar nėra — laukiama kito ESO importo.' }}
+
           - type: entities
-            title: ESO pranešimai
             entities:
-              - entity: sensor.eso_atjungimai
-                name: Planuojami atjungimai
-                secondary_info: last-updated
-              - entity: sensor.eso_pranesimai
-                name: Naujausias pranešimas
               - entity: input_boolean.eso_rezervo_planas
                 name: Rezervo planas (atjungimui)
               - entity: input_datetime.eso_atjungimas_nuo

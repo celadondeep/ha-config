@@ -2,16 +2,14 @@
 #  ESO pranešimai ir automatinis rezervo planavimas planuotiems atjungimams.
 #
 #  Duomenų šaltinis: custom_components/eso — kasdienio importo metu nuskaito
-#  savitarnos /messages dėžutę, naujiems pranešimams kelia eso_new_message
-#  įvykį (tipas: planuojamas_atjungimas / atjungimas_baigtas / kita; jei
-#  tekste rastas langas — atjungimas_nuo/atjungimas_iki "YYYY-MM-DD HH:MM").
-#  Pirmas paleidimas tik užsėja matytų sąrašą (eso_seen_messages.json) — be
-#  įvykių, kad istorija nesuplanuotų praėjusių atjungimų.
+#  savitarnos dashboardo bloką „Planuojami elektros atjungimai"
+#  (sensor.eso_atjungimai: būsena = artimiausias langas / nenumatoma,
+#  tekstas atributas = originalus bloko tekstas). Naujam langui keliamas
+#  eso_planned_outage įvykis (dedup — eso_seen_messages.json).
 #
 #  Grandinė:
-#   1. eso_naujas_pranesimas — kiekvienam naujam pranešimui HA notification;
-#      planuojamo atjungimo atveju užpildo input_datetime langus ir įjungia
-#      eso_rezervo_planas (tik jei atjungimas ateityje).
+#   1. eso_atjungimas_is_dashboardo — langas → input_datetime + rezervo
+#      planas + notification (tik ateities datai).
 #   2. eso_rezervo_ijungimas — likus ≤14 val. iki atjungimo įjungia
 #      input_boolean.storm_mode (Šeškinių elektrinė; atjungimo pranešimai —
 #      šio įvado). storm_mode toliau tvarko solis_storm_mode_toggle: eksportas
@@ -39,11 +37,6 @@ input_datetime:
     icon: mdi:transmission-tower
 
 automation:
-  # PIRMINIS atjungimų šaltinis (2026-07-18, vartotojo pageidavimas):
-  # savitarnos dashboardo blokas „Planuojami elektros atjungimai" —
-  # integracija jį tikrina per kasdienį importą ir naujam langui kelia
-  # eso_planned_outage įvykį. Pranešimų tekstų kelias (žemiau) lieka
-  # atsarginis — abu nustato tą patį langą, konflikto nėra.
   - id: eso_atjungimas_is_dashboardo
     alias: "ESO - Planuojamas atjungimas (dashboardo blokas)"
     trigger:
@@ -79,55 +72,6 @@ automation:
             atjungimo dienai baterija bus kaupiama pilna.
     mode: queued
     max: 5
-
-  - id: eso_naujas_pranesimas
-    alias: "ESO - Naujas savitarnos pranešimas"
-    description: >
-      Kiekvienam eso_new_message įvykiui — persistent notification.
-      Planuojamo atjungimo su rastu laiko langu atveju papildomai užpildo
-      atjungimo input_datetime ir įjungia rezervo planą (tik ateities datai).
-    trigger:
-      - platform: event
-        event_type: eso_new_message
-    action:
-      - service: notify.persistent_notification
-        data:
-          title: "ESO pranešimas: {{ trigger.event.data.tema }}"
-          message: >
-            {{ trigger.event.data.data }} —
-            {{ trigger.event.data.tekstas[:600] }}
-      - choose:
-          - conditions:
-              - condition: template
-                value_template: >
-                  {{ trigger.event.data.tipas == 'planuojamas_atjungimas'
-                     and trigger.event.data.atjungimas_nuo is defined
-                     and as_timestamp(trigger.event.data.atjungimas_nuo, 0) > as_timestamp(now()) }}
-            sequence:
-              - service: input_datetime.set_datetime
-                target:
-                  entity_id: input_datetime.eso_atjungimas_nuo
-                data:
-                  datetime: "{{ trigger.event.data.atjungimas_nuo }}:00"
-              - service: input_datetime.set_datetime
-                target:
-                  entity_id: input_datetime.eso_atjungimas_iki
-                data:
-                  datetime: "{{ trigger.event.data.atjungimas_iki }}:00"
-              - service: input_boolean.turn_on
-                target:
-                  entity_id: input_boolean.eso_rezervo_planas
-              - service: notify.persistent_notification
-                data:
-                  title: "ESO atjungimas suplanuotas — rezervas paruoštas 📅⚡"
-                  message: >
-                    Planuojamas atjungimas
-                    {{ trigger.event.data.atjungimas_nuo }} –
-                    {{ trigger.event.data.atjungimas_iki }}.
-                    Audros/rezervo režimas įsijungs automatiškai likus ~14 val.
-                    (baterija bus kaupiama rezervui, eksportas sustabdytas).
-    mode: queued
-    max: 10
 
   - id: eso_rezervo_ijungimas
     alias: "ESO - Rezervo režimo įjungimas prieš atjungimą"

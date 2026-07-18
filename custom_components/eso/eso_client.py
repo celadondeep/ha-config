@@ -17,10 +17,6 @@ from .objects_parser import (
 
 LOGIN_URL = "https://mano.eso.lt/?destination=/consumption"
 GENERATION_URL = "https://mano.eso.lt/consumption?ajax_form=1&_wrapper_format=drupal_ajax"
-# Pranešimų sąrašas kraunasi lazy-load būdu: /messages puslapyje drupalSettings
-# rodo lazyLoadTableListReload.url=/messages?reload=1, kuris grąžina Drupal
-# AJAX komandas su sąrašo HTML "insert" komandoje.
-MESSAGES_URL = "https://mano.eso.lt/messages?reload=1"
 DASHBOARD_URL = "https://mano.eso.lt/dashboard"
 TFA_FORM_ID = "gpc_tfa_login_auth_form"
 CONSUMPTION_FORM_ID = "eso_consumption_history_form"
@@ -513,64 +509,6 @@ class ESOClient:
                     self.dataset[obj][consumption_type] = {}
                 self.dataset[obj][consumption_type].update(self.parse_dataset(dataset))
 
-    def fetch_messages(self, limit: int = 20) -> list[dict]:
-        """Return recent inbox messages from the self-service portal.
-
-        Each message: {"id", "title", "body", "date", "unread"}; id is the
-        portal path (/messages/received/<thread>/<msg>), body is the plain
-        text of the list excerpt (the full text — ESO messages are short)."""
-        if not self.cookies:
-            return []
-        try:
-            response = self.session.get(
-                MESSAGES_URL,
-                headers={"X-Requested-With": "XMLHttpRequest"},
-                allow_redirects=True,
-            )
-            response.raise_for_status()
-            commands = response.json()
-        except (requests.exceptions.RequestException, ValueError) as e:
-            _LOGGER.error("ESO messages fetch error: %s", e)
-            return []
-        html = "".join(
-            d.get("data", "")
-            for d in commands
-            if d.get("command") == "insert" and isinstance(d.get("data"), str)
-        )
-        messages: list[dict] = []
-        # Eilutės: <div class="row unread "> arba <div class="row"> (bet ne
-        # "row-table" — regex reikalauja kabutės iškart po klasės).
-        markers = list(re.finditer(r'<div class="row( unread)?\s*">', html))
-        for i, marker in enumerate(markers):
-            end = markers[i + 1].start() if i + 1 < len(markers) else len(html)
-            chunk = html[marker.end():end]
-            m_id = re.search(r'href="(/messages/received/\d+/\d+)"', chunk)
-            m_title = re.search(
-                r'class="topic-element"><span>(.*?)</span>', chunk, re.DOTALL
-            )
-            m_body = re.search(
-                r'class="desc-element"><span>(.*?)</span>', chunk, re.DOTALL
-            )
-            m_date = re.search(r'col-date"><span>([\d-]+)</span>', chunk)
-            if not (m_id and m_title):
-                continue
-
-            def _clean(raw: str) -> str:
-                return unescape(re.sub(r"<[^>]+>", " ", raw)).strip()
-
-            messages.append(
-                {
-                    "id": m_id.group(1),
-                    "title": _clean(m_title.group(1)),
-                    "body": _clean(m_body.group(1)) if m_body else "",
-                    "date": m_date.group(1) if m_date else None,
-                    "unread": bool(marker.group(1)),
-                }
-            )
-            if len(messages) >= limit:
-                break
-        return messages
-
     def fetch_planned_outages(self) -> dict:
         """Return planned outages from the dashboard block.
 
@@ -598,6 +536,16 @@ class ESOClient:
         text = re.sub(r"<script.*?</script>", " ", segment, flags=re.DOTALL)
         text = unescape(re.sub(r"<[^>]+>", " ", text))
         text = re.sub(r"\s+", " ", text).strip()
+        # Palikti tik bloko turinį kaip jį rodo ESO dashboardas: numesti
+        # HTML klasės liekaną prieš antraštę ir mygtukų tekstus gale.
+        m = re.search(r"Planuojami elektros atjungimai\s*(.*)", text)
+        if m:
+            text = m.group(1).strip()
+        # „Sutrikimo registravimas" — bloko mygtukas, po jo tik markup'o
+        # liekanos (segmentas kerpamas ties kito bloko pradžia, todėl gale
+        # gali likti neuždarytas tagas).
+        text = text.split("Sutrikimo registravimas")[0]
+        text = re.sub(r"<[^>]*$", "", text).strip()
         windows: list[dict] = []
         if "nenumatoma" not in text.lower():
             for m in re.finditer(

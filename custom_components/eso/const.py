@@ -47,16 +47,14 @@ def signal_stored_updated(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_stored_updated"
 
 
-# Dispatcher signal fired after the inbox messages are refreshed
-def signal_messages_updated(entry_id: str) -> str:
-    return f"{DOMAIN}_{entry_id}_messages_updated"
+# Dispatcher signal fired after the planned-outages block is refreshed
+def signal_outages_updated(entry_id: str) -> str:
+    return f"{DOMAIN}_{entry_id}_outages_updated"
 
 
-# Event fired on the HA bus for every message not seen before
-EVENT_NEW_MESSAGE = "eso_new_message"
 # Event fired for every planned-outage window newly seen on the dashboard
 EVENT_PLANNED_OUTAGE = "eso_planned_outage"
-# Matytų pranešimų id sąrašas (kad įvykiai nešaudytų pakartotinai)
+# Matytų atjungimo langų sąrašas (kad įvykiai nešaudytų pakartotinai)
 SEEN_MESSAGES_FILE = "eso_seen_messages.json"
 
 
