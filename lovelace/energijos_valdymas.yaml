@@ -396,31 +396,46 @@ views:
               - entity: input_number.electricity_price_sell
                 name: Pardavimo kaina
 
-          # Audros / ESO rezervas — VISKAS vienoje vietoje (2026-07-18):
-          # originalus ESO atjungimų bloko tekstas, rankinis audros jungiklis,
-          # automatinis rezervo planas su atjungimo langu ir krovimo sloto
-          # (audros rež.) būsena. Automatika: packages/eso_pranesimai.yaml
-          # + solis_storm_mode_toggle.
-          - type: vertical-stack
-            cards:
-              - type: markdown
-                title: Audros / ESO rezervas
-                content: >-
-                  **Planuojami elektros atjungimai:**
-                  {{ state_attr('sensor.eso_atjungimai', 'tekstas')
-                     or 'duomenų dar nėra — laukiama kito ESO importo.' }}
-              - type: entities
-                entities:
-                  - entity: input_boolean.storm_mode
-                    name: Audros / ESO režimas (rankinis)
-                  - entity: input_boolean.eso_rezervo_planas
-                    name: Rezervo planas (automatinis, iš ESO)
-                  - entity: input_datetime.eso_atjungimas_nuo
-                    name: Atjungimas nuo
-                  - entity: input_datetime.eso_atjungimas_iki
-                    name: Atjungimas iki
-                  - entity: switch.solis_s6_eh3p_grid_time_of_use_charging_period_1
-                    name: Krovimo slotas (audros rež.)
+          # Audros / ESO rezervas — VIENA kortelė (2026-07-18): ramybės
+          # būsenoje tik 3 eilutės (atjungimų būsena, rankinis jungiklis,
+          # planas); atjungimo langas rodomas tik kai planas aktyvus, krovimo
+          # sloto būsena — tik kai audros režimas įjungtas. Pilnas ESO bloko
+          # tekstas — paspaudus atjungimų eilutę (more-info atributas
+          # „tekstas"). Automatika: packages/eso_pranesimai.yaml +
+          # solis_storm_mode_toggle.
+          - type: entities
+            title: Audros / ESO rezervas
+            entities:
+              - entity: sensor.eso_atjungimai
+                name: ESO planuojami atjungimai
+              - entity: input_boolean.storm_mode
+                name: Audros / ESO režimas (rankinis)
+              - entity: input_boolean.eso_rezervo_planas
+                name: Rezervo planas (automatinis)
+              - type: conditional
+                conditions:
+                  - condition: state
+                    entity: input_boolean.eso_rezervo_planas
+                    state: "on"
+                row:
+                  entity: input_datetime.eso_atjungimas_nuo
+                  name: Atjungimas nuo
+              - type: conditional
+                conditions:
+                  - condition: state
+                    entity: input_boolean.eso_rezervo_planas
+                    state: "on"
+                row:
+                  entity: input_datetime.eso_atjungimas_iki
+                  name: Atjungimas iki
+              - type: conditional
+                conditions:
+                  - condition: state
+                    entity: input_boolean.storm_mode
+                    state: "on"
+                row:
+                  entity: switch.solis_s6_eh3p_grid_time_of_use_charging_period_1
+                  name: Krovimo slotas (audros rež.)
 
       # ── 3. ESO PASAUGOJIMO BANKAS (kairė kolona po „Dabar" sekcijos) ──
       # ESO oficialūs įvado duomenys — TIK Modbus elektrinė (obj. 220588,
