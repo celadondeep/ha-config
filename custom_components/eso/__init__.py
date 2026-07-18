@@ -292,6 +292,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
                 async_dispatcher_send(
                     hass, signal_outages_updated(entry.entry_id)
                 )
+                # Saugiklis: blokas NE tuščias, bet lango atpažinti nepavyko
+                # (užpildyto bloko markup dar nematytas) — kelti įspėjimą,
+                # kad vartotojas patikrintų ranka, o auditas pamatytų formatą.
+                raw = outages.get("raw", "")
+                if raw and "nenumatoma" not in raw.lower() and not outages.get("windows"):
+                    _LOGGER.warning(
+                        "ESO: atjungimų blokas ne tuščias, bet langas neatpažintas: %s",
+                        raw[:200],
+                    )
+                    hass.async_create_task(
+                        hass.services.async_call(
+                            "notify",
+                            "persistent_notification",
+                            {
+                                "title": "ESO atjungimų blokas neatpažintas ⚠️",
+                                "message": (
+                                    "Savitarnoje rodomas atjungimų tekstas, bet "
+                                    "automatika laiko lango neišparsino — "
+                                    "patikrink ir, jei reikia, įvesk langą ranka "
+                                    f"(input_datetime.eso_atjungimas_*): {raw[:400]}"
+                                ),
+                            },
+                        )
+                    )
                 if outages.get("windows"):
                     seen_path = hass.config.path(SEEN_MESSAGES_FILE)
                     seen = await hass.async_add_executor_job(_load_seen, seen_path) or []
