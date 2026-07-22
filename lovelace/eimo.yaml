@@ -575,7 +575,7 @@ views:
     cards:
       - type: markdown
         content: >
-          ### 📊 Eimo vartojimo profilis
+          ### Eimo vartojimo profilis
 
           Paros vidurkis **{{ state_attr('sensor.consumption_profile_eimo','daily_avg') }} kWh**
           · duomenų **{{ state_attr('sensor.consumption_profile_eimo','data_days') }} d.**
@@ -632,33 +632,3 @@ views:
                 const d = new Date(now); d.setDate(now.getDate() - back); d.setHours(12, 0, 0, 0);
                 return [d.getTime(), v];
               });
-      - type: custom:apexcharts-card
-        header:
-          show: true
-          title: Tinklo srautas pagal valandą (inverteris · 3 d.)
-        graph_span: 3d
-        span:
-          end: day
-        apex_config:
-          chart:
-            height: 280
-            animations:
-              enabled: false
-        yaxis:
-          - min: 0
-            decimals: 2
-        series:
-          - entity: sensor.solis_inverter_1033300254190112_solis_yearly_grid_energy_purchased
-            name: Iš tinklo (pirkta)
-            type: column
-            color: '#ef5350'
-            group_by:
-              func: diff
-              duration: 1h
-          - entity: sensor.solis_inverter_1033300254190112_solis_yearly_on_grid_energy
-            name: Į tinklą (parduota)
-            type: column
-            color: '#66bb6a'
-            group_by:
-              func: diff
-              duration: 1h

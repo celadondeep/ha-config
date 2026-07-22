@@ -1109,7 +1109,7 @@ views:
     cards:
       - type: markdown
         content: >
-          ### 📊 Namų vartojimo profilis
+          ### Namų vartojimo profilis
 
           Paros vidurkis **{{ state_attr('sensor.consumption_profile','daily_avg') }} kWh**
           · duomenų **{{ state_attr('sensor.consumption_profile','data_days') }} d.**
@@ -1166,33 +1166,21 @@ views:
                 const d = new Date(now); d.setDate(now.getDate() - back); d.setHours(12, 0, 0, 0);
                 return [d.getTime(), v];
               });
-      - type: custom:apexcharts-card
-        header:
-          show: true
-          title: Tinklo srautas pagal valandą (ESO įvadas · 3 d.)
-        graph_span: 3d
-        span:
-          end: day
-        apex_config:
-          chart:
-            height: 280
-            animations:
-              enabled: false
-        yaxis:
-          - min: 0
-            decimals: 2
-        series:
-          - entity: sensor.eso_ivado_importas
+      # ESO tinklo srautas — iš ILGALAIKĖS statistikos (jutiklio būsena
+      # atsinaujina tik ~kartą per parą, todėl diff nieko nerodo). Išorinė
+      # statistika eso:energy_consumed_220588 turi valandinius duomenis.
+      # Native statistics-graph (ECharts) leidžia zoom/slinkti per datas.
+      # PASTABA: ESO savitarnos duomenys vėluoja ~1–2 paras; eksporto
+      # valandinės statistikos ESO kol kas neteikia (rodys tik importą).
+      - type: statistics-graph
+        title: ESO tinklo srautas (valandinis)
+        chart_type: bar
+        period: hour
+        days_to_show: 7
+        stat_types:
+          - change
+        entities:
+          - entity: eso:energy_consumed_220588
             name: Iš tinklo (pirkta)
-            type: column
-            color: '#ef5350'
-            group_by:
-              func: diff
-              duration: 1h
-          - entity: sensor.eso_ivado_eksportas
+          - entity: eso:energy_returned_220588
             name: Į tinklą (parduota)
-            type: column
-            color: '#66bb6a'
-            group_by:
-              func: diff
-              duration: 1h
