@@ -26,3 +26,4 @@ __pycache__/
 # Solcast cache
 solcast_solar/*.json
 ip_bans.yaml
+www/docs/md/

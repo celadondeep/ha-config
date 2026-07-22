@@ -1,0 +1,12 @@
+title: Dokumentacija
+views:
+  # Pilno ekrano peržiūra: /config/docs/*.md renderinami per
+  # /local/docs/index.html (marked.js lokaliai, be CDN). Šaltinis —
+  # /config/docs, www/docs/md yra symlink į jį (visada šviežia).
+  - title: Docs
+    path: docs
+    panel: true
+    cards:
+      - type: iframe
+        url: /local/docs/index.html
+        aspect_ratio: 100%

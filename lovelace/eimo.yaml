@@ -568,3 +568,97 @@ views:
                 group_by:
                   func: max
                   duration: 1d
+
+  - title: Vartojimas
+    path: vartojimas
+    icon: mdi:chart-bar
+    cards:
+      - type: markdown
+        content: >
+          ### 📊 Eimo vartojimo profilis
+
+          Paros vidurkis **{{ state_attr('sensor.consumption_profile_eimo','daily_avg') }} kWh**
+          · duomenų **{{ state_attr('sensor.consumption_profile_eimo','data_days') }} d.**
+          · valandinio mokymosi **{{ states('sensor.consumption_profile_eimo') }} d.**
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Vartojimas pagal valandą (kWh)
+        graph_span: 24h
+        span:
+          start: day
+        apex_config:
+          chart:
+            height: 260
+            animations:
+              enabled: false
+        yaxis:
+          - min: 0
+            decimals: 1
+        series:
+          - entity: sensor.consumption_profile_eimo
+            name: kWh/val
+            type: column
+            color: '#42a5f5'
+            data_generator: |
+              return (entity.attributes.hourly_kwh || []).map((v, i) => {
+                const d = new Date(); d.setHours(i, 0, 0, 0);
+                return [d.getTime(), v];
+              });
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Vartojimas pagal savaitės dieną (kWh)
+        graph_span: 7d
+        span:
+          end: day
+        apex_config:
+          chart:
+            height: 240
+            animations:
+              enabled: false
+        yaxis:
+          - min: 0
+            decimals: 1
+        series:
+          - entity: sensor.consumption_profile_eimo
+            name: kWh/diena
+            type: column
+            color: '#66bb6a'
+            data_generator: |
+              return (entity.attributes.weekday_kwh || []).map((v, i) => {
+                const now = new Date();
+                const back = (((now.getDay() + 6) % 7) - i + 7) % 7;
+                const d = new Date(now); d.setDate(now.getDate() - back); d.setHours(12, 0, 0, 0);
+                return [d.getTime(), v];
+              });
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Tinklo srautas pagal valandą (inverteris · 3 d.)
+        graph_span: 3d
+        span:
+          end: day
+        apex_config:
+          chart:
+            height: 280
+            animations:
+              enabled: false
+        yaxis:
+          - min: 0
+            decimals: 2
+        series:
+          - entity: sensor.solis_inverter_1033300254190112_solis_yearly_grid_energy_purchased
+            name: Iš tinklo (pirkta)
+            type: column
+            color: '#ef5350'
+            group_by:
+              func: diff
+              duration: 1h
+          - entity: sensor.solis_inverter_1033300254190112_solis_yearly_on_grid_energy
+            name: Į tinklą (parduota)
+            type: column
+            color: '#66bb6a'
+            group_by:
+              func: diff
+              duration: 1h
