@@ -592,6 +592,12 @@ views:
             height: 260
             animations:
               enabled: false
+          xaxis:
+            labels:
+              format: 'HH:00'
+          tooltip:
+            x:
+              format: 'HH:00'
         yaxis:
           - min: 0
             decimals: 1
