@@ -1119,13 +1119,19 @@ views:
           show: true
           title: Vartojimas pagal valandą (kWh)
         graph_span: 24h
+        span:
+          start: day
         apex_config:
           chart:
             height: 260
             animations:
               enabled: false
           xaxis:
-            type: category
+            labels:
+              format: 'HH:00'
+          tooltip:
+            x:
+              format: 'HH:00'
         yaxis:
           - min: 0
             decimals: 1
@@ -1136,7 +1142,8 @@ views:
             color: '#42a5f5'
             data_generator: |
               return (entity.attributes.hourly_kwh || []).map((v, i) => {
-                return [String(i).padStart(2, '0') + ':00', v];
+                const d = new Date(); d.setHours(i, 0, 0, 0);
+                return [d.getTime(), v];
               });
       - type: custom:apexcharts-card
         header:
