@@ -1207,12 +1207,10 @@ views:
             data_generator: |
               const arr = entity.attributes.weekday_kwh || [];
               const avg = arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-              return arr.map((v, i) => {
-                const now = new Date();
-                const back = (((now.getDay() + 6) % 7) - i + 7) % 7;
-                const d = new Date(now); d.setDate(now.getDate() - back); d.setHours(0, 0, 0, 0);
-                return [d.getTime(), avg];
-              });
+              const now = new Date();
+              const start = new Date(now); start.setDate(now.getDate() - 7); start.setHours(0, 0, 0, 0);
+              const end = new Date(now); end.setDate(now.getDate() + 1); end.setHours(0, 0, 0, 0);
+              return [[start.getTime(), avg], [end.getTime(), avg]];
       # ESO tinklo srautas — iš ILGALAIKĖS statistikos (jutiklio būsena
       # atsinaujina tik ~kartą per parą, todėl diff nieko nerodo). Išorinė
       # statistika eso:energy_consumed_220588 turi valandinius duomenis.
