@@ -1181,10 +1181,11 @@ views:
             x:
               format: dddd
           stroke:
-            dashArray: [0, 4]
             curve: straight
           markers:
             size: 0
+            hover:
+              size: 0
         yaxis:
           - min: 0
             decimals: 1
