@@ -1179,6 +1179,10 @@ views:
           tooltip:
             x:
               format: dddd
+          stroke:
+            width: [0, 2]
+            dashArray: [0, 5]
+            curve: straight
         yaxis:
           - min: 0
             decimals: 1
@@ -1193,6 +1197,19 @@ views:
                 const back = (((now.getDay() + 6) % 7) - i + 7) % 7;
                 const d = new Date(now); d.setDate(now.getDate() - back); d.setHours(0, 0, 0, 0);
                 return [d.getTime(), v];
+              });
+          - entity: sensor.consumption_profile
+            name: Vidurkis
+            type: line
+            color: '#ff9800'
+            data_generator: |
+              const arr = entity.attributes.weekday_kwh || [];
+              const avg = arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+              return arr.map((v, i) => {
+                const now = new Date();
+                const back = (((now.getDay() + 6) % 7) - i + 7) % 7;
+                const d = new Date(now); d.setDate(now.getDate() - back); d.setHours(0, 0, 0, 0);
+                return [d.getTime(), avg];
               });
       # ESO tinklo srautas — iš ILGALAIKĖS statistikos (jutiklio būsena
       # atsinaujina tik ~kartą per parą, todėl diff nieko nerodo). Išorinė
