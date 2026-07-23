@@ -607,10 +607,16 @@ views:
             type: column
             color: '#42a5f5'
             data_generator: |
-              return (entity.attributes.hourly_kwh || []).map((v, i) => {
+              const arr = entity.attributes.hourly_kwh || [];
+              const pts = arr.map((v, i) => {
                 const d = new Date(); d.setHours(i, 0, 0, 0);
                 return [d.getTime(), v];
               });
+              if (arr.length) {
+                const d = new Date(); d.setHours(24, 0, 0, 0);
+                pts.push([d.getTime(), arr[0]]);
+              }
+              return pts;
       - type: custom:apexcharts-card
         header:
           show: true
