@@ -624,6 +624,7 @@ views:
         graph_span: 167h
         span:
           start: isoWeek
+          offset: '-7d'
         apex_config:
           chart:
             height: 240
@@ -661,7 +662,7 @@ views:
             data_generator: |
               const now = new Date();
               const dow = (now.getDay() + 6) % 7;
-              const monday = new Date(now); monday.setDate(now.getDate() - dow); monday.setHours(0, 0, 0, 0);
+              const monday = new Date(now); monday.setDate(now.getDate() - dow - 7); monday.setHours(0, 0, 0, 0);
               return (entity.attributes.weekday_kwh || []).map((v, i) => {
                 const d = new Date(monday); d.setDate(monday.getDate() + i); d.setHours(0, 0, 0, 0);
                 return [d.getTime(), v];
@@ -676,7 +677,7 @@ views:
               const avg = arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
               const now = new Date();
               const dow = (now.getDay() + 6) % 7;
-              const monday = new Date(now); monday.setDate(now.getDate() - dow); monday.setHours(0, 0, 0, 0);
+              const monday = new Date(now); monday.setDate(now.getDate() - dow - 7); monday.setHours(0, 0, 0, 0);
               return arr.map((v, i) => {
                 const d = new Date(monday); d.setDate(monday.getDate() + i); d.setHours(0, 0, 0, 0);
                 return [d.getTime(), avg];
