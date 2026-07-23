@@ -646,7 +646,6 @@ views:
             x:
               format: dddd
           stroke:
-            width: [0, 1]
             dashArray: [0, 4]
             curve: straight
           markers:
@@ -670,6 +669,7 @@ views:
             name: Vidurkis
             type: line
             color: '#78909c'
+            stroke_width: 1
             data_generator: |
               const arr = entity.attributes.weekday_kwh || [];
               const avg = arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
