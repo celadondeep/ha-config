@@ -603,7 +603,7 @@ views:
             decimals: 1
         series:
           - entity: sensor.consumption_profile_eimo
-            name: kWh/val
+            name: kWh
             type: column
             color: '#42a5f5'
             data_generator: |
