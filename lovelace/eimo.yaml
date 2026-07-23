@@ -637,8 +637,11 @@ views:
                   months: [Sausis, Vasaris, Kovas, Balandis, Gegužė, Birželis, Liepa, Rugpjūtis, Rugsėjis, Spalis, Lapkritis, Gruodis]
                   shortMonths: [Sau, Vas, Kov, Bal, Geg, Bir, Lie, Rgp, Rgs, Spa, Lap, Gru]
           xaxis:
+            type: datetime
+            tickAmount: 6
             labels:
               format: ddd
+              datetimeUTC: false
           tooltip:
             x:
               format: dddd
@@ -654,6 +657,6 @@ views:
               return (entity.attributes.weekday_kwh || []).map((v, i) => {
                 const now = new Date();
                 const back = (((now.getDay() + 6) % 7) - i + 7) % 7;
-                const d = new Date(now); d.setDate(now.getDate() - back); d.setHours(12, 0, 0, 0);
+                const d = new Date(now); d.setDate(now.getDate() - back); d.setHours(0, 0, 0, 0);
                 return [d.getTime(), v];
               });
