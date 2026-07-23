@@ -621,7 +621,7 @@ views:
         header:
           show: true
           title: Vartojimas pagal savaitės dieną (kWh)
-        graph_span: 154h
+        graph_span: 167h
         span:
           start: isoWeek
           offset: '-7d'
