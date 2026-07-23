@@ -629,12 +629,25 @@ views:
             height: 240
             animations:
               enabled: false
+            locales:
+              - name: en
+                options:
+                  days: [Sekmadienis, Pirmadienis, Antradienis, Trečiadienis, Ketvirtadienis, Penktadienis, Šeštadienis]
+                  shortDays: [Sk, Pr, An, Tr, Kt, Pn, Št]
+                  months: [Sausis, Vasaris, Kovas, Balandis, Gegužė, Birželis, Liepa, Rugpjūtis, Rugsėjis, Spalis, Lapkritis, Gruodis]
+                  shortMonths: [Sau, Vas, Kov, Bal, Geg, Bir, Lie, Rgp, Rgs, Spa, Lap, Gru]
+          xaxis:
+            labels:
+              format: ddd
+          tooltip:
+            x:
+              format: dddd
         yaxis:
           - min: 0
             decimals: 1
         series:
           - entity: sensor.consumption_profile_eimo
-            name: kWh/diena
+            name: kWh
             type: column
             color: '#66bb6a'
             data_generator: |
