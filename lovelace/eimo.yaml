@@ -677,5 +677,7 @@ views:
               const now = new Date();
               const dow = (now.getDay() + 6) % 7;
               const monday = new Date(now); monday.setDate(now.getDate() - dow); monday.setHours(0, 0, 0, 0);
-              const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6); sunday.setHours(0, 0, 0, 0);
-              return arr.length ? [[monday.getTime(), avg], [sunday.getTime(), avg]] : [];
+              return arr.map((v, i) => {
+                const d = new Date(monday); d.setDate(monday.getDate() + i); d.setHours(0, 0, 0, 0);
+                return [d.getTime(), avg];
+              });
