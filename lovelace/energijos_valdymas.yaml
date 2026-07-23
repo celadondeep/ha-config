@@ -1180,9 +1180,11 @@ views:
             x:
               format: dddd
           stroke:
-            width: [0, 2]
-            dashArray: [0, 5]
+            width: [0, 1.5]
+            dashArray: [0, 4]
             curve: straight
+          markers:
+            size: 0
         yaxis:
           - min: 0
             decimals: 1
@@ -1201,7 +1203,7 @@ views:
           - entity: sensor.consumption_profile
             name: Vidurkis
             type: line
-            color: '#ff9800'
+            color: '#78909c'
             data_generator: |
               const arr = entity.attributes.weekday_kwh || [];
               const avg = arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;

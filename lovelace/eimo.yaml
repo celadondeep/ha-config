@@ -667,7 +667,7 @@ views:
           - entity: sensor.consumption_profile_eimo
             name: Vidurkis
             type: line
-            color: '#ff9800'
+            color: '#78909c'
             data_generator: |
               const arr = entity.attributes.weekday_kwh || [];
               const avg = arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
