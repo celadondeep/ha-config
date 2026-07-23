@@ -673,6 +673,9 @@ views:
             data_generator: |
               const arr = entity.attributes.weekday_kwh || [];
               const avg = arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-              const now = new Date();
-              const start = new Date(now); start.setDate(now.getDate() - 7); start.setHours(1, 0, 0, 0);
-              return [[start.getTime(), avg], [now.getTime(), avg]];
+              return (entity.attributes.weekday_kwh || []).map((v, i) => {
+                const now = new Date();
+                const back = (((now.getDay() + 6) % 7) - i + 7) % 7;
+                const d = new Date(now); d.setDate(now.getDate() - back); d.setHours(0, 0, 0, 0);
+                return [d.getTime(), avg];
+              });
