@@ -646,7 +646,7 @@ views:
             x:
               format: dddd
           stroke:
-            width: [0, 1.5]
+            width: [0, 1]
             dashArray: [0, 4]
             curve: straight
           markers:
