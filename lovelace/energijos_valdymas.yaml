@@ -1214,7 +1214,7 @@ views:
                 return [d.getTime(), avg];
               });
               pts.sort((a, b) => a[0] - b[0]);
-              return pts;
+              return arr.length ? [pts[0], pts[pts.length - 1]] : [];
       # ESO tinklo srautas — iš ILGALAIKĖS statistikos (jutiklio būsena
       # atsinaujina tik ~kartą per parą, todėl diff nieko nerodo). Išorinė
       # statistika eso:energy_consumed_220588 turi valandinius duomenis.
