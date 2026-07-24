@@ -149,13 +149,16 @@
         # dugnas 10% (žemiau iškrauti neįmanoma); force-charge ties 4%.
         target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 5] | max }}"
         discharge_needed: "{{ states('sensor.energy_manager_discharge_needed') | float(0) }}"
-        # 7 punktas (2026-07-18): iškrovimo PABAIGA taikoma į gamybos pradžią,
-        # kad baterija kuo trumpiau stovėtų ties minimumu. Sparta ~1 kWh/val
-        # (sloto eksportas ~1 kW) + 0.5 val atsarga; itin saulėtai dienai
-        # (>22 kWh) baigiama ~1 val anksčiau (vietos reikia prieš ankstyvą
-        # piką). Startas ne ankstesnis nei 21:00; jei energijos daug —
-        # natūraliai gaunasi 21:00 (pilnas langas). Laukimo metu inverterį
-        # išjungia night_shutdown, pažadina power_on ties sloto startu.
+        # 7 punktas (2026-07-18, patikslinta 2026-07-24): iškrovimo PABAIGA
+        # taikoma į gamybos pradžią, kad baterija kuo trumpiau stovėtų ties
+        # dugnu. Lango DYDIS = kiek reikia EKSPORTUOTI 1 kW slotu = visa
+        # iškrova (SOC−target) MINUS nakties suvartojimas (patys namai iškrauna
+        # bateriją, tad tiek eksportuoti nereikia). Taip langas startuoja
+        # vėliau ir baterija dugną pasiekia būtent ties aušra, ne anksčiau.
+        # Sparta ~1 kWh/val (sloto eksportas ~1 kW) + 0.3 val atsarga; itin
+        # saulėtai dienai (>22 kWh) baigiama ~1 val anksčiau. Startas ne
+        # ankstesnis nei 21:00. Laukimo metu inverterį išjungia night_shutdown,
+        # pažadina power_on ties sloto startu.
         discharge_start: >-
           {% set m = as_datetime(states('sensor.inverter_morning_on_time')) %}
           {% set morning = m.astimezone() if m is not none
@@ -163,7 +166,9 @@
           {% if morning < now() %}
             {% set morning = (now() + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0) %}
           {% endif %}
-          {% set hours = ((current_soc - target_soc) * 0.16 / 1.0) + 0.5
+          {% set cons = states('sensor.energy_manager_cons_until_production') | float(0) %}
+          {% set export_kwh = (current_soc - target_soc) * 0.16 - cons %}
+          {% set hours = ([export_kwh, 0] | max / 1.0) + 0.3
              + (1.0 if forecast_tomorrow > 22 else 0.0) %}
           {% set start = morning - timedelta(hours=hours) %}
           {% set earliest = now().replace(hour=21, minute=0, second=0, microsecond=0) %}

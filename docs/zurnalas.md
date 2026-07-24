@@ -24,6 +24,15 @@ pakeista, KODĖL, kokie skaičiai tai pagrindė.
   žalia prognozė 100 W kerta 06:30 (0,164 kW) → įjungimas 06:00 (−30 min
   atsarga). Abi elektrinės (energy_manager + energy_manager_eimo). Vartotojo
   taisyklė: įjungti kai prognozuojama PV > 100 W.
+- **Naktinis iškrovimas link ryto — įskaičiuotas suvartojimas:** iškrovimo lango
+  DYDIS dabar = (SOC−target) MINUS nakties suvartojimas iki ryto gamybos (naujas
+  `sensor.energy_manager_cons_until_production`, iš valandinio vartojimo profilio
+  + inverterio savivartos). Anksčiau `hours` skaičiuota lyg visą iškrovą darytų
+  vien 1 kW eksportas — langas startuodavo per anksti ir baterija dugną pasiekdavo
+  prieš aušrą (nereikalingas stovėjimas ties minimumu). Dabar langas startuoja
+  vėliau, baterija dugną pasiekia ties gamybos pradžia → trumpiausias laikas ties
+  dugnu. Tikslas: baterija kraštutinėse būsenose (100 % ir dugne) būna kuo
+  trumpiau. Namai įdiegta; Eimo — analogiškai.
 - **Dashbordai — vartojimo grafikų šlifavimas:** valandinis grafikas — legendoje
   `kWh`, tooltip tik valanda; savaitės grafikas — praėjusi pilna savaitė Pr→Sk
   (span isoWeek −7d, 167h langas), lietuviški dienų vardai po stulpeliais,
