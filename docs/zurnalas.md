@@ -4,6 +4,22 @@ Chronologinis svarbių pakeitimų ir atradimų sąrašas (naujausi viršuje).
 Auditas ir sesijos pildo po kiekvieno reikšmingo pakeitimo: data, kas
 pakeista, KODĖL, kokie skaičiai tai pagrindė.
 
+## 2026-07-24
+
+- **🔴 Ryto įjungimas vėluodavo 2+ val.:** `get_morning_on_time` PV slenkstį
+  (100 W) lygino su Solcast prognoze, PADAUGINTA iš `hourly_factor` korekcijos.
+  Ryte faktorius nuslopindavo vertę, tad įjungimo laikas nusikeldavo (07-24
+  išeidavo 08:14 vietoj ~06:00), o inverteris pramiegodavo silpną ryto saulę
+  (Eimo, buvusi įjungta, tuo metu jau gamino ~270 W). Pataisyta: slenkstis
+  lyginamas su **žalia** Solcast valandine prognoze (be faktoriaus). Šiandienos
+  žalia prognozė 100 W kerta 06:30 (0,164 kW) → įjungimas 06:00 (−30 min
+  atsarga). Abi elektrinės (energy_manager + energy_manager_eimo). Vartotojo
+  taisyklė: įjungti kai prognozuojama PV > 100 W.
+- **Dashbordai — vartojimo grafikų šlifavimas:** valandinis grafikas — legendoje
+  `kWh`, tooltip tik valanda; savaitės grafikas — praėjusi pilna savaitė Pr→Sk
+  (span isoWeek −7d, 167h langas), lietuviški dienų vardai po stulpeliais,
+  plona vientisa vidurkio linija be markerių; pašalintos ikonos iš pavadinimų.
+
 ## 2026-07-23
 
 - **🔴 Valandinis mokymasis niekada neveikė (4 vietose):** vartojimo modelis
