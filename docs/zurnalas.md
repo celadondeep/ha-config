@@ -6,6 +6,15 @@ pakeista, KODĖL, kokie skaičiai tai pagrindė.
 
 ## 2026-07-24
 
+- **🔴 Dieninis inverterio išjunginėjimas (klaida):** `solis_low_soc_night_shutdown`
+  dieninė šaka `soc<=12 and pv<load` debesuotą rytą (SOC 10, PV 290 W < apkrova
+  1847 W) kas 15 min išjungdavo inverterį — vartotojas rankiniu būdu įjungdavo,
+  ji vėl išjungdavo (07-24: on 08:09 → off 08:15 → on 08:50). Prarandama ryto PV,
+  namai vien iš tinklo. Dieninė šaka PAŠALINTA — apsauga nuo iškrovos žemiau dugno
+  jau užtikrinta overdischarge=11 % (BMS), inverterio išjungti tam nereikia.
+  Liko tik naktinė churn apsauga (20:30–10:00 / SOC≤6). Atitinka 07-22 vartotojo
+  prašymą („neiškraudinėti žemiau 11" = overdischarge, ne inverterio išjungimas).
+
 - **🔴 Ryto įjungimas vėluodavo 2+ val.:** `get_morning_on_time` PV slenkstį
   (100 W) lygino su Solcast prognoze, PADAUGINTA iš `hourly_factor` korekcijos.
   Ryte faktorius nuslopindavo vertę, tad įjungimo laikas nusikeldavo (07-24
