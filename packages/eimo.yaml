@@ -96,9 +96,9 @@ template:
         unit_of_measurement: kWh
         icon: mdi:home-lightning-bolt
         state: >
-          {{ state_attr('sensor.eimo_consumption_today', 'last_period') | float(0) | round(2) }}
+          {{ state_attr('sensor.eimo_namu_suvartojimas_siandien', 'last_period') | float(0) | round(2) }}
         availability: >
-          {{ state_attr('sensor.eimo_consumption_today', 'last_period') is not none }}
+          {{ state_attr('sensor.eimo_namu_suvartojimas_siandien', 'last_period') is not none }}
       # Intradienos Solcast santykis (Eimo) — faktinė šios dienos gamyba
       # lyginama su tuo, kiek pagal koreguotą prognozę TURĖJO būti pagaminta
       # iki šio momento. Naudojamas surplus skaičiavime, kad geresnę nei
@@ -348,16 +348,23 @@ automation:
       # Tikslinis SOC iš AppDaemon (energy_manager_eimo). Clamp į slot SOC min 6%.
       target_soc: "{{ [states('sensor.energy_manager_eimo_target_soc') | float(100) | round(0) | int, 6] | max }}"
       discharge_current: 100   # A, slot iškrovimo srovė (max 220) — derinama pagal poreikį
-      # 7 punktas (2026-07-18): iškrovimo PABAIGA taikoma į saulėtekį (Eimo
-      # neturi morning_on sensoriaus — naudojamas sun.sun next_rising), kad
-      # baterija kuo trumpiau stovėtų ties minimumu. Sparta ~1 kWh/val +
-      # 0.5 val atsarga; itin saulėtai dienai (>22 kWh) baigiama ~1 val
-      # anksčiau. Startas ne ankstesnis nei 21:00. 1% SOC ≈ 0.1434 kWh.
+      # 7 punktas (2026-07-18, patikslinta 2026-07-24): iškrovimo PABAIGA
+      # taikoma į ryto gamybos pradžią (inverter_morning_on_time_eimo — Solcast
+      # >100 W, tiksliau nei saulėtekis). Lango DYDIS = (SOC−target) MINUS
+      # nakties suvartojimas iki gamybos (sensor.energy_manager_eimo_cons_until_production)
+      # — patys namai iškrauna bateriją, tad tiek mažiau eksportuoti; langas
+      # startuoja vėliau ir baterija dugną pasiekia ties aušra, ne anksčiau.
+      # Startas ne ankstesnis nei 21:00. 1% SOC ≈ 0.1434 kWh.
       discharge_start: >-
-        {% set m = as_datetime(state_attr('sun.sun', 'next_rising')) %}
+        {% set m = as_datetime(states('sensor.inverter_morning_on_time_eimo')) %}
         {% set morning = m.astimezone() if m is not none
            else (now() + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0) %}
-        {% set hours = ((current_soc - target_soc) * 0.1434 / 1.0) + 0.5
+        {% if morning < now() %}
+          {% set morning = (now() + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0) %}
+        {% endif %}
+        {% set cons = states('sensor.energy_manager_eimo_cons_until_production') | float(0) %}
+        {% set export_kwh = (current_soc - target_soc) * 0.1434 - cons %}
+        {% set hours = ([export_kwh, 0] | max / 1.0) + 0.3
            + (1.0 if forecast_tomorrow > 22 else 0.0) %}
         {% set start = morning - timedelta(hours=hours) %}
         {% set earliest = now().replace(hour=21, minute=0, second=0, microsecond=0) %}
@@ -556,13 +563,21 @@ automation:
       # Dabartinis sloto cut-off: ≥80 = „viršūnės skutimo" variantas
       # (7 punktas), <80 = pertekliaus (floor) variantas.
       slot_cutoff: "{{ states('number.inverter_control_1033300254190112_slot1_discharge_soc') | float(0) }}"
-      # SVEIKATOS ZONA (2026-07-18): nuosaikią dieną viršūnė skutama ties
-      # 80 % (kaupiklis 20–80 % ruože), aukštos gamybos dieną (koreguota
-      # prognozė > 26 kWh) — ties 90 % (pilnas diapazonas realizavimui).
+      # SVEIKATOS ZONA (2026-07-18; apatinė 20→30 2026-07-21): nuosaikią dieną
+      # viršūnė skutama ties 80 % (kaupiklis 30–80 % ruože), aukštos gamybos
+      # dieną (koreguota prognozė > 26 kWh) — ties 90 % (pilnas diapazonas
+      # realizavimui).
       shave_cutoff: >-
         {{ 90 if (states('sensor.solcast_pv_forecast_forecast_today') | float(0)
                   * states('sensor.solcast_correction_factor_eimo') | float(1)) > 26
            else 80 }}
+      # 2026-07-21: tinklas importuoja >200 W. Naudojama viršūnės skutimo
+      # slotą atleisti vakare: slotas su cut-off ≥80 veikia kaip rezervas
+      # (neiškrauna žemiau cut-off net namams), tad PV nukritus baterija
+      # užšąla ties 80 % ir namus dengia tinklas. Grid + = eksportas, − = imp.
+      grid_importing: >-
+        {{ states('sensor.solis_inverter_1033300254190112_solis_power_grid_total_power')
+           | float(0) < -200 }}
     action:
       - choose:
           # 1) Yra perteklius (>1 kWh netilps) ir yra ką atiduoti — įjungti
@@ -607,6 +622,27 @@ automation:
                     (baterija + namai + 1 kW eksportas). Baterija {{ soc }}%.
                     Self-Use + slot: iškraunama į tinklą
                     iki ~{{ floor }}% (slot 07:00–19:30, 150A).
+          # 1b) VIRŠŪNĖS SKUTIMO ATLEIDIMAS (2026-07-21): skutimo slotas
+          #    (cut-off ≥80) veikia kaip rezervas — neiškrauna žemiau cut-off
+          #    net namams. Vakare PV nukritus baterija užšąla ties 80 %, namus
+          #    dengia tinklas. Kai slotas aktyvus IR tinklas importuoja —
+          #    slotą išjungti, kad Self-Use baterija dengtų namus. Branch 2
+          #    re-armuos tik SOC ≥ shave+1 (t.y. saulei vėl pakėlus).
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ daytime_slot_active and slot_cutoff >= 80 and grid_importing }}
+            sequence:
+              - service: switch.turn_off
+                target:
+                  entity_id: switch.inverter_control_1033300254190112_slot1_discharge
+              - service: notify.persistent_notification
+                data:
+                  title: "Eimo - Skutimo slotas atleistas 🔋→🏠"
+                  message: >
+                    Baterija {{ soc }}% ties skutimo riba, bet PV nedengia namų
+                    ir tinklas importuoja — slotas išjungtas, baterija dengia
+                    namus (Self-Use). Vakaro logika 20:00 perims naktinį planą.
           # 2) VIRŠŪNĖS SKUTIMAS (7 punktas + sveikatos zona): SOC pasiekus
           #    lubas (nuosaikią dieną 80%, aukštos gamybos — 90%) — laikyti
           #    slotą aktyvų su cut-off ties lubomis. Mažina laiką aukštame
