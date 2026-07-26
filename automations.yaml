@@ -846,16 +846,11 @@
     - condition: state
       entity_id: switch.solis_s6_eh3p_power_state
       state: "off"
-    # 2026-07-22: kai baterija ties dugnu (SOC ≤ 12) ir saulė dar silpna
-    # (Eimo PV < 1200 W) — NEĮJUNGTI atgal, palikti pailsėti, kad baterija
-    # nesiciklautų (poroje su išplėsta churn apsauga). Išimtis: audros režimas
-    # (reikia backup) — tada įjungiama visada.
-    - condition: template
-      value_template: >
-        {% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(100) %}
-        {% set eimo = states('sensor.eimo_pv_power') | float(0) %}
-        {{ is_state('input_boolean.storm_mode', 'on')
-           or not (soc <= 12 and eimo < 1200) }}
+    # 2026-07-26: pašalinta 07-22 blokavimo sąlyga „SOC≤12 ir Eimo PV<1200 —
+    # neįjungti". Ji buvo pora su (jau pašalinta) dienine išjungimo šaka ir
+    # debesuotą rytą su tuščia baterija atidėdavo įjungimą iki 10:00 —
+    # prarandama ryto PV. Vartotojo taisyklė: įjungti kai Solcast valandinė
+    # >100 W, o įjungus — neišjunginėti iki vakaro (dugną saugo overdischarge).
   action:
     - service: switch.turn_on
       target:

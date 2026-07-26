@@ -63,10 +63,10 @@ def dugno_rest(soc, pv, load, night, hh):
     return night and night_band
 
 def morning_on_blocked(soc, eimo_pv, storm):
-    """solis_morning_inverter_power_on guard: ar įjungimas blokuojamas."""
-    if storm:
-        return False
-    return soc <= 12 and eimo_pv < 1200
+    """solis_morning_inverter_power_on: blokavimo nebėra (2026-07-26 pašalinta
+    07-22 sąlyga soc<=12 ir eimo<1200 — ji atidėdavo įjungimą debesuotą rytą;
+    dugną saugo overdischarge, ne inverterio laikymas išjungto)."""
+    return False
 
 def health_target(base_target, fc, soc, p):
     """energy_manager: nuosaikią dieną target ne žemiau health_min."""
@@ -129,9 +129,8 @@ def run(p, name):
         # (a) dugno-rest išjungia inverterį, o feedin_tou tuo pat metu bando eksportuoti
         if rest and br.startswith(("1_", "2_")):
             konfliktai.append("dugno-rest IŠJUNGIA, o feedin_tou EKSPORTUOJA (konfliktas)")
-        # (b) baterija ties dugnu, bet morning-on neblokuoja + rytas silpna saulė
-        if s["soc"] <= 12 and not blocked and s["eimo_pv"] < 800 and s["hh"] < 12:
-            konfliktai.append("baterija dugne, silpna saulė, bet įjungimas neblokuotas")
+        # (b) [pašalinta 2026-07-26] ryto įjungimo blokavimo nebėra — dieną
+        #     inverteris visada įjungtas, dugną saugo overdischarge=11 %.
         # (c) audra, bet siūloma eksportuoti
         if s["storm"] and br.startswith(("1_", "2_")):
             konfliktai.append("audros režimas, bet feedin_tou eksportuoja")
