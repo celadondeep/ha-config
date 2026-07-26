@@ -48,6 +48,7 @@
 <script>
 const FILES = [
   ["README.md", "Indeksas"],
+  ["vizija.md", "⭐ Mano vizija"],
   ["architektura.md", "Architektūra"],
   ["taisykles.md", "Taisyklės"],
   ["valdymo_logika.md", "Valdymo logika"],
@@ -71,7 +72,10 @@ async function load(file, btn) {
     return;
   }
   const md = await r.text();
-  document.getElementById("meta").textContent = "docs/" + file + " · atnaujinta: " + (r.headers.get("last-modified") || "—");
+  document.getElementById("meta").innerHTML =
+    "docs/" + file + " · atnaujinta: " + (r.headers.get("last-modified") || "—") +
+    ' · <a href="/hassio/ingress/core_configurator" target="_top"' +
+    ' title="Atidaro File editor priedą — jame nueik į docs/' + file + '">✏️ Redaguoti</a>';
   // Vidines .md nuorodas paversti į peržiūros perjungimą
   const html = marked.parse(md);
   const div = document.getElementById("content");

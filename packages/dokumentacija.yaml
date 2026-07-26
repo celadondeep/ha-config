@@ -3,8 +3,9 @@
 #  /config/www/docs/md (HA /local serviravimas — symlink'ų HA neseka).
 #  Peržiūra: sidebaro „Dokumentacija" (lovelace/dokumentacija.yaml, iframe
 #  į /local/docs/index.html su marked.js). Sinchronizuojama HA starte ir
-#  kas 30 min — docs pakeitimas dashboarde matomas ne vėliau kaip per 30 min
-#  (redaguojant galima iškviesti shell_command.sync_docs ranka).
+#  kas 5 min (2026-07-22, buvo 30) — docs pakeitimas dashboarde matomas ne
+#  vėliau kaip per 5 min (redaguojant galima iškviesti shell_command.sync_docs
+#  ranka greitesniam atnaujinimui).
 # =============================================================================
 
 shell_command:
@@ -17,7 +18,7 @@ automation:
       - platform: homeassistant
         event: start
       - platform: time_pattern
-        minutes: "/30"
+        minutes: "/5"
     action:
       - service: shell_command.sync_docs
     mode: single

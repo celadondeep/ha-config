@@ -63,5 +63,5 @@ versija truputį diverguoja (LT atributai `menuo`/`serija`).
   duomenų šaltinis (savaitės rodinys visada rodo tik paskutines 7 d.).
 - Statistikos sumos tęsiamos nuo paskutinio taško (60 d. lookback) — spragos
   užpildomos import_now su date_from/date_to.
-- Eimo ESO paskyra NEpajungta — bankas/atjungimai tik Šeškinių įvadui
+- Eimo ESO paskyra NEpajungta — bankas/atjungimai tik Namų įvadui
   (obj. 220588, sutartis 18116704, objektas 35015580).

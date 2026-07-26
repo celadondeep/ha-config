@@ -31,16 +31,24 @@
    tik ~6–8 ct/kWh round-trip.
 2. **Daugiau vietos geriau nei mažiau** (2026-07-18): PLAN_MARGIN = 1.25 —
    Solcast sistemingai kuklina.
-3. **Eksportas nuo pirmų vatų** (2026-07-18): FiP — numatytasis Solis dienos
-   režimas; Self-Use tik kai visa diena tilptų į laisvą baterijos vietą +
-   namus be eksporto (dinaminis slenkstis pagal SOC).
-4. **Sveikatos zona 20–80 %** (2026-07-18): nuosaikią dieną (koreguota
-   prognozė ≤ 28 kWh Solis / ≤ 26 Eimo) kaupiklis 20–80 % ruože; aukštos
-   gamybos dieną — pilnas diapazonas nuo dugno iki 100 (realizavimas
-   svarbiau).
+3. **Aukšta diena → Feed-in, nuosaiki → Self-Use** (2026-07-22 ištaisyta).
+   ESO eksportas ribotas 1 kW. Aukštos gamybos dieną (prognozė > slenkstis) —
+   Feed-in Priority: ~1 kW į banką visą dieną + baterija kraunasi iš likučio
+   (Feed-in NEnukerpa — patikrinta gyvai 07-22: PV 5455 W, baterija +4 kW,
+   grid −1 kW). Nuosaikią dieną — Self-Use (kaupti savo vartojimui). PASTABA:
+   07-21 buvo klaidingai įvesta „vien Self-Use" (suklaidintas stebėjimas) —
+   grąžinta. Žr. `valdymo_logika.md` §0.
+4. **Sveikatos zona 30–80 %** (2026-07-21 — apatinė 20→30): nuosaikią dieną
+   (koreguota prognozė ≤ 28 kWh Solis / ≤ 26 Eimo) kaupiklis 30–80 % ruože;
+   aukštos gamybos dieną — pilnas diapazonas nuo dugno iki 100. **Su 1 kW
+   riba apatinė riba „soft"** — laikoma tik kai nemokama, saulėtą rytdieną
+   pasiduoda realizavimui (kad nenukirptų). Namuose latentu kol nėra
+   cloud-slotų; Eimo veikia.
 5. **Baterijos tausojimas** (2026-07-18, „7 punktas"): viršūnės skutimas
    (80/90 cut-off), naktinio iškrovimo pabaiga taikoma į gamybos pradžią,
-   dugno atsistatymas +5 pp prieš eksporto atnaujinimą.
+   dugno atsistatymas +5 pp. **Skutimo slotas turi ATLEIDIMO sąlygą**
+   (2026-07-21): kai aktyvus ir tinklas importuoja — išjungti, kad baterija
+   dengtų namus (kitaip užšąla ties 80 %). Įdiegta Eimo.
 6. **Surplus be namų vartojimo:** surplus = pv_liko − baterijos_vieta;
    vartojimo nario negrąžinti. Sloto eksportas ~1 kW ≈ 1 kWh/val.
 

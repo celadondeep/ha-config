@@ -7,6 +7,8 @@ views:
     path: docs
     panel: true
     cards:
+      # ?v= — cache-busteris: keičiant index.html padidink versiją, kad
+      # naršyklė užsikrautų naują peržiūros HTML (2026-07-22).
       - type: iframe
-        url: /local/docs/index.html
+        url: /local/docs/index.html?v=20260722
         aspect_ratio: 100%

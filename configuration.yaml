@@ -36,7 +36,7 @@ lovelace:
   dashboards:
     energijos-valdymas:
       mode: yaml
-      title: Šeškiniai SE
+      title: Namai SE
       icon: mdi:solar-power
       show_in_sidebar: true
       filename: lovelace/energijos_valdymas.yaml
@@ -46,7 +46,7 @@ lovelace:
       icon: mdi:solar-power-variant
       show_in_sidebar: true
       filename: lovelace/eimo.yaml
-    dokumentacija:
+    dokumentacija-docs:
       mode: yaml
       title: Dokumentacija
       icon: mdi:book-open-page-variant
@@ -489,6 +489,7 @@ template:
       # projekcija iki 6000 ciklų (tipinis LFP resursas iki 80 % SOH).
       - name: "battery_equivalent_cycles"
         unique_id: battery_equivalent_cycles
+        unit_of_measurement: "ciklai"
         state_class: total_increasing
         icon: mdi:battery-sync
         state: >
@@ -576,15 +577,9 @@ template:
           {{ states('sensor.solis_s6_eh3p_pv_total_energy_generation') not in ['unavailable', 'unknown', ''] }}
 
       # Ekvivalentiniai baterijos ciklai = bendra įkrova / naudingoji talpa.
-      - name: "battery_equivalent_cycles"
-        unique_id: battery_equivalent_cycles
-        unit_of_measurement: "ciklai"
-        state_class: total_increasing
-        icon: mdi:battery-sync
-        state: >
-          {{ (states('sensor.solis_s6_eh3p_total_battery_charge_energy') | float(0) / 14.4) | round(1) }}
-        availability: >
-          {{ states('sensor.solis_s6_eh3p_total_battery_charge_energy') not in ['unavailable', 'unknown', ''] }}
+      # (2026-07-22: pašalintas battery_equivalent_cycles DUBLIKATAS — tas pats
+      # unique_id kaip aukščiau, todėl HA jį ignoravo. Vienetas perkeltas į
+      # pirmąją (su atributais) apibrėžtį.)
 
       # Savarankiškumas šiandien: kiek % namų suvartojimo padengė ne tinklas.
       - name: "self_sufficiency_today"
