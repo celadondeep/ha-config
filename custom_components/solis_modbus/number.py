@@ -1,9 +1,9 @@
 import logging
-from typing import List
 
 from homeassistant.config_entries import ConfigEntry
 
 from custom_components.solis_modbus import ModbusController
+from custom_components.solis_modbus.const import DOMAIN, NUMBER_ENTITIES
 from custom_components.solis_modbus.helpers import get_controller_from_entry
 from custom_components.solis_modbus.sensors.solis_number_sensor import SolisNumberEntity
 
@@ -22,11 +22,12 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
 
     _LOGGER.info(f"Solis platform_config: {platform_config}")
 
-    sensors: List[SolisNumberEntity] = []
+    sensors: list[SolisNumberEntity] = []
     for sensor_group in controller.sensor_groups:
         for sensor in sensor_group.sensors:
             if sensor.name != "reserve" and sensor.editable:
                 sensors.append(SolisNumberEntity(hass, sensor))
+    hass.data.setdefault(DOMAIN, {})[NUMBER_ENTITIES] = sensors
     _LOGGER.info(f"Number entities = {len(sensors)}")
     async_add_devices(sensors, True)
     return True

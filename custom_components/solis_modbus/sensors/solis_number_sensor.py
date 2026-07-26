@@ -1,15 +1,25 @@
 import logging
-from typing import List
 
 from homeassistant.components.number import NumberEntity, NumberMode, RestoreNumber
 from homeassistant.core import callback
-from homeassistant.helpers.template import is_number
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from custom_components.solis_modbus.const import REGISTER, DOMAIN, VALUE, CONTROLLER, SLAVE
-from custom_components.solis_modbus.helpers import cache_get, is_correct_controller
+from custom_components.solis_modbus.const import CONTROLLER, REGISTER, SLAVE, VALUE
+from custom_components.solis_modbus.helpers import cache_get, is_correct_controller, register_update_signal
 from custom_components.solis_modbus.sensors.solis_base_sensor import SolisBaseSensor
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def is_number(value) -> bool:
+    """Check if a value is a finite number (replaces removed homeassistant.helpers.template.is_number)."""
+    if isinstance(value, bool):
+        return False
+    try:
+        number = float(value)
+    except (ValueError, TypeError):
+        return False
+    return number == number and number not in (float("inf"), float("-inf"))
 
 
 class SolisNumberEntity(RestoreNumber, NumberEntity):
@@ -23,17 +33,16 @@ class SolisNumberEntity(RestoreNumber, NumberEntity):
         self._attr_has_entity_name = True
         self._attr_unique_id = sensor.unique_id
 
-        self._register: List[int] = sensor.registrars
+        self._register: list[int] = sensor.registrars
         _LOGGER.debug(f"read_register = {sensor.registrars} | write_register {sensor.write_register}")
-        self._write_register: int = sensor.write_register if sensor.write_register is not None else self._register[
-            0] if len(self._register) == 1 else None
+        self._write_register: int = sensor.write_register if sensor.write_register is not None else self._register[0] if len(self._register) == 1 else None
 
         self._device_class = sensor.device_class
         self._unit_of_measurement = sensor.unit_of_measurement
         self._attr_device_class = sensor.device_class
         self._attr_state_class = sensor.state_class
         self._attr_native_unit_of_measurement = sensor.unit_of_measurement
-        self._attr_available = not sensor.hidden
+        self._attr_available = not sensor.hidden and sensor.enabled
 
         self._received_values = {}
 
@@ -57,13 +66,21 @@ class SolisNumberEntity(RestoreNumber, NumberEntity):
             self._attr_native_value = state.native_value
             # self.adjust_min_max_step(state.native_min_value, state.native_max_value, state.native_step)
 
-        # 🔥 Register event listener for real-time updates
-        self._hass.bus.async_listen(DOMAIN, self.handle_modbus_update)
+        for reg in set(self._register):
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self._hass,
+                    register_update_signal(self.base_sensor.controller, reg),
+                    self.handle_modbus_update,
+                )
+            )
+        if not self.base_sensor.enabled:
+            self._attr_available = False
 
     def adjust_min_max_step(self, min_wanted: float | None, max_wanted: float | None, step_wanted: float | None):
         # float(43016) & equalization(43017) voltages, and rated capacity(43019)
         if 43016 in self._register or 43017 in self._register or 43019 in self._register:
-            installed_battery = cache_get(self.hass, 43009)
+            installed_battery = cache_get(self.hass, self.base_sensor.controller, 43009)
 
             if is_number(installed_battery):
                 # only supported with a user defined battery
@@ -78,17 +95,20 @@ class SolisNumberEntity(RestoreNumber, NumberEntity):
             self._attr_native_step = step_wanted
 
     @callback
-    def handle_modbus_update(self, event):
-        """Callback function that updates sensor when new register data is available."""
-        updated_register = int(event.data.get(REGISTER))
-        updated_controller = str(event.data.get(CONTROLLER))
-        updated_controller_slave = int(event.data.get(SLAVE))
+    def handle_modbus_update(self, data):
+        """Callback when register data is available (per-register dispatcher)."""
+        updated_register = int(data.get(REGISTER))
+        updated_controller = str(data.get(CONTROLLER))
+        updated_controller_slave = int(data.get(SLAVE))
 
         if not is_correct_controller(self.base_sensor.controller, updated_controller, updated_controller_slave):
             return  # meant for a different sensor/inverter combo
 
+        if not self.base_sensor.enabled:
+            return
+
         if updated_register in self._register:
-            updated_value = int(event.data.get(VALUE))
+            updated_value = int(data.get(VALUE))
 
             self._received_values[updated_register] = updated_value
 
@@ -117,11 +137,12 @@ class SolisNumberEntity(RestoreNumber, NumberEntity):
             return
 
         register_value = round(value / self._multiplier)
+        if self.base_sensor.data_type == "S16":
+            register_value = max(-32768, min(32767, register_value))
+            register_value &= 0xFFFF
 
         # Write to Modbus controller
-        self._hass.create_task(
-            self.base_sensor.controller.async_write_holding_register(self._write_register, int(register_value))
-        )
+        self._hass.create_task(self.base_sensor.controller.async_write_holding_register(self._write_register, int(register_value)))
 
         self._attr_native_value = value
         self.schedule_update_ha_state()

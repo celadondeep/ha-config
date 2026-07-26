@@ -1,15 +1,23 @@
 import logging
 import struct
 from datetime import datetime
-from typing import List
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_utils
 
 from custom_components.solis_modbus import DOMAIN
 from custom_components.solis_modbus.const import (
-    DRIFT_COUNTER, VALUES, CONTROLLER
+    CONN_TYPE_TCP,
+    CONTROLLER,
+    DRIFT_COUNTER,
+    NUMBER_ENTITIES,
+    REGISTER,
+    SENSOR_ENTITIES,
+    SLAVE,
+    VALUE,
+    VALUES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -24,7 +32,7 @@ def hex_to_ascii(hex_value):
     byte2 = decimal_value & 0xFF
 
     # Convert bytes to ASCII characters
-    ascii_chars = ''.join([chr(byte) for byte in [byte1, byte2]])
+    ascii_chars = "".join([chr(byte) for byte in [byte1, byte2]])
 
     return ascii_chars
 
@@ -33,48 +41,45 @@ def unique_id_generator(controller, third_value, fourth_value=None):
     # new method to generate unique id
     if fourth_value is None:
         if controller.device_serial_number is not None:
-            return "{}_{}_{}".format(DOMAIN, controller.device_serial_number, third_value)
+            return f"{DOMAIN}_{controller.device_serial_number}_{third_value}"
 
         if controller.identification is not None:
-            return "{}_{}_{}".format(DOMAIN, controller.identification, third_value)
+            return f"{DOMAIN}_{controller.identification}_{third_value}"
 
-        return "{}_{}_{}".format(DOMAIN, controller.host, third_value)
+        return f"{DOMAIN}_{controller.host}_{third_value}"
     else:
         if controller.device_serial_number is not None:
-            return "{}_{}_{}_{}".format(DOMAIN, controller.device_serial_number, third_value, fourth_value)
+            return f"{DOMAIN}_{controller.device_serial_number}_{third_value}_{fourth_value}"
 
         if controller.identification is not None:
-            return "{}_{}_{}_{}".format(DOMAIN, controller.identification, third_value, fourth_value)
+            return f"{DOMAIN}_{controller.identification}_{third_value}_{fourth_value}"
 
-        return "{}_{}_{}_{}".format(DOMAIN, controller.host, third_value, fourth_value)
+        return f"{DOMAIN}_{controller.host}_{third_value}_{fourth_value}"
 
 
 def unique_id_generator_binary(controller, register, bit_position, on_value):
     if controller.device_serial_number is not None:
-        return "{}_{}_{}_{}".format(DOMAIN, controller.device_serial_number, register,
-                                    on_value if on_value is not None else bit_position)
+        return f"{DOMAIN}_{controller.device_serial_number}_{register}_{on_value if on_value is not None else bit_position}"
     if controller.identification is not None:
-        return "{}_{}_{}_{}".format(DOMAIN, controller.identification, register,
-                                    on_value if on_value is not None else bit_position)
+        return f"{DOMAIN}_{controller.identification}_{register}_{on_value if on_value is not None else bit_position}"
 
-    return "{}_{}_{}_{}".format(DOMAIN,
-                                controller.host,
-                                register,
-                                on_value if on_value is not None else bit_position)
+    return f"{DOMAIN}_{controller.host}_{register}_{on_value if on_value is not None else bit_position}"
 
 
 def extract_serial_number(values):
-    packed = struct.pack('>' + 'H' * len(values), *values)
-    return packed.decode('ascii', errors='ignore').strip('\x00\r\n ')
+    packed = struct.pack(">" + "H" * len(values), *values)
+    return packed.decode("ascii", errors="ignore").strip("\x00\r\n ")
 
 
-def clock_drift_test(hass, controller, hours, minutes, seconds):
+def clock_drift_test(hass, controller, year, month, day, hours, minutes, seconds):
     current_time = dt_utils.now()
-    device_time = datetime(
-        current_time.year, current_time.month, current_time.day, hours, minutes, seconds,
-        tzinfo=current_time.tzinfo
-    )
-    total_drift = (current_time - device_time).total_seconds()
+    try:
+        # RTC year register holds 0-99 (offset from 2000)
+        device_time = datetime(2000 + year, month, day, hours, minutes, seconds, tzinfo=current_time.tzinfo)
+        total_drift = abs((current_time - device_time).total_seconds())
+    except ValueError:
+        # RTC holds an impossible date (e.g. zeros after backup-power loss) — force a correction
+        total_drift = float("inf")
 
     # Ensure structure
     if DOMAIN not in hass.data:
@@ -82,12 +87,22 @@ def clock_drift_test(hass, controller, hours, minutes, seconds):
     drift_counter = hass.data[DOMAIN].get(DRIFT_COUNTER, 0)
     clock_adjusted = False
 
-    if abs(total_drift) > 60:
+    if total_drift > 60:
         if drift_counter > 5:
             if controller.connected():
-                hass.create_task(controller.async_write_holding_registers(
-                    43003, [current_time.hour, current_time.minute, current_time.second]
-                ))
+                hass.create_task(
+                    controller.async_write_holding_registers(
+                        43000,
+                        [
+                            current_time.year % 100,
+                            current_time.month,
+                            current_time.day,
+                            current_time.hour,
+                            current_time.minute,
+                            current_time.second,
+                        ],
+                    )
+                )
                 clock_adjusted = True
         else:
             hass.data[DOMAIN][DRIFT_COUNTER] = drift_counter + 1
@@ -141,12 +156,35 @@ def decode_inverter_model(hex_value):
     return protocol_version, model_description
 
 
-def cache_save(hass: HomeAssistant, register: str | int, value):
-    hass.data[DOMAIN][VALUES][str(register)] = value
+def register_cache_key(controller, register: str | int) -> str:
+    """Build a register cache key scoped to Modbus link + slave (parallel inverters on one logger)."""
+    conn = getattr(controller, "connection_id", None)
+    if not isinstance(conn, str):
+        conn = str(getattr(controller, "host", "") or "")
+    slave = int(getattr(controller, "device_id", 1))
+    return f"{conn}|{slave}|{register}"
 
 
-def cache_get(hass: HomeAssistant, register: str | int):
-    return hass.data[DOMAIN][VALUES].get(str(register), None)
+def cache_save(hass: HomeAssistant, controller, register: str | int, value):
+    hass.data[DOMAIN][VALUES][register_cache_key(controller, register)] = value
+
+
+def cache_get(hass: HomeAssistant, controller, register: str | int):
+    return hass.data[DOMAIN][VALUES].get(register_cache_key(controller, register), None)
+
+
+def mark_platform_entities_unavailable_for_base_sensors(hass: HomeAssistant, disabled_sensors: list) -> None:
+    """Mark sensor/number platform entities unavailable when their SolisBaseSensor is dynamically disabled."""
+    if not disabled_sensors:
+        return
+    disabled_set = frozenset(disabled_sensors)
+    domain_data = hass.data.get(DOMAIN) or {}
+    for bucket in (SENSOR_ENTITIES, NUMBER_ENTITIES):
+        for ent in domain_data.get(bucket) or []:
+            base = getattr(ent, "base_sensor", None)
+            if base is not None and base in disabled_set:
+                ent._attr_available = False
+                ent.schedule_update_ha_state()
 
 
 def set_controller(hass: HomeAssistant, controller, config_entry: ConfigEntry):
@@ -173,7 +211,7 @@ def get_controller(hass: HomeAssistant, host: str, slave: int = 1):
     return None
 
 
-def split_s32(s32_values: List[int]):
+def split_s32(s32_values: list[int]):
     high_word = s32_values[0] - (1 << 16) if s32_values[0] & (1 << 15) else s32_values[0]
     low_word = s32_values[1] - (1 << 16) if s32_values[1] & (1 << 15) else s32_values[1]
 
@@ -181,9 +219,32 @@ def split_s32(s32_values: List[int]):
     return (high_word << 16) | (low_word & 0xFFFF)
 
 
-def _any_in(target: List[int], collection: set[int]) -> bool:
+def _any_in(target: list[int], collection: set[int]) -> bool:
     return any(item in collection for item in target)
 
 
 def is_correct_controller(controller, host: str, slave: int):
     return controller.host == host and controller.device_id == slave
+
+
+def register_update_signal(controller, register: int) -> str:
+    """Dispatcher signal for one Modbus register on a specific controller (not recorded by the HA recorder)."""
+    cid = getattr(controller, "connection_id", None)
+    if isinstance(cid, str):
+        scope = f"{cid}_{int(controller.device_id)}"
+    elif isinstance(getattr(controller, "connection_type", None), str) and controller.connection_type == CONN_TYPE_TCP:
+        scope = f"{controller.host}_{int(controller.port)}_{int(controller.device_id)}"
+    else:
+        scope = f"{controller.host}_{int(controller.device_id)}"
+    return f"{DOMAIN}_{scope}_{int(register)}"
+
+
+def notify_register_update(hass: HomeAssistant, controller, register: int, value) -> None:
+    """Notify listeners for a single register; replaces bus.async_fire(DOMAIN, ...) for Modbus data."""
+    payload = {
+        REGISTER: register,
+        VALUE: value,
+        CONTROLLER: controller.host,
+        SLAVE: int(controller.device_id),
+    }
+    async_dispatcher_send(hass, register_update_signal(controller, register), payload)

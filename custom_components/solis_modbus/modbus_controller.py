@@ -1,36 +1,73 @@
 import asyncio
 import logging
-import time
-from datetime import datetime, UTC
-from typing import List, Union
+from datetime import UTC, datetime
 
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.template import is_number
-from pymodbus.client import AsyncModbusTcpClient, AsyncModbusSerialClient
+from pymodbus.client import AsyncModbusSerialClient, AsyncModbusTcpClient
 
 from custom_components.solis_modbus.client_manager import ModbusClientManager
 from custom_components.solis_modbus.const import (
-    DOMAIN, REGISTER, VALUE, CONTROLLER, SLAVE,
-    CONN_TYPE_TCP, DEFAULT_BAUDRATE, DEFAULT_BYTESIZE, DEFAULT_PARITY, DEFAULT_STOPBITS, MANUFACTURER
+    CONN_TYPE_TCP,
+    DEFAULT_BAUDRATE,
+    DEFAULT_BYTESIZE,
+    DEFAULT_PARITY,
+    DEFAULT_STOPBITS,
+    DOMAIN,
+    MANUFACTURER,
 )
 from custom_components.solis_modbus.data.enums import PollSpeed
 from custom_components.solis_modbus.data.solis_config import InverterConfig
-from custom_components.solis_modbus.helpers import cache_save
+from custom_components.solis_modbus.helpers import cache_save, notify_register_update
 from custom_components.solis_modbus.sensors.solis_base_sensor import SolisSensorGroup
 from custom_components.solis_modbus.sensors.solis_derived_sensor import SolisDerivedSensor
 
 _LOGGER = logging.getLogger(__name__)
 
 
+def is_number(value) -> bool:
+    """Check if a value is a finite number (replaces removed homeassistant.helpers.template.is_number)."""
+    if isinstance(value, bool):
+        return False
+    try:
+        number = float(value)
+    except (ValueError, TypeError):
+        return False
+    return number == number and number not in (float("inf"), float("-inf"))
+
+
+# Modbus exception codes we treat as address/map issues worth splitting reads (see data_retrieval recovery).
+RECOVERABLE_REGISTER_READ_EXCEPTIONS = frozenset({2, 3})
+
+
+def _exception_code_from_modbus_result(result) -> int | None:
+    """Best-effort Modbus exception code from a pymodbus response object."""
+    return getattr(result, "exception_code", None)
+
+
 class ModbusController:
-    def __init__(self, hass, inverter_config: InverterConfig, sensor_groups: List[SolisSensorGroup] = None,
-                 derived_sensors: List[SolisDerivedSensor] = None, device_id=1, fast_poll=5, normal_poll=15,
-                 slow_poll=30, connection_type=CONN_TYPE_TCP,
-                 # TCP parameters
-                 host=None, port=502, identification=None,
-                 # Serial parameters
-                 serial_port=None, baudrate=DEFAULT_BAUDRATE, bytesize=DEFAULT_BYTESIZE,
-                 parity=DEFAULT_PARITY, stopbits=DEFAULT_STOPBITS, serial_number=None):
+    def __init__(
+        self,
+        hass,
+        inverter_config: InverterConfig,
+        sensor_groups: list[SolisSensorGroup] = None,
+        derived_sensors: list[SolisDerivedSensor] = None,
+        device_id=1,
+        fast_poll=5,
+        normal_poll=15,
+        slow_poll=30,
+        connection_type=CONN_TYPE_TCP,
+        # TCP parameters
+        host=None,
+        port=502,
+        identification=None,
+        # Serial parameters
+        serial_port=None,
+        baudrate=DEFAULT_BAUDRATE,
+        bytesize=DEFAULT_BYTESIZE,
+        parity=DEFAULT_PARITY,
+        stopbits=DEFAULT_STOPBITS,
+        serial_number=None,
+    ):
         """
         Initialize ModbusController with support for both TCP and Serial connections.
 
@@ -57,8 +94,9 @@ class ModbusController:
         self.serial_number = serial_number
         self.identification = identification
 
-        # Use ModbusClientManager to get shared client and lock
-        manager = ModbusClientManager.get_instance()
+        # Use ModbusClientManager to get shared client, lock, and per-link timing shared by all slaves.
+        self._client_manager = ModbusClientManager.get_instance()
+        manager = self._client_manager
 
         # Connection-specific setup
         if connection_type == CONN_TYPE_TCP:
@@ -67,7 +105,7 @@ class ModbusController:
             self.host = host
             self.port = port
             self.connection_id = f"{host}:{port}"
-            self.client: Union[AsyncModbusTcpClient, AsyncModbusSerialClient] = manager.get_tcp_client(host, port)
+            self.client: AsyncModbusTcpClient | AsyncModbusSerialClient = manager.get_tcp_client(host, port)
             self.poll_lock = manager.get_client_lock(self.connection_id)
         else:  # CONN_TYPE_SERIAL
             if not serial_port:
@@ -80,9 +118,7 @@ class ModbusController:
             self.connection_id = serial_port
             # For serial, set host to serial_port for backwards compatibility with logging
             self.host = serial_port
-            self.client: Union[AsyncModbusTcpClient, AsyncModbusSerialClient] = manager.get_serial_client(
-                serial_port, baudrate, bytesize, parity, stopbits
-            )
+            self.client: AsyncModbusTcpClient | AsyncModbusSerialClient = manager.get_serial_client(serial_port, baudrate, bytesize, parity, stopbits)
             self.poll_lock = manager.get_client_lock(self.connection_id)
 
         self.connect_failures = 0
@@ -101,7 +137,6 @@ class ModbusController:
 
         # Modbus Write Queue
         self.write_queue = asyncio.Queue()
-        self._last_modbus_request = 0
         self._last_modbus_success = datetime.now(UTC)
 
     async def process_write_queue(self):
@@ -155,23 +190,20 @@ class ModbusController:
 
                 # Different pymodbus APIs for TCP vs Serial
                 if self.connection_type == CONN_TYPE_TCP:
-                    result = await self.client.write_register(address=int_register, value=int_value,
-                                                              device_id=self.device_id)
+                    result = await self.client.write_register(address=int_register, value=int_value, device_id=self.device_id)
                 else:
                     self.client.slave = self.device_id
                     result = await self.client.write_register(address=int_register, value=int_value)
                 _LOGGER.debug(
-                    f"({self.host}.{self.device_id}) Write Holding Register register = {int_register}, value = {value}, int_value = {int_value}: {result}")
+                    f"({self.host}.{self.device_id}) Write Holding Register register = {int_register}, value = {value}, int_value = {int_value}: {result}"
+                )
 
                 if result.isError():
-                    _LOGGER.error(
-                        f"({self.host}.{self.device_id}) Failed to write holding register {register} with value {value}: {result}")
+                    _LOGGER.error(f"({self.host}.{self.device_id}) Failed to write holding register {register} with value {value}: {result}")
                     return None
 
-                cache_save(self.hass, int_register, result.registers[0])
-                self.hass.bus.async_fire(DOMAIN,
-                                         {REGISTER: int_register, VALUE: result.registers[0], CONTROLLER: self.host,
-                                          SLAVE: self.device_id})
+                cache_save(self.hass, self, int_register, result.registers[0])
+                notify_register_update(self.hass, self, int_register, result.registers[0])
 
                 return result
         except Exception as e:
@@ -196,29 +228,40 @@ class ModbusController:
             async with self.poll_lock:
                 await self.inter_frame_wait(is_write=True)  # Delay before write
 
-                # Different pymodbus APIs for TCP vs Serial
-                if self.connection_type == CONN_TYPE_TCP:
-                    result = await self.client.write_registers(address=start_register, values=values,
-                                                               device_id=self.device_id)
-                else:
-                    self.client.slave = self.device_id
-                    result = await self.client.write_registers(address=start_register, values=values)
-                _LOGGER.debug(
-                    f"({self.host}.{self.device_id}) Write Holding Register block for {len(values)} registers starting at register = {start_register}")
+                try:
+                    # Different pymodbus APIs for TCP vs Serial
+                    if self.connection_type == CONN_TYPE_TCP:
+                        result = await self.client.write_registers(address=start_register, values=values, device_id=self.device_id)
+                    else:
+                        self.client.slave = self.device_id
+                        result = await self.client.write_registers(address=start_register, values=values)
+                    _LOGGER.debug(
+                        f"({self.host}.{self.device_id}) Write Holding Register block for {len(values)} registers starting at register = {start_register}"
+                    )
 
-                if result.isError():
-                    _LOGGER.error(f"({self.host}.{self.device_id}) Write block failed: {result}")
+                    if result.isError():
+                        _LOGGER.error(f"({self.host}.{self.device_id}) Write block failed: {result}")
+                        return None
+
+                    for i, value in enumerate(values):
+                        reg_addr = start_register + i
+                        cache_save(self.hass, self, reg_addr, value)
+                        notify_register_update(self.hass, self, reg_addr, value)
+                    return result
+                except Exception as write_error:
+                    _LOGGER.error(
+                        f"({self.host}.{self.device_id}) Exception during write holding registers "
+                        f"{start_register}-{start_register + len(values) - 1}: {str(write_error)}"
+                    )
+                    # Close connection to clear any stale state/responses
+                    try:
+                        if hasattr(self.client, "connected") and self.client.connected:
+                            self.client.close()
+                    except Exception:
+                        pass
                     return None
-
-                for i, value in enumerate(values):
-                    cache_save(self.hass, start_register + i, value)
-                    self.hass.bus.async_fire(DOMAIN,
-                                             {REGISTER: start_register + i, VALUE: value, CONTROLLER: self.host,
-                                              SLAVE: self.device_id})
-                return result
         except Exception as e:
-            _LOGGER.error(
-                f"({self.host}.{self.device_id}) Failed to write holding registers {start_register}-{start_register + len(values) - 1}: {str(e)}")
+            _LOGGER.error(f"({self.host}.{self.device_id}) Failed to write holding registers {start_register}-{start_register + len(values) - 1}: {str(e)}")
             return None
 
     async def async_write_holding_register(self, register, value):
@@ -246,54 +289,57 @@ class ModbusController:
         await self.write_queue.put((start_register, values, True))
 
     async def inter_frame_wait(self, is_write=False):
-        """Implements inter-frame delay to respect Modbus timing requirements.
+        """Spacing between Modbus frames on this link (shared across parallel inverters on the same host:port)."""
+        await self._client_manager.inter_frame_wait(self.connection_id, is_write=is_write)
 
-        This method calculates the time since the last Modbus request and adds
-        a delay if necessary to ensure proper spacing between operations.
-
-        Args:
-            is_write (bool): If True, uses a longer delay for write operations.
-
-        Returns:
-            None
-        """
-        # Minimum delay between Modbus operations (milliseconds)
-        # Write operations get slightly longer delays for safety
-        delay_ms = 100 if is_write else 50
-
-        current_time = time.perf_counter()
-        elapsed = (current_time - self._last_modbus_request) * 1000  # Convert to ms
-
-        if elapsed < delay_ms:
-            sleep_time = (delay_ms - elapsed) / 1000
-            await asyncio.sleep(sleep_time)
-
-        self._last_modbus_request = time.perf_counter()
-
-    async def _async_read_input_register_raw(self, register, count):
-        """Raw read input registers without connection check (internal use)."""
+    async def _async_read_input_register_raw_detailed(self, register: int, count: int, *, quiet: bool = False) -> tuple[list[int] | None, int | None]:
+        """Read input registers under poll_lock. Returns (registers, None) or (None, exception_code|None)."""
         async with self.poll_lock:
             await self.inter_frame_wait()
 
-            # Different pymodbus APIs for TCP vs Serial
-            if self.connection_type == CONN_TYPE_TCP:
-                # TCP: pass slave as parameter
-                result = await self.client.read_input_registers(address=register, count=count, device_id=self.device_id)
-            else:
-                # Serial: set slave on client, then call without slave parameter
-                self.client.slave = self.device_id
-                result = await self.client.read_input_registers(address=register, count=count)
+            try:
+                if self.connection_type == CONN_TYPE_TCP:
+                    result = await self.client.read_input_registers(address=register, count=count, device_id=self.device_id)
+                else:
+                    self.client.slave = self.device_id
+                    result = await self.client.read_input_registers(address=register, count=count)
 
-            _LOGGER.debug(
-                f"({self.host}.{self.device_id}) Read Input Registers: register = {register}, count = {count}")
+                _LOGGER.debug(f"({self.host}.{self.device_id}) Read Input Registers: register = {register}, count = {count}")
 
-            if result.isError():
-                _LOGGER.error(
-                    f"({self.host}.{self.device_id}) Failed to read input registers starting at {register}: {result}")
-                return None
+                if result.isError():
+                    exc = _exception_code_from_modbus_result(result)
+                    log_fn = _LOGGER.debug if quiet else _LOGGER.error
+                    log_fn(f"({self.host}.{self.device_id}) Failed to read input registers starting at {register}: {result}")
+                    return None, exc
 
-            self._last_modbus_success = datetime.now(UTC)
-            return result.registers
+                self._last_modbus_success = datetime.now(UTC)
+                return result.registers, None
+            except Exception as e:
+                # Log the exception, close connection, and return error
+                error_msg = str(e)
+                log_fn = _LOGGER.debug if quiet else _LOGGER.error
+                log_fn(f"({self.host}.{self.device_id}) Exception reading input registers at {register}: {error_msg}")
+                # Close connection to clear any stale state/responses
+                try:
+                    if hasattr(self.client, "connected") and self.client.connected:
+                        self.client.close()
+                except Exception:
+                    pass
+                return None, None
+
+    async def _async_read_input_register_raw(self, register, count):
+        """Raw read input registers without connection check (internal use)."""
+        registers, _err = await self._async_read_input_register_raw_detailed(register, count, quiet=False)
+        return registers
+
+    async def async_read_input_registers_with_exception(self, register: int, count: int) -> tuple[list[int] | None, int | None]:
+        """Like async_read_input_register but returns (registers, exception_code) for recoverable-read logic."""
+        try:
+            await self.connect()
+            return await self._async_read_input_register_raw_detailed(register, count, quiet=False)
+        except Exception as e:
+            _LOGGER.error(f"({self.host}.{self.device_id}) Exception while reading input registers starting at {register} (count={count}): {str(e)}")
+            return None, None
 
     async def async_read_input_register(self, register, count):
         """Reads input registers from the Modbus device.
@@ -312,9 +358,56 @@ class ModbusController:
             await self.connect()
             return await self._async_read_input_register_raw(register, count)
         except Exception as e:
-            _LOGGER.error(
-                f"({self.host}.{self.device_id}) Exception while reading input registers starting at {register} (count={count}): {str(e)}")
+            _LOGGER.error(f"({self.host}.{self.device_id}) Exception while reading input registers starting at {register} (count={count}): {str(e)}")
             return None
+
+    async def _async_read_holding_register_raw_detailed(self, register: int, count: int, *, quiet: bool = False) -> tuple[list[int] | None, int | None]:
+        """Read holding registers under poll_lock. Returns (registers, None) or (None, exception_code|None)."""
+        async with self.poll_lock:
+            await self.inter_frame_wait()
+
+            try:
+                if self.connection_type == CONN_TYPE_TCP:
+                    result = await self.client.read_holding_registers(address=register, count=count, device_id=self.device_id)
+                else:
+                    self.client.slave = self.device_id
+                    result = await self.client.read_holding_registers(address=register, count=count)
+
+                _LOGGER.debug(f"({self.host}.{self.device_id}) Read Holding Registers: register = {register}, count = {count}")
+
+                if result.isError():
+                    exc = _exception_code_from_modbus_result(result)
+                    log_fn = _LOGGER.debug if quiet else _LOGGER.error
+                    log_fn(f"({self.host}.{self.device_id}) Failed to read holding registers starting at {register}: {result}")
+                    return None, exc
+
+                self._last_modbus_success = datetime.now(UTC)
+                return result.registers, None
+            except Exception as e:
+                # Log the exception, close connection, and return error
+                error_msg = str(e)
+                log_fn = _LOGGER.debug if quiet else _LOGGER.error
+                log_fn(f"({self.host}.{self.device_id}) Exception reading holding registers at {register}: {error_msg}")
+                # Close connection to clear any stale state/responses
+                try:
+                    if hasattr(self.client, "connected") and self.client.connected:
+                        self.client.close()
+                except Exception:
+                    pass
+                return None, None
+
+    async def _async_read_holding_register_raw(self, register, count):
+        registers, _err = await self._async_read_holding_register_raw_detailed(register, count, quiet=False)
+        return registers
+
+    async def async_read_holding_registers_with_exception(self, register: int, count: int) -> tuple[list[int] | None, int | None]:
+        """Like async_read_holding_register but returns (registers, exception_code) for recoverable-read logic."""
+        try:
+            await self.connect()
+            return await self._async_read_holding_register_raw_detailed(register, count, quiet=False)
+        except Exception as e:
+            _LOGGER.error(f"({self.host}.{self.device_id}) Exception while reading holding registers starting at {register} (count={count}): {str(e)}")
+            return None, None
 
     async def async_read_holding_register(self, register, count):
         """Reads holding registers from the Modbus device.
@@ -331,32 +424,9 @@ class ModbusController:
         """
         try:
             await self.connect()
-            async with self.poll_lock:
-                await self.inter_frame_wait()
-
-                # Different pymodbus APIs for TCP vs Serial
-                if self.connection_type == CONN_TYPE_TCP:
-                    # TCP: pass slave as parameter
-                    result = await self.client.read_holding_registers(address=register, count=count,
-                                                                      device_id=self.device_id)
-                else:
-                    # Serial: set slave on client, then call without slave parameter
-                    self.client.slave = self.device_id
-                    result = await self.client.read_holding_registers(address=register, count=count)
-
-                _LOGGER.debug(
-                    f"({self.host}.{self.device_id}) Read Holding Registers: register = {register}, count = {count}")
-
-                if result.isError():
-                    _LOGGER.error(
-                        f"({self.host}.{self.device_id}) Failed to read holding registers starting at {register}: {result}")
-                    return None
-
-                self._last_modbus_success = datetime.now(UTC)
-                return result.registers
+            return await self._async_read_holding_register_raw(register, count)
         except Exception as e:
-            _LOGGER.error(
-                f"({self.host}.{self.device_id}) Exception while reading holding registers starting at {register} (count={count}): {str(e)}")
+            _LOGGER.error(f"({self.host}.{self.device_id}) Exception while reading holding registers starting at {register} (count={count}): {str(e)}")
             return None
 
     async def connect(self):
@@ -371,27 +441,46 @@ class ModbusController:
         if self.connected():
             return True
 
-        try:
-            await self.client.connect()
-            if self.connected():
-                _LOGGER.info(f"✅ ({self.host}.{self.device_id}) Connected to Modbus device")
-                self.connect_failures = 0
+        async def _try_connect() -> bool:
+            try:
+                await self.client.connect()
+                if self.connected():
+                    _LOGGER.info(f"✅ ({self.host}.{self.device_id}) Connected to Modbus device")
+                    self.connect_failures = 0
 
-                if self.serial_number is None:
-                    _LOGGER.info(f"serial got from device: {self.serial_number}")
-                else:
-                    _LOGGER.info(f"serial got from cache: {self.serial_number}")
+                    if self.serial_number is None:
+                        _LOGGER.info(f"serial got from device: {self.serial_number}")
+                    else:
+                        _LOGGER.info(f"serial got from cache: {self.serial_number}")
 
-                return True
-            else:
+                    return True
                 self.connect_failures += 1
-                _LOGGER.debug(
-                    f"⚠️ ({self.host}:{self.port}.{self.device_id}) Connection attempt {self.connect_failures} failed")
+                _LOGGER.debug(f"⚠️ ({self.host}:{self.port}.{self.device_id}) Connection attempt {self.connect_failures} failed")
+                # Close connection to clear any pending responses/state
+                try:
+                    if hasattr(self.client, "connected") and self.client.connected:
+                        self.client.close()
+                except Exception:
+                    pass
                 return False
-        except Exception as e:
-            self.connect_failures += 1
-            _LOGGER.debug(f"❌ ({self.host}.{self.device_id}) Connection error (attempt {self.connect_failures}): {e}")
-            return False
+            except Exception as e:
+                self.connect_failures += 1
+                _LOGGER.debug(f"❌ ({self.host}.{self.device_id}) Connection error (attempt {self.connect_failures}): {e}")
+                # Close connection to clear any pending responses/state on connection error
+                try:
+                    if hasattr(self.client, "connected") and self.client.connected:
+                        self.client.close()
+                except Exception:
+                    pass
+                return False
+
+        lock = self.poll_lock
+        if lock:
+            async with lock:
+                if self.connected():
+                    return True
+                return await _try_connect()
+        return await _try_connect()
 
     def connected(self):
         """Checks if the Modbus client is currently connected.
@@ -400,6 +489,18 @@ class ModbusController:
             bool: True if the client is connected, False otherwise.
         """
         return self.client.connected if self.client else False
+
+    def force_close(self):
+        """Close the underlying client so a fresh connection can be established.
+
+        Used by the stale-link watchdog when the socket still claims to be
+        connected but reads have stopped succeeding (half-open TCP after the
+        datalogger sleeps or drops off WiFi).
+        """
+        try:
+            self.client.close()
+        except Exception as e:
+            _LOGGER.debug(f"({self.host}.{self.device_id}) Error closing stale client: {e}")
 
     def disable_connection(self):
         """Disables the Modbus connection.
@@ -449,13 +550,22 @@ class ModbusController:
         return {
             PollSpeed.FAST: self._poll_interval_fast,
             PollSpeed.NORMAL: self._poll_interval_normal,
-            PollSpeed.SLOW: self._poll_interval_slow
+            PollSpeed.SLOW: self._poll_interval_slow,
         }
 
     @property
     def sw_version(self):
         """Returns the software version of the inverter."""
         return self._sw_version
+
+    def replace_sensor_group(self, old_group: SolisSensorGroup, new_groups: list[SolisSensorGroup]) -> None:
+        """Replace one sensor group with several (or none) at the same list index."""
+        try:
+            idx = self._sensor_groups.index(old_group)
+        except ValueError:
+            _LOGGER.warning("(%s.%s) Sensor group to replace not found in controller list", self.host, self.device_id)
+            return
+        self._sensor_groups = self._sensor_groups[:idx] + new_groups + self._sensor_groups[idx + 1 :]
 
     @property
     def sensor_groups(self):
@@ -477,9 +587,9 @@ class ModbusController:
         """Gets the timestamp of the last Modbus request.
 
         Returns:
-            float: The timestamp of the last Modbus request (from time.monotonic()).
+            float: Shared per-link timestamp from time.perf_counter() after the last inter-frame wait.
         """
-        return self._last_modbus_request
+        return self._client_manager.get_last_modbus_request(self.connection_id)
 
     @property
     def last_modbus_success(self):

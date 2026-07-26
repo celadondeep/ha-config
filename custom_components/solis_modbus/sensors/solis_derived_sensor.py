@@ -2,15 +2,15 @@ import decimal
 import fractions
 import logging
 import numbers
-from datetime import datetime, UTC
-from typing import List
+from datetime import UTC, datetime
 
-from homeassistant.components.sensor import RestoreSensor, SensorEntity, SensorDeviceClass
-from homeassistant.core import callback, HomeAssistant
+from homeassistant.components.sensor import RestoreSensor, SensorDeviceClass, SensorEntity
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from custom_components.solis_modbus.const import DOMAIN, REGISTER, VALUE, CONTROLLER, SLAVE
+from custom_components.solis_modbus.const import CONTROLLER, REGISTER, SLAVE, VALUE
 from custom_components.solis_modbus.data.status_mapping import STATUS_MAPPING
-from custom_components.solis_modbus.helpers import decode_inverter_model, clock_drift_test, is_correct_controller
+from custom_components.solis_modbus.helpers import clock_drift_test, decode_inverter_model, is_correct_controller, register_update_signal
 from custom_components.solis_modbus.sensors.solis_base_sensor import SolisBaseSensor
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class SolisDerivedSensor(RestoreSensor, SensorEntity):
         self._attr_has_entity_name = True
         self._attr_unique_id = sensor.unique_id
 
-        self._register: List[int] = sensor.registrars
+        self._register: list[int] = sensor.registrars
 
         self._device_class = sensor.device_class
         self._unit_of_measurement = sensor.unit_of_measurement
@@ -50,22 +50,28 @@ class SolisDerivedSensor(RestoreSensor, SensorEntity):
                 self._attr_native_value = datetime.now(UTC)
         self.is_added_to_hass = True
 
-        # 🔥 Register event listener for real-time updates
-        self._hass.bus.async_listen(DOMAIN, self.handle_modbus_update)
+        for reg in set(self._register):
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self._hass,
+                    register_update_signal(self.base_sensor.controller, reg),
+                    self.handle_modbus_update,
+                )
+            )
 
     @callback
-    def handle_modbus_update(self, event):
-        """Callback function that updates sensor when new register data is available."""
-        updated_register = int(event.data.get(REGISTER))
-        updated_controller = str(event.data.get(CONTROLLER))
-        updated_controller_slave = int(event.data.get(SLAVE))
+    def handle_modbus_update(self, data):
+        """Callback when register data is available (per-register dispatcher)."""
+        updated_register = int(data.get(REGISTER))
+        updated_controller = str(data.get(CONTROLLER))
+        updated_controller_slave = int(data.get(SLAVE))
 
         if not is_correct_controller(self.base_sensor.controller, updated_controller, updated_controller_slave):
             return  # meant for a different sensor/inverter combo
 
         # Only process if this register belongs to the sensor
         if updated_register in self._register:
-            self._received_values[updated_register] = event.data.get(VALUE)
+            self._received_values[updated_register] = data.get(VALUE)
 
             # If we haven't received all registers yet, wait
             filtered_registers = {reg for reg in self._register if reg not in (0, 1, 90007)}
@@ -75,11 +81,16 @@ class SolisDerivedSensor(RestoreSensor, SensorEntity):
 
             ## start
             if 90007 in self._register:
-                is_adjusted = clock_drift_test(self.hass, self.base_sensor.controller,
-                                               self._received_values[33025],
-                                               self._received_values[33026],
-                                               self._received_values[33027],
-                                               )
+                is_adjusted = clock_drift_test(
+                    self.hass,
+                    self.base_sensor.controller,
+                    self._received_values[33022],
+                    self._received_values[33023],
+                    self._received_values[33024],
+                    self._received_values[33025],
+                    self._received_values[33026],
+                    self._received_values[33027],
+                )
                 if is_adjusted:
                     self._attr_available = True
                     self._attr_native_value = datetime.now(UTC)
@@ -107,16 +118,20 @@ class SolisDerivedSensor(RestoreSensor, SensorEntity):
                 r2_value = self._received_values[self._register[1]] * self.base_sensor.multiplier
                 new_value = round(r1_value * r2_value)
 
+            # String inverter: DC Voltage [n] × DC Current [n] (registers 3021–3028, protocol Ver19)
+            if 3021 in self._register or 3023 in self._register or 3025 in self._register or 3027 in self._register:
+                r1_value = self._received_values[self._register[0]] * self.base_sensor.multiplier
+                r2_value = self._received_values[self._register[1]] * self.base_sensor.multiplier
+                new_value = round(r1_value * r2_value)
+
             if 33079 in self._register or 33080 in self._register or 33081 in self._register or 33082 in self._register:
-                active_power = self.base_sensor.convert_value(
-                    [self._received_values[self._register[0]], self._received_values[self._register[1]]])
-                reactive_power = self.base_sensor.convert_value(
-                    [self._received_values[self._register[2]], self._received_values[self._register[3]]])
+                active_power = self.base_sensor.convert_value([self._received_values[self._register[0]], self._received_values[self._register[1]]])
+                reactive_power = self.base_sensor.convert_value([self._received_values[self._register[2]], self._received_values[self._register[3]]])
 
                 if active_power == 0 or reactive_power == 0:
                     new_value = 1
                 else:
-                    new_value = round(active_power / ((active_power ** 2 + reactive_power ** 2) ** 0.5), 3)
+                    new_value = round(active_power / ((active_power**2 + reactive_power**2) ** 0.5), 3)
 
             if 33135 in self._register and len(self._register) == 4:
                 registers = self._register.copy()
@@ -165,8 +180,7 @@ class SolisDerivedSensor(RestoreSensor, SensorEntity):
                 ## self.base_sensor.controller._model = model_description
                 new_value = model_description + f"(Protocol {protocol_version})"
 
-            if isinstance(new_value, (numbers.Number, decimal.Decimal, fractions.Fraction)) or isinstance(new_value,
-                                                                                                          str):
+            if isinstance(new_value, (numbers.Number, decimal.Decimal, fractions.Fraction)) or isinstance(new_value, str):
                 self._attr_available = True
                 self._attr_native_value = new_value
                 self._state = new_value
