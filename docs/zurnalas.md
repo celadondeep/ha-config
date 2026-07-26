@@ -4,6 +4,18 @@ Chronologinis svarbių pakeitimų ir atradimų sąrašas (naujausi viršuje).
 Auditas ir sesijos pildo po kiekvieno reikšmingo pakeitimo: data, kas
 pakeista, KODĖL, kokie skaičiai tai pagrindė.
 
+## 2026-07-26
+
+- **🔴 Naktinis iškrovimas ~5 naktis neveikė (cut-off min 12 %):** iškrovimo
+  cut-off SOC registro MINIMUMAS inverteryje = 12 % (range 12–100). Automatikos
+  (evening_discharge, tou_recalc) rašydavo target=10 (clamp buvo ≥5) → inverteris
+  ATMETA rašymą <12 ir palieka SENĄ reikšmę (dienos viršūnės skutimo 80). SOC 66 <
+  80 → inverteris laiko bateriją rezervu, namus maitina tinklas, į banką neeksportuoja.
+  PATAISA: abiejų automatikų clamp `≥5` → `≥12`. Su cut-off=12 (+ slotą perjungus)
+  baterija iškrovė 1191 W, į tinklą ~1 kW. Dieninė `feedin_tou` jau naudojo floor
+  clamp ≥12 (nepaliesta). backup_soc=80 (EPS rezervas) NEkaltas — netrukdo tinklinei
+  iškrovai. grid_peak_shaving derinant išjungtas (ne priežastis). Detaliau atmintyje.
+
 ## 2026-07-24
 
 - **🔴 Dieninis inverterio išjunginėjimas (klaida):** `solis_low_soc_night_shutdown`

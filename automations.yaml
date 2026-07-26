@@ -147,7 +147,11 @@
         # apsauga nuo klaidingų reikšmių (pvz. sensorius po restarto dar
         # nepaskelbtas); 5% = inverterio overdischarge riba, bet faktinis BMS
         # dugnas 10% (žemiau iškrauti neįmanoma); force-charge ties 4%.
-        target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 5] | max }}"
+        # Clamp ≥12: iškrovimo cut-off SOC registro MINIMUMAS inverteryje = 12 %
+        # (range 12–100). Rašant <12 inverteris atmeta ir palieka SENĄ reikšmę
+        # (2026-07-26: dėl to naktinis iškrovimas 5 naktis stovėjo ties 80 —
+        # dienos viršūnės skutimo 80 likdavo, nes 10 buvo atmetama).
+        target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 12] | max }}"
         discharge_needed: "{{ states('sensor.energy_manager_discharge_needed') | float(0) }}"
         # 7 punktas (2026-07-18, patikslinta 2026-07-24): iškrovimo PABAIGA
         # taikoma į gamybos pradžią, kad baterija kuo trumpiau stovėtų ties
@@ -315,7 +319,9 @@
     #    Clamp ≥5% — apsauga nuo klaidingų reikšmių (faktinis BMS dugnas 10%);
     #    jei sensorius nepasiekiamas — 100% (= neiškrauti nieko).
     - variables:
-        target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 5] | max }}"
+        # Clamp ≥12: iškrovimo cut-off SOC registro minimumas inverteryje = 12 %
+        # (range 12–100). <12 inverteris atmeta ir palieka seną (žr. 2026-07-26).
+        target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 12] | max }}"
         current_soc: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(100) }}"
         tou_on: "{{ is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on') }}"
     # Jei iškrovimo slotas išjungtas — nieko nedaryti (nerašinėti į Modbus
