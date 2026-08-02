@@ -4,6 +4,24 @@ Chronologinis svarbių pakeitimų ir atradimų sąrašas (naujausi viršuje).
 Auditas ir sesijos pildo po kiekvieno reikšmingo pakeitimo: data, kas
 pakeista, KODĖL, kokie skaičiai tai pagrindė.
 
+## 2026-08-01 (auditas)
+
+- **Banko likučio mėnesio-ribos artefaktas (atradimas, NE pataisa).**
+  `eso_bankas_likutis` nukrito 350→4.3 kWh, kai `eso_bankas_220588.menuo`
+  pasistūmė į 2026-07, o ESO savitarna liepos uždarymo likučio dar nepaskelbė
+  (oficialus_eso=0). Formulė (oficialus + einamojo mėn. neto) todėl „prarado"
+  ~382 kWh (birž. 269 + liepos neto +112.7; ESO liepa: exp 242.9 / imp 130.2).
+  **Savaime pasitaiso** ESO paskelbus liepą; `eso/import_now` (08-02) dar
+  nepadėjo. **Poveikio valdymui NĖRA** — likutis/ciklo_nuostolis/prognozė
+  naudojami tik packages/eso_bankas.yaml, jokioje automatikoje/AppDaemon.
+  Rankinė `eso_bankas_pradzia` korekcija NEDĖTA (ESO paskelbus → dvigubas
+  skaičiavimas). Ateities auditams: šis kritimas kartosis KAS mėnesio pabaigą
+  1–2 sav., kol ESO publikuoja — tai laukiama elgsena, ne defektas. Svarstytina
+  atsparumo pataisa (statistikų fallback su mėnesio flooring) — peržiūrai.
+- **Recorderio 145 val. spraga (07-26 22:00 → 08-01 23:23):** istorija
+  neįrašinėta (HA veikė, dienos skaitikliai kaupė). 08-01 auditas rėmėsi tik
+  paros sumomis + ESO statistikomis; vidurdienio trajektorija neprieinama.
+
 ## 2026-07-26
 
 - **🔴 Naktinis iškrovimas ~5 naktis neveikė (cut-off min 12 %):** iškrovimo
