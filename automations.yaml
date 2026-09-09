@@ -200,7 +200,41 @@
         slot_end: "{{ states('time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1') }}"
         mode_now: "{{ states('select.solis_s6_eh3p_work_mode') }}"
         power_on: "{{ is_state('switch.solis_s6_eh3p_power_state', 'on') }}"
+        precise_morning: "{{ states('sensor.inverter_morning_on_time_precise') }}"
+        precise_morning_reached: >-
+          {% set t = as_datetime(states('sensor.inverter_morning_on_time_precise')) %}
+          {{ t is not none and now() >= as_local(t) }}
     - choose:
+        # Aukščiausias prioritetas: realus native HA >=100 W momentas.
+        # Nuo šio momento nakties planas nebeturi teisės laikyti inverterio OFF.
+        - conditions:
+            - condition: template
+              value_template: "{{ precise_morning_reached }}"
+          sequence:
+            - if:
+                - condition: template
+                  value_template: "{{ slot_on }}"
+              then:
+                - service: switch.turn_off
+                  target:
+                    entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+            - if:
+                - condition: template
+                  value_template: "{{ slot_current | float(0) != 0 }}"
+              then:
+                - service: number.set_value
+                  target:
+                    entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
+                  data:
+                    value: 0
+            - if:
+                - condition: template
+                  value_template: "{{ not is_state('switch.solis_s6_eh3p_power_state', 'on') }}"
+              then:
+                - service: switch.turn_on
+                  target:
+                    entity_id: switch.solis_s6_eh3p_power_state
+
         # Aktyvios iškrovimo fazės
         - conditions:
             - condition: template
@@ -768,6 +802,10 @@
     - condition: state
       entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
       state: "off"
+    - condition: template
+      value_template: >
+        {% set t = as_datetime(states('sensor.inverter_morning_on_time_precise')) %}
+        {{ t is none or now() < as_local(t) }}
   action:
     - service: switch.turn_off
       target:
@@ -779,8 +817,8 @@
   description: >
     Įjungia inverterį (power_state on) po naktinio išjungimo tą pirmą minutę,
     kai pagal Solcast interpoliuotą pusvalandinę prognozę PV pasiekia >=100 W.
-    Laiką minutės tikslumu skaičiuoja AppDaemon
-    (sensor.inverter_morning_on_time, timestamp). Birželį tai ~1–2 val. vėliau už saulėtekį, kas sutaupo
+    Laiką minutės tikslumu skaičiuoja native HA template
+    (sensor.inverter_morning_on_time_precise, timestamp). Birželį tai ~1–2 val. vėliau už saulėtekį, kas sutaupo
     ~100 W tuščio veikimo. Realaus signalo trigeris: Eimo elektrinės faktinė
     PV gamyba >200 W (10 min) — apsauga nuo Solcast ryto pesimizmo, kai
     prognozuojamas 100 W perkirtimas vėluoja prieš tikrąją gamybos pradžią
@@ -791,7 +829,7 @@
     išjungiamas naktinio išjungimo jungiklis.
   trigger:
     - platform: time
-      at: sensor.inverter_morning_on_time
+      at: sensor.inverter_morning_on_time_precise
       id: exact_100w_time
     - platform: time_pattern
       minutes: "/1"
@@ -845,7 +883,7 @@
     - condition: template
       value_template: >
         {% if trigger.id == 'minute_100w_catchup' %}
-          {% set morning_ts = as_datetime(states('sensor.inverter_morning_on_time')) %}
+          {% set morning_ts = as_datetime(states('sensor.inverter_morning_on_time_precise')) %}
           {{ morning_ts is not none
              and now() >= as_local(morning_ts)
              and now() < as_local(morning_ts) + timedelta(minutes=15) }}
