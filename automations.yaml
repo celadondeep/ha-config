@@ -777,10 +777,10 @@
 - id: solis_morning_inverter_power_on
   alias: "Solis - Ryto inverterio įjungimas pagal Solcast gamybos pradžią"
   description: >
-    Įjungia inverterį (power_state on) po naktinio išjungimo tada, kai pagal
-    Solcast pusvalandinę prognozę PV gamyba viršys ~100 W (idle/off
-    skirtumą) — laiką skaičiuoja AppDaemon (sensor.inverter_morning_on_time,
-    timestamp). Birželį tai ~1–2 val. vėliau už saulėtekį, kas sutaupo
+    Įjungia inverterį (power_state on) po naktinio išjungimo tą pirmą minutę,
+    kai pagal Solcast interpoliuotą pusvalandinę prognozę PV pasiekia >=100 W.
+    Laiką minutės tikslumu skaičiuoja AppDaemon
+    (sensor.inverter_morning_on_time, timestamp). Birželį tai ~1–2 val. vėliau už saulėtekį, kas sutaupo
     ~100 W tuščio veikimo. Realaus signalo trigeris: Eimo elektrinės faktinė
     PV gamyba >200 W (10 min) — apsauga nuo Solcast ryto pesimizmo, kai
     prognozuojamas 100 W perkirtimas vėluoja prieš tikrąją gamybos pradžią
@@ -792,6 +792,10 @@
   trigger:
     - platform: time
       at: sensor.inverter_morning_on_time
+      id: exact_100w_time
+    - platform: time_pattern
+      minutes: "/1"
+      id: minute_100w_catchup
     - platform: state
       entity_id: sensor.energy_manager_night_plan
       to: "EVENING_BOOST"
@@ -835,6 +839,19 @@
     - condition: state
       entity_id: switch.solis_s6_eh3p_power_state
       state: "off"
+    # Jei Solcast 100 W momentą perskaičiavo į jau praėjusią minutę,
+    # timestamp triggerio nebebus. Minutinis catch-up leidžiamas tik trumpame
+    # 15 min lange po apskaičiuoto 100 W kirtimo; kitu metu jis nieko nedaro.
+    - condition: template
+      value_template: >
+        {% if trigger.id == 'minute_100w_catchup' %}
+          {% set morning_ts = as_datetime(states('sensor.inverter_morning_on_time')) %}
+          {{ morning_ts is not none
+             and now() >= as_local(morning_ts)
+             and now() < as_local(morning_ts) + timedelta(minutes=15) }}
+        {% else %}
+          true
+        {% endif %}
     # 2026-07-26: pašalinta 07-22 blokavimo sąlyga „SOC≤12 ir Eimo PV<1200 —
     # neįjungti". Ji buvo pora su (jau pašalinta) dienine išjungimo šaka ir
     # debesuotą rytą su tuščia baterija atidėdavo įjungimą iki 10:00 —
