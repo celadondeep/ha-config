@@ -17,9 +17,9 @@ Paleisti:  python3 /config/claude/tests/valdymo_simuliacija.py
 """
 
 # ── Parametrai (turi sutapti su gyva konfigūracija) ───────────────────────
-NAMAI = dict(floor=12, big_day=28, health_min=30, kwh_per_soc=0.16,
+NAMAI = dict(floor=12, big_day=28, health_min=20, kwh_per_soc=0.16,
              export_kw=1.0, min_soc=10)
-EIMO  = dict(floor=6,  big_day=26, health_min=30, kwh_per_soc=0.1434,
+EIMO  = dict(floor=6,  big_day=28, health_min=20, kwh_per_soc=0.1434,
              export_kw=1.0, min_soc=5)
 
 # ── Sprendimų formulės ────────────────────────────────────────────────────
@@ -73,6 +73,56 @@ def health_target(base_target, fc, soc, p):
     if fc <= p["big_day"]:
         return max(base_target, p["health_min"])
     return base_target
+
+def dynamic_night_stage(soc, target, hh, p, sleep_enabled=True,
+                        morning_h=6.0, exec_start_h=19.5):
+    """Supaprastintas energy_manager night_plan_cycle modelis."""
+    target = max(target, p["floor"])
+    if soc <= target + 1:
+        return "DONE"
+
+    # Linijinė nakties laiko ašis: 20:00=20, 05:00=29.
+    now_h = hh + (24 if hh < 12 else 0)
+    morning = morning_h + 24
+    exec_start = exec_start_h
+
+    if hh >= 18 and now_h < exec_start:
+        return "WAIT_EVENING"
+
+    if not sleep_enabled:
+        return "EVENING_BOOST" if hh >= 18 else "DAWN_FINISH"
+
+    sleep_soc = max(target, p["health_min"])
+    if soc > sleep_soc + 1:
+        return "EVENING_BOOST"
+
+    if target < sleep_soc:
+        dawn_kw = p["export_kw"] + 0.30 + 0.14
+        energy = max(0.0, (soc - target) * p["kwh_per_soc"])
+        dawn_hours = energy / dawn_kw + 0.20
+        dawn_start = morning - dawn_hours
+        return "SLEEP" if now_h < dawn_start else "DAWN_FINISH"
+
+    return "DONE"
+
+def run_night_plan_tests():
+    cases = [
+        ("vakaro boost 70→20", NAMAI, 70, 20, 20.0, True, "EVENING_BOOST"),
+        ("žemas target: miego langas", NAMAI, 20, 12, 23.0, True, "SLEEP"),
+        ("žemas target: dawn finish", NAMAI, 20, 12, 5.0, True, "DAWN_FINISH"),
+        ("target pasiektas", NAMAI, 12, 12, 5.5, True, "DONE"),
+        ("Eimo be power-cycle naktį aktyvus", EIMO, 60, 30, 23.0, False, "EVENING_BOOST"),
+        ("Eimo po vidurnakčio aktyvus", EIMO, 40, 20, 3.0, False, "DAWN_FINISH"),
+    ]
+    errors = 0
+    print(f"\n{'='*70}\n  DINAMINIS NAKTIES PLANAS\n{'='*70}")
+    for name, p, soc, target, hh, sleep_enabled, expected in cases:
+        got = dynamic_night_stage(soc, target, hh, p, sleep_enabled=sleep_enabled)
+        ok = got == expected
+        print(f"  {'✓' if ok else '❌'} {name}: {got} (tikėtasi {expected})")
+        if not ok:
+            errors += 1
+    return errors
 
 # ── Scenarijai ────────────────────────────────────────────────────────────
 # hh — vietos valanda (float). pv/load — W. fc — koreguota dienos prognozė kWh.
@@ -148,7 +198,7 @@ def run(p, name):
     return klaidos
 
 if __name__ == "__main__":
-    total = run(NAMAI, "NAMAI SE") + run(EIMO, "EIMO SE")
+    total = run(NAMAI, "NAMAI SE") + run(EIMO, "EIMO SE") + run_night_plan_tests()
     print(f"\n{'='*70}")
     print(f"  REZULTATAS: {'VISKAS ŠVARU ✓' if total == 0 else f'{total} KONFLIKTŲ ❌'}")
     print(f"{'='*70}")
