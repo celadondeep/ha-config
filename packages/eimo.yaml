@@ -332,207 +332,133 @@ automation:
   #  Self-Use). slot1_discharge_soc = cut-off (min 6%!).
   # ───────────────────────────────────────────────────────────────────────
   - id: solis_evening_discharge_eimo
-    alias: "Eimo - Vakaro iškrovimas pagal rytojaus prognozę"
+    alias: "Eimo - Dinaminio nakties plano startas"
     description: >
-      20:00: jei esamas SOC viršija energy_manager_eimo apskaičiuotą tikslą —
-      įjungia cloud slot1 iškrovimą į tinklą (21:00–07:30) su cut-off ties tikslu
-      (clamp ≥6%, nes slot SOC min = 6). Kitaip — slotas išjungtas, baterija namams.
+      19:30 cloud nakties valdymą perduoda
+      sensor.energy_manager_eimo_night_plan. Targetas ir plano būsena
+      AppDaemon'e regeneruojami kas 5 min; ši automatika daugiau nekuria
+      vienkartinio 20:00 discharge_start.
     trigger:
       - platform: time
-        at: "20:00:00"
-    variables:
-      forecast_tomorrow: >-
-        {{ (states('sensor.solcast_pv_forecast_forecast_tomorrow') | float(0)
-            * states('sensor.solcast_correction_factor_eimo') | float(1)) | round(1) }}
-      current_soc: "{{ states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(0) }}"
-      # Tikslinis SOC iš AppDaemon (energy_manager_eimo). Clamp į slot SOC min 6%.
-      target_soc: "{{ [states('sensor.energy_manager_eimo_target_soc') | float(100) | round(0) | int, 6] | max }}"
-      discharge_current: 100   # A, slot iškrovimo srovė (max 220) — derinama pagal poreikį
-      # 7 punktas (2026-07-18, patikslinta 2026-07-24): iškrovimo PABAIGA
-      # taikoma į ryto gamybos pradžią (inverter_morning_on_time_eimo — Solcast
-      # >100 W, tiksliau nei saulėtekis). Lango DYDIS = (SOC−target) MINUS
-      # nakties suvartojimas iki gamybos (sensor.energy_manager_eimo_cons_until_production)
-      # — patys namai iškrauna bateriją, tad tiek mažiau eksportuoti; langas
-      # startuoja vėliau ir baterija dugną pasiekia ties aušra, ne anksčiau.
-      # Startas ne ankstesnis nei 21:00. 1% SOC ≈ 0.1434 kWh.
-      discharge_start: >-
-        {% set m = as_datetime(states('sensor.inverter_morning_on_time_eimo')) %}
-        {% set morning = m.astimezone() if m is not none
-           else (now() + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0) %}
-        {% if morning < now() %}
-          {% set morning = (now() + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0) %}
-        {% endif %}
-        {% set cons = states('sensor.energy_manager_eimo_cons_until_production') | float(0) %}
-        {% set export_kwh = (current_soc - target_soc) * 0.1434 - cons %}
-        {% set hours = ([export_kwh, 0] | max / 1.0) + 0.3
-           + (1.0 if forecast_tomorrow > 22 else 0.0) %}
-        {% set start = morning - timedelta(hours=hours) %}
-        {% set earliest = now().replace(hour=21, minute=0, second=0, microsecond=0) %}
-        {{ (start if start > earliest else earliest).strftime('%H:%M') }}
+        at: "19:30:00"
     action:
-      - choose:
-          # 1) Audros/ESO režimas — neiškrauti, baterija rezervas namams
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.storm_mode_eimo
-                state: "on"
-            sequence:
-              - service: switch.turn_off
-                target:
-                  entity_id: switch.inverter_control_1033300254190112_slot1_discharge
-              - service: select.select_option
-                target:
-                  entity_id: select.inverter_control_1033300254190112_storage_mode
-                data:
-                  option: "Self-Use"
-              - service: notify.persistent_notification
-                data:
-                  title: "Eimo - Audros / ESO rezervo režimas 🔋"
-                  message: >
-                    Audros režimas — iškrovimas sustabdytas, baterija laikoma
-                    namams kaip rezervas.
-          # 2) SOC viršija tikslą — iškrauti perteklių į tinklą (21:00–07:30)
-          - conditions:
-              - condition: template
-                value_template: "{{ current_soc > target_soc }}"
-            sequence:
-              - service: number.set_value
-                target:
-                  entity_id: number.inverter_control_1033300254190112_slot1_discharge_soc
-                data:
-                  value: "{{ target_soc }}"
-              - service: number.set_value
-                target:
-                  entity_id: number.inverter_control_1033300254190112_slot1_discharge_current
-                data:
-                  value: "{{ discharge_current }}"
-              - service: text.set_value
-                target:
-                  entity_id: text.inverter_control_1033300254190112_slot1_discharge_time
-                data:
-                  value: "{{ discharge_start }}-07:30"
-              - service: switch.turn_on
-                target:
-                  entity_id: switch.inverter_control_1033300254190112_slot1_discharge
-              - service: select.select_option
-                target:
-                  entity_id: select.inverter_control_1033300254190112_storage_mode
-                data:
-                  option: "Self-Use"
-              - service: notify.persistent_notification
-                data:
-                  title: "Eimo - Naktinis iškrovimas 🔋→⚡"
-                  message: >
-                    Rytojaus prognozė: {{ forecast_tomorrow }} kWh.
-                    Iškraunam: SOC {{ current_soc }}% → {{ target_soc }}%.
-                    Slot1 {{ discharge_start }}–07:30 (pabaiga taikoma į
-                    saulėtekį), srovė {{ discharge_current }}A, cut-off {{ target_soc }}%.
-        # 3) SOC jau ≤ tikslo — iškrauti nereikia, baterija lieka namams
-        default:
-          - service: switch.turn_off
-            target:
-              entity_id: switch.inverter_control_1033300254190112_slot1_discharge
-          - service: select.select_option
-            target:
-              entity_id: select.inverter_control_1033300254190112_storage_mode
-            data:
-              option: "Self-Use"
-          - service: notify.persistent_notification
-            data:
-              title: "Eimo - Iškrovimas nereikalingas 🔋"
-              message: >
-                Rytojaus prognozė: {{ forecast_tomorrow }} kWh.
-                Tikslinis SOC {{ target_soc }}% ≥ esamo {{ current_soc }}%.
-                Baterija paliekama namams.
+      - service: notify.persistent_notification
+        data:
+          title: "Eimo - Dinaminis nakties planas"
+          message: >
+            Fazė: {{ states('sensor.energy_manager_eimo_night_plan') }}.
+            SOC {{ states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') }}% →
+            target {{ state_attr('sensor.energy_manager_eimo_night_plan', 'target_soc') }}%.
+            Planas perskaičiuojamas kas 5 min.
     mode: single
 
-  # ───────────────────────────────────────────────────────────────────────
-  #  TOU perskaičiavimas kas 5 min (20:05–07:00). Cloud rate-limit apsauga:
-  #  rašom į slot SOC TIK kai reikšmė pasikeitė. Pasiekus tikslą — slotas off.
-  # ───────────────────────────────────────────────────────────────────────
   - id: solis_tou_recalc_eimo
-    alias: "Eimo - TOU: tikslinio SOC perskaičiavimas kas 5 min"
+    alias: "Eimo - Dinaminis cloud nakties vykdytojas kas 5 min"
     description: >
-      Vakare/naktį perskaičiuoja cloud slot1 iškrovimo cut-off SOC pagal naujausią
-      energy_manager_eimo tikslą. Rašo tik kai pasikeitė (cloud API tausojimas).
-      Pasiekus tikslą — išjungia slot1 iškrovimą.
+      Kas 5 min seka sensor.energy_manager_eimo_night_plan ir realų SOC.
+      EVENING_BOOST/DAWN_FINISH fazėse slot1 dinamiškai armuojamas arba
+      perarmuojamas pagal naują targetą. DONE/HOLD fazėse slotas išjungiamas.
+      Cloud inverterio power_state naktį nepower-cyclinamas dėl ryšio patikimumo.
     trigger:
       - platform: time_pattern
         minutes: "/5"
+      - platform: state
+        entity_id: sensor.energy_manager_eimo_night_plan
     condition:
-      # 20:05–07:00, kad nesikirstų su dienos iškrovimu (07:00–19:30), kuris
-      # naudoja kitą cut-off (floor), ir nesilenktyniautų su vakaro automatika
-      # (20:00). Naktinį slotą valdo TIK šis recalc.
       - condition: time
-        after: "20:05:00"
-        before: "07:00:00"
+        after: "19:29:59"
+        before: "07:30:01"
       - condition: state
         entity_id: input_boolean.storm_mode_eimo
         state: "off"
-      # Veikiam tik kai iškrovimo slotas įjungtas
-      - condition: state
-        entity_id: switch.inverter_control_1033300254190112_slot1_discharge
-        state: "on"
     variables:
-      target_soc: "{{ [states('sensor.energy_manager_eimo_target_soc') | float(100) | round(0) | int, 6] | max }}"
+      plan: "{{ states('sensor.energy_manager_eimo_night_plan') }}"
+      plan_trusted: "{{ state_attr('sensor.energy_manager_eimo_night_plan', 'trusted') | bool(false) }}"
+      target_soc: >-
+        {{ [state_attr('sensor.energy_manager_eimo_night_plan', 'target_soc') | float(100) | round(0) | int, 6] | max }}
       current_soc: "{{ states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(100) }}"
+      slot_on: "{{ is_state('switch.inverter_control_1033300254190112_slot1_discharge', 'on') }}"
       slot_soc: "{{ states('number.inverter_control_1033300254190112_slot1_discharge_soc') | float(-1) | round(0) | int }}"
+      slot_current: "{{ states('number.inverter_control_1033300254190112_slot1_discharge_current') | float(-1) }}"
+      slot_time: "{{ states('text.inverter_control_1033300254190112_slot1_discharge_time') }}"
+      mode_now: "{{ states('select.inverter_control_1033300254190112_storage_mode') }}"
     action:
       - choose:
-          # Pasiektas tikslas — išjungti iškrovimą, baterija namams
           - conditions:
               - condition: template
-                value_template: "{{ current_soc <= target_soc }}"
+                value_template: >
+                  {{ plan_trusted and plan in ['EVENING_BOOST', 'DAWN_FINISH']
+                     and current_soc > target_soc }}
             sequence:
-              - service: switch.turn_off
-                target:
-                  entity_id: switch.inverter_control_1033300254190112_slot1_discharge
-              # Po iškrovos lieka Self-Use: tik šis režimas (su slotu) realiai
-              # iškrauna bateriją į tinklą. Feed-In Priority baterijos neiškrauna
-              # (eksportuoja tik PV perteklių) — todėl jo nebenaudojam.
-              - variables:
-                  forecast_tomorrow: >-
-                    {{ (states('sensor.solcast_pv_forecast_forecast_tomorrow') | float(0)
-                        * states('sensor.solcast_correction_factor_eimo') | float(1)) | round(1) }}
-                  next_mode: "Self-Use"
-              - service: select.select_option
-                target:
-                  entity_id: select.inverter_control_1033300254190112_storage_mode
-                data:
-                  option: "{{ next_mode }}"
-              - service: notify.persistent_notification
-                data:
-                  title: "Eimo - TOU išjungtas: SOC tikslas pasiektas 🔋"
-                  message: >
-                    Baterija {{ current_soc }}% ≤ tikslo {{ target_soc }}%.
-                    Rytojaus prognozė: {{ forecast_tomorrow }} kWh →
-                    iškrovimas išjungtas, režimas: {{ next_mode }}.
-          # Tikslas pasikeitė — atnaujinti cut-off SOC (tik kai skiriasi)
-          - conditions:
-              - condition: template
-                value_template: "{{ slot_soc != target_soc }}"
-            sequence:
-              - service: number.set_value
-                target:
-                  entity_id: number.inverter_control_1033300254190112_slot1_discharge_soc
-                data:
-                  value: "{{ target_soc }}"
-    mode: single
+              - if:
+                  - condition: template
+                    value_template: "{{ slot_soc != target_soc }}"
+                then:
+                  - service: number.set_value
+                    target:
+                      entity_id: number.inverter_control_1033300254190112_slot1_discharge_soc
+                    data:
+                      value: "{{ target_soc }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ slot_current | float(0) != 100 }}"
+                then:
+                  - service: number.set_value
+                    target:
+                      entity_id: number.inverter_control_1033300254190112_slot1_discharge_current
+                    data:
+                      value: 100
+              - if:
+                  - condition: template
+                    value_template: "{{ slot_time != '19:30-07:30' }}"
+                then:
+                  - service: text.set_value
+                    target:
+                      entity_id: text.inverter_control_1033300254190112_slot1_discharge_time
+                    data:
+                      value: "19:30-07:30"
+              - if:
+                  - condition: template
+                    value_template: "{{ not slot_on }}"
+                then:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: switch.inverter_control_1033300254190112_slot1_discharge
+              - if:
+                  - condition: template
+                    value_template: "{{ mode_now != 'Self-Use' }}"
+                then:
+                  - service: select.select_option
+                    target:
+                      entity_id: select.inverter_control_1033300254190112_storage_mode
+                    data:
+                      option: "Self-Use"
 
-  # ───────────────────────────────────────────────────────────────────────
-  #  Dienos iškrovimas į tinklą (Self-Use + slot1), langas 07:00–19:30.
-  #  SVARBU: tik Self-Use + slotas realiai iškrauna bateriją į tinklą;
-  #  Feed-In Priority baterijos NEIŠKRAUNA (tik prikrauna ją ir eksportuoja
-  #  PV likutį) — todėl jo nebenaudojam. SĄLYGINIS (2026-07-08, audito 07-07
-  #  radinys — anksčiau besąlygiškas laikė bateriją prie dugno ir ignoravo
-  #  target_soc): iškraunama tik kai energy_manager_eimo_surplus rodo, kad
-  #  likusi dienos saulė netilps (histerezė: ON > 1 kWh, OFF < 0.2 kWh —
-  #  tarpas saugo cloud API nuo debesų mirgėjimo). Be pertekliaus slotas
-  #  išjungiamas ir baterija kaupia PV link target_soc. Cut-off = floor
-  #  (dugnas), 150A. Stabdo cloud cut-off SOC (floor) + HW over-discharge
-  #  (5%). Langas iki 19:30, kad nesikirstų su naktiniu solis_tou_recalc_eimo
-  #  (20:05–07:00).
-  # ───────────────────────────────────────────────────────────────────────
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ plan in ['DONE', 'HOLD', 'DAY']
+                     or not plan_trusted
+                     or current_soc <= target_soc }}
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: "{{ slot_on }}"
+                then:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: switch.inverter_control_1033300254190112_slot1_discharge
+              - if:
+                  - condition: template
+                    value_template: "{{ mode_now != 'Self-Use' }}"
+                then:
+                  - service: select.select_option
+                    target:
+                      entity_id: select.inverter_control_1033300254190112_storage_mode
+                    data:
+                      option: "Self-Use"
+    mode: restart
+
   - id: solis_daytime_discharge_eimo
     alias: "Eimo - Dienos iškrovimas į tinklą (Self-Use + slot, pagal perteklių)"
     trigger:
