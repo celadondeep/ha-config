@@ -1,0 +1,58 @@
+name: HA Stage-1 Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "custom_components/solis_cloud_control/**"
+      - "scripts/deploy_eimo_solis_stage1.sh"
+      - "scripts/check_eimo_solis_stage1.sh"
+      - ".github/workflows/ha-stage1-validation.yml"
+  pull_request:
+    paths:
+      - "custom_components/solis_cloud_control/**"
+      - "scripts/deploy_eimo_solis_stage1.sh"
+      - "scripts/check_eimo_solis_stage1.sh"
+      - ".github/workflows/ha-stage1-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Stage-1 Python syntax
+        run: |
+          python3 -m py_compile             custom_components/solis_cloud_control/__init__.py             custom_components/solis_cloud_control/coordinator.py             custom_components/solis_cloud_control/entity.py             custom_components/solis_cloud_control/inverters/inverter_factory.py
+
+      - name: Validate deploy and diagnostic scripts
+        run: |
+          bash -n scripts/deploy_eimo_solis_stage1.sh
+          bash -n scripts/check_eimo_solis_stage1.sh
+
+      - name: Verify Eimo recovery is scoped to one inverter
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          sn = "1033300254190112"
+          factory = Path("custom_components/solis_cloud_control/inverters/inverter_factory.py").read_text()
+          coordinator = Path("custom_components/solis_cloud_control/coordinator.py").read_text()
+          init = Path("custom_components/solis_cloud_control/__init__.py").read_text()
+          entity = Path("custom_components/solis_cloud_control/entity.py").read_text()
+
+          assert sn in factory
+          assert sn in coordinator
+          assert sn in init
+          assert 'tou_v2_mode="43605"' in factory
+          assert "timedelta(minutes=1)" in coordinator
+          assert "timedelta(minutes=5)" in coordinator
+          assert "async_config_entry_first_refresh()" in init
+          assert "async_refresh()" in init
+          assert "self.coordinator.data is None" in entity
+          print("Eimo-only Stage-1 invariants OK")
+          PY
