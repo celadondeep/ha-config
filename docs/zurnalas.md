@@ -208,8 +208,8 @@ pakeista, KODĖL, kokie skaičiai tai pagrindė.
 
 - Tik Eimo inverteriui `1033300254190112` startup'e apeinamas stringantis `/v1/api/inverterDetail` ir naudojamas paskutinis patvirtintas statinis inverterio profilis; kitiems inverteriams elgsena nepakeista.
 - Eimo TOU V2 režimas fiksuojamas kaip `43605`, todėl po starto tiesiogiai naudojamas vienas `/v2/api/atReadBatch` kelias, kuris istoriniuose loguose buvo sėkmingas.
-- Pirmo cloud refresh klaida nebeužlaiko viso config entry `setup_error`: naudojamas `coordinator.async_refresh()`, o entities lieka unavailable, kol nėra validžių duomenų.
-- Polling pakeistas iš 5 min į 1 min; batch ir pavienių užklausų retry biudžetai apriboti iki 30 s, kad vienas cloud sutrikimas neužblokuotų ciklo kelioms minutėms.
+- Tik Eimo entry pirmo cloud refresh klaida nebeužlaiko config entry `setup_error`: naudojamas `coordinator.async_refresh()`, o entities lieka unavailable, kol nėra validžių duomenų. Kitiems inverteriams paliktas originalus privalomas first-refresh.
+- Tik Eimo entry polling pakeistas iš 5 min į 1 min, o batch ir pavienių užklausų retry biudžetai apriboti iki 30 s; visiems kitiems `solis_cloud_control` inverteriams palikti originalūs 5 min / 180 s / 60 s nustatymai.
 - `entity.available` papildomai saugo nuo `coordinator.data is None`.
 - Git backup prieš pakeitimą: `backup/eimo-solis-stage1-20260909`. Pakeisti tik 4 failai po `custom_components/solis_cloud_control/`.
 - Patikrinta Python sintaksė. Git `main` paruoštas; gyvam HA dar reikia, kad šie failai patektų į `/config` / `/homeassistant` ir būtų atliktas HA restartas bei patikrinti `atReadBatch` logai.
