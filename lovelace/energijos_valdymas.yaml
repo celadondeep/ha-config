@@ -269,18 +269,26 @@ views:
               - entity: input_select.energy_season
                 name: Sezonas
 
-          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager.py):
-          # kada apsimoka išjungti inverterį ir kada jį vėl įjungti ryte.
+          # Dinaminis nakties planas — AppDaemon regeneruoja kas 5 min.
           - type: markdown
             title: Naktinis planas 💤
             content: >
-              **{{ states('sensor.inverter_night_economics') }}**
+              **Fazė: {{ states('sensor.energy_manager_night_plan') }}**
+              {% set trusted = state_attr('sensor.energy_manager_night_plan', 'trusted') %}
+              {{ '✅ patikimas' if trusted else '⚠️ nepatikimas / HOLD' }}
 
-              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
-                išjungtas: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
-              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics', 'baterijos_kwh_verte') }}
-              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta') }}**
-              - Ryto įjungimas (Solcast >100 W): **{{ state_attr('sensor.inverter_morning_on_time', 'laikas') | default('—', true) }}**
+              - SOC: **{{ state_attr('sensor.energy_manager_night_plan', 'soc') | default('—', true) }}%**
+                → target **{{ state_attr('sensor.energy_manager_night_plan', 'target_soc') | default('—', true) }}%**
+                · sleep **{{ state_attr('sensor.energy_manager_night_plan', 'sleep_soc') | default('—', true) }}%**
+              - Dar reikia pašalinti: **{{ state_attr('sensor.energy_manager_night_plan', 'energy_remaining_kwh') | default('—', true) }} kWh**
+              - Finalinio lango startas:
+                **{{ as_datetime(state_attr('sensor.energy_manager_night_plan', 'dawn_start')) | as_local | string if state_attr('sensor.energy_manager_night_plan', 'dawn_start') else '—' }}**
+              - Ryto PV orientyras:
+                **{{ as_datetime(state_attr('sensor.energy_manager_night_plan', 'morning_on')) | as_local | string if state_attr('sensor.energy_manager_night_plan', 'morning_on') else '—' }}**
+              - Plano priežastis: {{ state_attr('sensor.energy_manager_night_plan', 'reason') | default('—', true) }}
+              - Atnaujinta: {{ state_attr('sensor.energy_manager_night_plan', 'generated_at') | default('—', true) }}
+
+              **Ekonomika:** {{ states('sensor.inverter_night_economics') }}
 
       # ── 2. VALDYMAS ──────────────────────────────────────────────────
       - type: grid
