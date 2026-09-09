@@ -52,11 +52,15 @@ try:
     with urllib.request.urlopen(req, timeout=10) as r:
         d = json.load(r)
     attrs = d.get("attributes", {})
+    heartbeat = attrs.get("planner_heartbeat", "-")
+    interval = attrs.get("planner_interval_s", "-")
+    source = attrs.get("saltinis", attrs.get("source", "-"))
     print(
         f"{entity}: state={d.get('state')} "
         f"last_changed={d.get('last_changed')} "
         f"last_updated={d.get('last_updated')} "
-        f"last_reported={d.get('last_reported', '-')}"
+        f"last_reported={d.get('last_reported', '-')} "
+        f"planner_heartbeat={heartbeat} planner_interval_s={interval} source={source}"
     )
 except Exception as exc:
     print(f"{entity}: ERROR {exc}")
