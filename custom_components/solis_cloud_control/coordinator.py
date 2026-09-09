@@ -13,15 +13,17 @@ _LOGGER = logging.getLogger(__name__)
 
 _COORDINATOR_NAME = "Solis Cloud Control"
 
-# Stage-1 recovery: poll often enough to catch short SolisCloud availability
-# windows, but keep one normal batch request per minute.
-_UPDATE_INTERVAL = timedelta(minutes=1)
+_DEFAULT_UPDATE_INTERVAL = timedelta(minutes=5)
+_EIMO_UPDATE_INTERVAL = timedelta(minutes=1)
 
 _REQUEST_REFRESH_COOLDOWN_SECONDS = 10
 
-# Do not let a single failed cloud request occupy the coordinator for minutes.
-_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS = 30
-_UPDATE_DATA_MAX_RETRY_TIME_SECONDS = 30
+_DEFAULT_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS = 180
+_DEFAULT_UPDATE_DATA_MAX_RETRY_TIME_SECONDS = 60
+_EIMO_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS = 30
+_EIMO_UPDATE_DATA_MAX_RETRY_TIME_SECONDS = 30
+
+_EIMO_INVERTER_SN = "1033300254190112"
 
 
 class SolisCloudControlData(dict[int, str | None]):
@@ -36,12 +38,14 @@ class SolisCloudControlCoordinator(DataUpdateCoordinator[SolisCloudControlData])
         api_client: SolisCloudControlApiClient,
         inverter: Inverter,
     ) -> None:
+        is_eimo = inverter.info.serial_number == _EIMO_INVERTER_SN
+
         super().__init__(
             hass,
             _LOGGER,
             name=_COORDINATOR_NAME,
             config_entry=config_entry,
-            update_interval=_UPDATE_INTERVAL,
+            update_interval=_EIMO_UPDATE_INTERVAL if is_eimo else _DEFAULT_UPDATE_INTERVAL,
             request_refresh_debouncer=Debouncer(
                 hass,
                 _LOGGER,
@@ -51,6 +55,16 @@ class SolisCloudControlCoordinator(DataUpdateCoordinator[SolisCloudControlData])
         )
         self._api_client = api_client
         self._inverter = inverter
+        self._batch_retry_seconds = (
+            _EIMO_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS
+            if is_eimo
+            else _DEFAULT_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS
+        )
+        self._data_retry_seconds = (
+            _EIMO_UPDATE_DATA_MAX_RETRY_TIME_SECONDS
+            if is_eimo
+            else _DEFAULT_UPDATE_DATA_MAX_RETRY_TIME_SECONDS
+        )
 
     async def _async_update_data(self) -> SolisCloudControlData:
         inverter_sn = self._inverter.info.serial_number
@@ -58,14 +72,14 @@ class SolisCloudControlCoordinator(DataUpdateCoordinator[SolisCloudControlData])
             results = await self._api_client.read_batch(
                 inverter_sn,
                 self._inverter.read_batch_cids,
-                max_retry_time=_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS,
+                max_retry_time=self._batch_retry_seconds,
             )
 
             for read_cid in self._inverter.read_cids:
                 results[read_cid] = await self._api_client.read(
                     inverter_sn,
                     read_cid,
-                    max_retry_time=_UPDATE_DATA_MAX_RETRY_TIME_SECONDS,
+                    max_retry_time=self._data_retry_seconds,
                 )
 
             data = SolisCloudControlData({cid: results.get(cid) for cid in self._inverter.all_cids})
