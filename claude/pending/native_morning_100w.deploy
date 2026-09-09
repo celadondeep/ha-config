@@ -1,0 +1,4 @@
+Deploy native precise >=100 W morning wake.
+Run: bash /config/scripts/deploy_native_morning_100w.sh
+Success requires live sensor.inverter_morning_on_time_precise with algorithm_version=native_ha_morning_100w_v1_20260909.
+Legacy sensor.inverter_morning_on_time may remain 08:00 and is diagnostic only.
