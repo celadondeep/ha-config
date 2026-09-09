@@ -19,6 +19,8 @@ Never claim a change was applied until the write/action result has been verified
 
 ## Tool availability
 
+Read `references/ha-mcp-connection.md` when the HA app/MCP is installed but its tools are missing, or when reconnecting a new chat/workspace.
+
 1. Look for an already connected Home Assistant app/MCP first.
 2. If the app exposes a Home Assistant best-practices or skill-guide tool, read it before the first live write.
 3. If the app is connected but its tools are unavailable in the current runtime, say that clearly. Do not pretend a write occurred.
