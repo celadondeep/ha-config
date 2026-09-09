@@ -757,6 +757,14 @@
     - condition: state
       entity_id: switch.solis_s6_eh3p_power_state
       state: "on"
+    # Fail-safe: 100% target čia reiškia ne „tikslas pasiektas“, o dažniausiai
+    # nepasiekiamą / nepatikimą plannerio reikšmę. Ekonominis night-off leidžiamas
+    # tik su realiu AppDaemon planu (<100%). Audros 100% atskirai blokuoja storm_mode.
+    - condition: template
+      value_template: >
+        {{ states('sensor.energy_manager_target_soc') not in
+             ['unknown', 'unavailable', 'none', '']
+           and states('sensor.target_soc_effective') | float(100) < 100 }}
     # Išjungti galima dviem atvejais (7 punktas, 2026-07-18):
     #  a) TOU slotas išjungtas IR baterija jau ties tiksliniu SOC (senoji
     #     logika — iškrova baigta);
