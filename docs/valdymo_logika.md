@@ -49,7 +49,7 @@ telemetrija, režimas IR laiko langai. Modbus TOU langai **VEIKIA**.
   `sensor.energy_manager_night_plan`: targetas ir fazė perskaičiuojami iš
   realaus SOC, naujausio Solcast ir ryto PV pradžios.
 - **Inverterio įjungimas rytą** (`solis_morning_inverter_power_on`): pagal
-  `inverter_morning_on_time` (interpoliuotas Solcast >=100 W kirtimas minutės tikslumu), Eimo PV >200 W
+  `inverter_morning_on_time_precise` (native HA interpoliuotas Solcast >=100 W kirtimas minutės tikslumu), Eimo PV >200 W
   signalą arba 10:00 fallback. (Trigeris pataisytas 2026-07-20 dėl HA 2026.7.)
 - **Dugno ciklavimo apsauga** (2026-07-22): inverteris pailsi (išjungiamas),
   kai **SOC ≤ 12 % IR PV nedengia namų** (saulės per mažai baterijai krautis)
@@ -136,3 +136,13 @@ vakaro logika target = 100. Automatinis planavimas ESO atjungimams — žr.
 Logika paruošta `energy_manager`: strateginis leidimas pagal balansą,
 taktinis pagal perteklių (SURPLUS_MIN 0.3 kW), SOC slenksčiai. Pajungus
 reikės įrašyti tikrus entity ID.
+
+### Ryto ON autoritetas (2026-09-09)
+
+- Autoritetinis valdymo sensorius: `sensor.inverter_morning_on_time_precise`.
+- Jis skaičiuojamas native Home Assistant template sluoksnyje tiesiai iš Solcast
+  `detailedForecast`, todėl nepriklauso nuo AppDaemon/Horizon fallback laiko.
+- Senas `sensor.inverter_morning_on_time` ir
+  `energy_manager_night_plan.morning_on` laikomi tik diagnostiniais.
+- Pasiekus precise timestamp, nakties vykdytojas priverstinai uždaro naktinį TOU,
+  įjungia inverterį ir nebeleidžia SLEEP/DONE šakai jo išjungti iš naujo.
