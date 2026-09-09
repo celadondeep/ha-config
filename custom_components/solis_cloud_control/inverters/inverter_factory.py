@@ -24,8 +24,16 @@ from custom_components.solis_cloud_control.inverters.inverter import (
 
 _MAX_RETRY_TIME_SECONDS = 60
 
+# Eimo SE: historical SolisCloud logs confirmed that direct /v2/api/atReadBatch
+# communication works even when /v1/api/inverterDetail is unavailable.
+# Keep this override deliberately scoped to this single inverter.
+_EIMO_INVERTER_SN = "1033300254190112"
+
 
 async def create_inverter_info(api_client: SolisCloudControlApiClient, inverter_sn: str) -> InverterInfo:
+    if inverter_sn == _EIMO_INVERTER_SN:
+        return _create_eimo_cached_inverter_info(inverter_sn)
+
     inverter_details = await api_client.inverter_details(inverter_sn, _MAX_RETRY_TIME_SECONDS)
 
     inverter_info = InverterInfo(
@@ -49,6 +57,29 @@ async def create_inverter_info(api_client: SolisCloudControlApiClient, inverter_
         inverter_info = replace(inverter_info, tou_v2_mode=tou_v2_mode)
 
     return inverter_info
+
+
+def _create_eimo_cached_inverter_info(inverter_sn: str) -> InverterInfo:
+    """Return the last known-good static Eimo inverter profile.
+
+    This bypasses startup discovery only. Live values are still read from
+    SolisCloud through the normal coordinator batch request.
+    """
+    return InverterInfo(
+        serial_number=inverter_sn,
+        model="3330",
+        version="09000C",
+        machine="S6-EH3P10K02-NV-YD-L",
+        energy_storage_control="40",
+        smart_support="1",
+        generator_support="1",
+        collector_model="WL",
+        power="10.0",
+        power_unit="kW",
+        parallel_number="1.0",
+        parallel_battery="0",
+        tou_v2_mode="43605",
+    )
 
 
 def create_inverter(inverter_info: InverterInfo) -> Inverter:
