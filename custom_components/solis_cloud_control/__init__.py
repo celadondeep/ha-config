@@ -13,6 +13,8 @@ from custom_components.solis_cloud_control.inverters.inverter_factory import cre
 
 _LOGGER = logging.getLogger(__name__)
 
+_EIMO_INVERTER_SN = "1033300254190112"
+
 _PLATFORMS: list[Platform] = [
     Platform.DATETIME,
     Platform.NUMBER,
@@ -51,9 +53,14 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: SolisCloudControl
     # create coordinator
     coordinator = SolisCloudControlCoordinator(hass, config_entry, api_client, inverter)
 
-    # Try the first load, but do not abort integration setup if SolisCloud is
-    # temporarily unavailable. The coordinator will keep retrying on schedule.
-    await coordinator.async_refresh()
+    if inverter_sn == _EIMO_INVERTER_SN:
+        # Eimo recovery mode: a temporary SolisCloud outage must not leave the
+        # integration permanently in setup_error. Platforms can load unavailable
+        # and recover when a later coordinator refresh succeeds.
+        await coordinator.async_refresh()
+    else:
+        # Preserve the upstream startup behavior for every other inverter.
+        await coordinator.async_config_entry_first_refresh()
 
     # make coordinator available to integration
     config_entry.runtime_data = SolisCloudControlData(inverter, coordinator)
