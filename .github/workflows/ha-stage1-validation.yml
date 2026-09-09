@@ -10,6 +10,9 @@ on:
       - "scripts/recover_control_plans.sh"
       - ".agents/skills/home-assistant-admin/**"
       - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
+      - "automations.yaml"
+      - "packages/eimo.yaml"
+      - "claude/tests/valdymo_simuliacija.py"
       - "AGENTS.md"
       - ".github/workflows/ha-stage1-validation.yml"
   pull_request:
@@ -19,6 +22,9 @@ on:
       - "scripts/check_eimo_solis_stage1.sh"
       - ".agents/skills/home-assistant-admin/**"
       - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
+      - "automations.yaml"
+      - "packages/eimo.yaml"
+      - "claude/tests/valdymo_simuliacija.py"
       - "AGENTS.md"
       - ".github/workflows/ha-stage1-validation.yml"
   workflow_dispatch:
@@ -68,3 +74,18 @@ jobs:
       - name: Verify repo skill mirror
         run: |
           diff -ru             plugins/home-assistant-admin/skills/home-assistant-admin             .agents/skills/home-assistant-admin
+
+      - name: Validate Home Assistant YAML syntax
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import yaml
+          for path in ("automations.yaml", "packages/eimo.yaml"):
+              with open(path, "r", encoding="utf-8") as f:
+                  yaml.safe_load(f)
+              print(f"{path}: YAML OK")
+          PY
+
+      - name: Run control logic simulation
+        run: |
+          python3 claude/tests/valdymo_simuliacija.py
