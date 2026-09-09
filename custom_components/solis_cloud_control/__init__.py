@@ -51,8 +51,9 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: SolisCloudControl
     # create coordinator
     coordinator = SolisCloudControlCoordinator(hass, config_entry, api_client, inverter)
 
-    # perform an initial data load from api
-    await coordinator.async_config_entry_first_refresh()
+    # Try the first load, but do not abort integration setup if SolisCloud is
+    # temporarily unavailable. The coordinator will keep retrying on schedule.
+    await coordinator.async_refresh()
 
     # make coordinator available to integration
     config_entry.runtime_data = SolisCloudControlData(inverter, coordinator)
