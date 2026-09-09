@@ -8,6 +8,25 @@ patobulinimus.
 
 ## Vienkartiniai deploy darbai prieš auditą
 
+### Native precise morning >=100 W deploy
+
+Prieš kitus vienkartinius darbus patikrink, ar egzistuoja
+`/config/claude/pending/native_morning_100w.deploy`.
+
+Jei markeris yra ir `$AUTO_APPLY=1`:
+
+1. Paleisk `bash /config/scripts/deploy_native_morning_100w.sh`.
+2. Sėkmė tik jei gyvas
+   `sensor.inverter_morning_on_time_precise` turi
+   `algorithm_version=native_ha_morning_100w_v1_20260909`.
+3. Patikrink, kad `solis_morning_inverter_power_on` naudoja precise sensorių
+   ir kad nakties vykdytojas po precise timestamp nebegali inverterio išjungti.
+4. Tik po sėkmės pašalink markerį:
+   `rm -f /config/claude/pending/native_morning_100w.deploy`.
+
+Jei `$AUTO_APPLY=0`, markerio neliesk ir deploy nevykdyk.
+
+
 Prieš įprastą dienos auditą patikrink, ar egzistuoja failas
 `/config/claude/pending/eimo_solis_stage1.deploy`.
 
