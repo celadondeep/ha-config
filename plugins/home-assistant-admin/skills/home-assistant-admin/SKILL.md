@@ -123,7 +123,7 @@ When troubleshooting:
 
 ## Solis / Eimo troubleshooting
 
-Read `references/solis-eimo.md` when the task involves SolisCloud, Eimo, Solis hybrid inverter control, stale cloud data, polling, `solis_cloud_control`, or `solis` integrations.
+For the current Eimo Stage-1 recovery implementation, read `references/eimo-stage1.md` first. For general Solis/Eimo troubleshooting, read `references/solis-eimo.md` when the task involves SolisCloud, Eimo, Solis hybrid inverter control, stale cloud data, polling, `solis_cloud_control`, or `solis` integrations.
 
 ## File Editor safety
 
