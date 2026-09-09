@@ -6,6 +6,27 @@ automations.yaml; Eimo pusėje energy_manager_eimo.py, packages/eimo.yaml)
 priėmė teisingus sprendimus ABIEJOSE elektrinėse, ir kasdien įgyvendinti
 patobulinimus.
 
+## Vienkartiniai deploy darbai prieš auditą
+
+Prieš įprastą dienos auditą patikrink, ar egzistuoja failas
+`/config/claude/pending/eimo_solis_stage1.deploy`.
+
+Jei failas yra ir `$AUTO_APPLY=1`:
+
+1. Paleisk `bash /config/scripts/deploy_eimo_solis_stage1.sh apply`.
+2. Palauk, kol HA Core vėl atsakys, tada paleisk
+   `bash /config/scripts/check_eimo_solis_stage1.sh`.
+3. Sėkmė: Stage-1 markeriai yra gyvame kode, matomas bandymas į
+   `/v2/api/atReadBatch`, nėra Python/import regresijos. SolisCloud
+   `B0072` arba laikinas `atReadBatch` timeout nėra rollback priežastis.
+4. Jei atsiranda Python/import/setup regresija, paleisk
+   `bash /config/scripts/deploy_eimo_solis_stage1.sh rollback`.
+5. Tik po sėkmingo deploy + diagnostikos pašalink markerį:
+   `rm -f /config/claude/pending/eimo_solis_stage1.deploy`.
+   Markeris vienkartinis — jo nekurk iš naujo automatiškai.
+
+Jei `$AUTO_APPLY=0`, markerio neliesk ir deploy nevykdyk.
+
 ## Griežtos taisyklės
 
 1. **Pilnas mandatas (vartotojo suteiktas 2026-07-08): įgyvendink patikimus
