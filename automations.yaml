@@ -4,7 +4,7 @@
 #   NAMŲ SĄNAUDOS:  0.7 kW  = vidutinis naktinis sunaudojimas
 #   IŠKROVIMO SROVĖ:150 A   = baterijos iškrovimo greitis (NE eksporto riba —
 #                             atidavimą į tinklą inverteris riboja atskiru parametru)
-#   GAMYBOS PRADŽIA:08:00   = laikas, iki kurio baterija turi pasiekti 12%
+#   GAMYBOS PRADŽIA:dinaminė = native HA skaičiuoja pirmą Solcast >=100 W minutę
 # ---------------------------------------------------------------------------
 
 - id: solis_morning_mode
