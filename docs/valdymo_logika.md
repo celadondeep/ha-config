@@ -49,7 +49,7 @@ telemetrija, režimas IR laiko langai. Modbus TOU langai **VEIKIA**.
   `sensor.energy_manager_night_plan`: targetas ir fazė perskaičiuojami iš
   realaus SOC, naujausio Solcast ir ryto PV pradžios.
 - **Inverterio įjungimas rytą** (`solis_morning_inverter_power_on`): pagal
-  `inverter_morning_on_time` (Solcast gamybos pradžia −30 min), Eimo PV >200 W
+  `inverter_morning_on_time` (interpoliuotas Solcast >=100 W kirtimas minutės tikslumu), Eimo PV >200 W
   signalą arba 10:00 fallback. (Trigeris pataisytas 2026-07-20 dėl HA 2026.7.)
 - **Dugno ciklavimo apsauga** (2026-07-22): inverteris pailsi (išjungiamas),
   kai **SOC ≤ 12 % IR PV nedengia namų** (saulės per mažai baterijai krautis)
