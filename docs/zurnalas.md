@@ -269,3 +269,16 @@ pakeista, KODĖL, kokie skaičiai tai pagrindė.
   `backup/morning-100w-interpolation-20260909` ir
   `backup/morning-100w-executor-20260909`.
 - CI testuoja konkrečius 50→150 W ir neapvalaus kirtimo scenarijus; SUCCESS.
+
+## 2026-09-09 — Native HA 100 W sensorius tapo autoritetiniu
+
+- Priežastis: gyvas dashboard/Horizon kelias vis dar rodė 08:00, nors
+  `celadondeep/Solis` interpolacijos kodas buvo pakeistas.
+- Sukurtas `sensor.inverter_morning_on_time_precise` tiesiai
+  `configuration.yaml`; jis nepriklauso nuo AppDaemon/Horizon writerio.
+- Ryto inverterio automatika perjungta į precise sensorių.
+- Nakties 5 min vykdytojui precise timestamp suteiktas aukščiausias prioritetas:
+  pasiekus >=100 W laiką TOU išjungiamas, inverteris ON, SLEEP/DONE daugiau
+  negali jo išjungti.
+- Dashboarde pagrindinis ryto ON laikas dabar rodo precise sensorių; senas
+  Horizon `morning_on` rodomas tik diagnostikai.
