@@ -214,3 +214,13 @@ pakeista, KODĖL, kokie skaičiai tai pagrindė.
 - Git backup prieš pakeitimą: `backup/eimo-solis-stage1-20260909`. Pakeisti tik 4 failai po `custom_components/solis_cloud_control/`.
 - Patikrinta Python sintaksė. Git `main` paruoštas; gyvam HA dar reikia, kad šie failai patektų į `/config` / `/homeassistant` ir būtų atliktas HA restartas bei patikrinti `atReadBatch` logai.
 
+## 2026-09-09 — HA Admin skill/plugin ir Stage-1 CI
+
+- Sukurtas repo-level `.agents/skills/home-assistant-admin` ir `AGENTS.md`, todėl atidarius `ha-config` Codex/Work aplinkoje HA darbo taisyklės yra pačiame repo.
+- Tas pats skill laikomas ir `plugins/home-assistant-admin/skills/home-assistant-admin`; CI tikrina, kad abu variantai būtų identiški.
+- Pluginas sąmoningai neturi `.mcp.json` su HA-MCP Connect URL: generated webhook URL yra kredencialas ir negali būti saugiai commitinamas į GitHub.
+- `HA` custom app leidimai ChatGPT pusėje yra `Allow all actions`, tačiau šiame runtime HA tool namespace vis dar nepateiktas; todėl live HA deploy dar nelaikomas atliktu.
+- Pridėtas `scripts/check_eimo_solis_stage1.sh` gyvai diagnostikai po restarto.
+- Pridėtas `.github/workflows/ha-stage1-validation.yml`: tikrina 4 Stage-1 Python failus, shell skriptus, Eimo-only invariantus ir skill mirror.
+- CI run #1 ir run #2 baigėsi `success`.
+
