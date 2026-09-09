@@ -224,3 +224,32 @@ pakeista, KODĖL, kokie skaičiai tai pagrindė.
 - Pridėtas `.github/workflows/ha-stage1-validation.yml`: tikrina 4 Stage-1 Python failus, shell skriptus, Eimo-only invariantus ir skill mirror.
 - CI run #1 ir run #2 baigėsi `success`.
 
+
+## 2026-09-09 — Dinaminis nakties valdymas
+
+- Abiejų AppDaemon plannerių planas/targetas regeneruojamas kas 5 min; pridėti
+  `planner_heartbeat`, `plan_generated_at`, `plan_valid_until`,
+  `plan_trusted` ir atskiri `energy_manager*_night_plan` sensoriai.
+- Namai: įgyvendintos fazės `EVENING_BOOST → SLEEP → DAWN_FINISH → DONE`.
+  Vakaro fazė naudoja namų apkrovą + 1 kW eksporto kanalą, žemam targetui
+  baterija vakare ruošiama iki ~20 % sleep SOC, tada inverteris OFF ir realus
+  likutis užbaigiamas prieš PV pradžią.
+- Nakties planas nebesiremia sena prielaida, kad visas `cons_until_production`
+  iškraus bateriją, nors inverteris tuo metu gali būti OFF.
+- Namų Modbus vykdymo minimumas suvienodintas su fiziniu TOU cut-off minimumu:
+  12 %. Eimo cloud slot minimumas: 6 %.
+- Namų `solis_tou_recalc_5min` tapo dinaminiu plano vykdytoju; senas 20:00
+  vienkartinis `discharge_start` pašalintas. `HOLD` neutralizuoja eksportą ir
+  palieka inverterį ON/Self-Use.
+- Eimo slot1 nuo 19:30 iki 07:30 kas 5 min gali būti dinamiškai armuojamas /
+  perarmuojamas / išjungiamas pagal planą; inverterio power-cycle nenaudojamas
+  dėl cloud patikimumo.
+- Ryto >100 W orientyrui naudojama žalia Solcast galia; dinaminio plano deadline
+  nebeturi slenkančio `now+2 min` efekto.
+- Dashboarduose rodomi fazė, target, sleep SOC, likusi kWh, dawn start,
+  patikimumas ir plano atnaujinimo laikas.
+- Rollback šakos:
+  `backup/dynamic-night-plan-20260909` (Solis) ir
+  `backup/dynamic-night-executor-20260909` (ha-config).
+- CI: Solis Python `py_compile` + invariantai SUCCESS; ha-config YAML +
+  valdymo simuliacija SUCCESS.
