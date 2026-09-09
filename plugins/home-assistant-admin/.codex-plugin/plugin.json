@@ -1,7 +1,7 @@
 {
   "name": "home-assistant-admin",
-  "version": "1.0.0",
-  "description": "Reusable Home Assistant administration, safe editing, validation, rollback, AppDaemon, custom integration, and Solis/Eimo troubleshooting workflow.",
+  "version": "1.1.0",
+  "description": "Reusable Home Assistant administration workflow with safe editing, validation, rollback, HA-MCP recovery, AppDaemon, custom integrations, and Solis/Eimo troubleshooting.",
   "author": {
     "name": "celadondeep",
     "url": "https://github.com/celadondeep"
@@ -19,7 +19,7 @@
   "interface": {
     "displayName": "Home Assistant Admin",
     "shortDescription": "Safely inspect, modify and troubleshoot Home Assistant.",
-    "longDescription": "A reusable workflow for Home Assistant configuration, automations, packages, AppDaemon, custom integrations, backups, validation, rollback, restarts, logs, and Solis/Eimo recovery.",
+    "longDescription": "Reusable Home Assistant administration workflow for connected HA apps/MCP: safe inspect, backup, edit, validation, reload/restart, rollback, AppDaemon, custom integrations, HA-MCP reconnection, logs, and Solis/Eimo recovery. Live writes use the user's existing HA connection; secret Connect URLs are never bundled.",
     "developerName": "celadondeep",
     "category": "Productivity",
     "capabilities": [
