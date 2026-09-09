@@ -70,3 +70,13 @@ If the HA app is known to be installed and authorized but no HA tool namespace i
 - do not invent an app ID or webhook ID;
 - use the generated Connect URL from the HA-MCP Server Configure screen to reconnect the app;
 - once tools appear, continue the pending live operation without asking the user to re-explain the task.
+
+## Plugin app binding
+
+A plugin `.app.json` mapping must use the canonical connected app ID, normally shaped like `connector_...` or `asdk_app_...`.
+
+Do not use the display name `HA` as an invented app ID.
+
+A declared app dependency also does not prove that the app is installed or callable in the current runtime. Verify the actual runtime tool inventory before claiming live access.
+
+Until the canonical private HA app ID is available, keep this plugin skills-only and rely on the user's separately connected HA app/MCP for live actions.
