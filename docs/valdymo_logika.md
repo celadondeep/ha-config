@@ -45,7 +45,9 @@ telemetrija, režimas IR laiko langai. Modbus TOU langai **VEIKIA**.
   - **Nuosaiki diena (≤ slenkstis) → Self-Use** — saulė pirma į bateriją,
     perteklius virš pilnos automatiškai iki 1 kW į tinklą.
   - (2026-07-22 ištaisyta — 07-21 klaidingai buvo „vien Self-Use".)
-- **Naktį** baterija natūraliai iškrauna namams iki dugno (10 %).
+- **Naktį** nuo 2026-09-09 naudojamas dinaminis 5 min planas
+  `sensor.energy_manager_night_plan`: targetas ir fazė perskaičiuojami iš
+  realaus SOC, naujausio Solcast ir ryto PV pradžios.
 - **Inverterio įjungimas rytą** (`solis_morning_inverter_power_on`): pagal
   `inverter_morning_on_time` (Solcast gamybos pradžia −30 min), Eimo PV >200 W
   signalą arba 10:00 fallback. (Trigeris pataisytas 2026-07-20 dėl HA 2026.7.)
@@ -55,10 +57,18 @@ telemetrija, režimas IR laiko langai. Modbus TOU langai **VEIKIA**.
   ties dugnu. Įsijungia saulei sustiprėjus (Eimo PV > 1200 W signalas). Naktinė
   churn juosta (10–15 %, 20:30–10:00) veikia kaip anksčiau. `overdischarge` lieka
   11 % (neliečiamas). Prideda idle 130 W → off 30 W ekonomiką.
-- **Naktinis iškrovimas į banką** (`solis_evening_discharge` 20:00): jei SOC >
-  target → Modbus iškrovos langas (21:00–07:30, cut-off = target, 150A,
-  „Feed-in + TOU") — baterija iškrauna į tinklą 1 kW iki target. `tou_recalc`
-  atnaujina cut-off kas 5 min, pasiekus tikslą išjungia. (Atkurta 2026-07-22.)
+- **Dinaminis naktinis iškrovimas į banką**: vykdytojas
+  `solis_tou_recalc_5min` kas 5 min seka planą.
+  - `EVENING_BOOST`: inverteris ON, namai iš baterijos + iki 1 kW eksportas;
+    aktyviai išnaudojamos vakaro apkrovos valandos.
+  - `SLEEP`: kai žemam galutiniam targetui paliktas ~20 % sleep SOC,
+    TOU išjungiamas ir inverteris gali būti OFF (130 W → ~30 W).
+  - `DAWN_FINISH`: prieš PV pradžią inverteris pažadinamas ir realaus SOC
+    likutis iškraunamas iki galutinio targeto.
+  - `DONE`: targetas pasiektas, TOU OFF.
+  - `HOLD`: nepatikimas planas → aktyvus eksportas neutralizuojamas,
+    inverteris paliekamas ON/Self-Use.
+  Planas nėra vienkartinis 20:00 sprendimas — jis regeneruojamas kas 5 min.
 - **Dienos eksportas/skutimas** (`solis_daytime_feedin_tou`, kas 15 min):
   floor variantas (room_shortfall) ir viršūnės skutimas (80/90) per Modbus
   langus.
@@ -87,24 +97,26 @@ Eimo cloud **slotai VEIKIA** (skirtingai nei Namų Modbus).
      namus dengia tinklas) — slotas išjungiamas, kad Self-Use baterija dengtų
      namus. Re-armuoja tik saulei vėl pakėlus SOC ≥ lubos+1.
   4. **Dugno atsistatymas / perteklius dingo** → slotas OFF, kaupiama.
-- **20:00** vakaro iškrovimas: slotas su cut-off = `target_soc` (clamp ≥6),
-  startas taikomas į saulėtekį.
-- **20:05–07:00** recalc kas 5 min.
-- Naktinio inverterio išjungimo nėra (cloud valdymu neįmanoma).
+- **Naktinis cloud planas** `sensor.energy_manager_eimo_night_plan`
+  regeneruojamas kas 5 min; targetas todėl nėra užfiksuojamas 20:00.
+- **19:30–07:30** `solis_tou_recalc_eimo` gali dinamiškai armuoti,
+  perarmuoti arba išjungti slot1 pagal naują targetą ir realų SOC. Į cloud
+  rašoma tik pasikeitus parametrui / būsenai.
+- Naktinio inverterio power-cycle Eimo nedaromas — dėl cloud ryšio patikimumo.
 
 ---
 
 ## 3. Sveikatos zona (abi elektrinės)
 
-Nuosaikią dieną kaupiklį laikyti **30–80 % SOC** ruože (LFP tausojimas):
-- **Apatinė 30 %** — `HEALTH_SOC_MIN = 30` (energy_manager*.py). Naktinis
-  target ne žemiau 30 %.
+Nuosaikią dieną kaupiklį laikyti **20–80 % SOC** ruože (LFP tausojimas):
+- **Apatinė 20 %** — `HEALTH_SOC_MIN = 20` (energy_manager*.py). Naktinis
+  target ne žemiau 20 %.
 - **Viršutinė 80 %** — per skutimo slotą (`shave_cutoff`).
-- **Išimtis:** kai koreguota dienos gamyba > `BIG_DAY_KWH` (Solis 28 / Eimo 26
+- **Išimtis:** kai koreguota dienos gamyba > `BIG_DAY_KWH` (Solis 28 / Eimo 28
   kWh) — zona NEGALIOJA, naudojamas pilnas diapazonas (realizavimas svarbiau).
 
 > **Su 1 kW eksporto riba apatinė riba yra „soft":** laikoma tik kai nemokama
-> (debesuota rytdiena); saulėtą rytdieną, kai 30 % ribos laikymasis nukirptų
+> (debesuota rytdiena); saulėtą rytdieną, kai 20 % ribos laikymasis nukirptų
 > saulę, ji pasiduoda realizavimui. **Namuose zona kol kas latentu** —
 > įsigalios su cloud-slotais. Eimo — veikia.
 
