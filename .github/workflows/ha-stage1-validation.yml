@@ -7,12 +7,18 @@ on:
       - "custom_components/solis_cloud_control/**"
       - "scripts/deploy_eimo_solis_stage1.sh"
       - "scripts/check_eimo_solis_stage1.sh"
+      - ".agents/skills/home-assistant-admin/**"
+      - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
+      - "AGENTS.md"
       - ".github/workflows/ha-stage1-validation.yml"
   pull_request:
     paths:
       - "custom_components/solis_cloud_control/**"
       - "scripts/deploy_eimo_solis_stage1.sh"
       - "scripts/check_eimo_solis_stage1.sh"
+      - ".agents/skills/home-assistant-admin/**"
+      - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
+      - "AGENTS.md"
       - ".github/workflows/ha-stage1-validation.yml"
   workflow_dispatch:
 
@@ -56,3 +62,7 @@ jobs:
           assert "self.coordinator.data is None" in entity
           print("Eimo-only Stage-1 invariants OK")
           PY
+
+      - name: Verify repo skill mirror
+        run: |
+          diff -ru             plugins/home-assistant-admin/skills/home-assistant-admin             .agents/skills/home-assistant-admin
