@@ -1,0 +1,2 @@
+Eimo SolisCloud Stage-1 one-time live deployment requested on 2026-09-09.
+Run scripts/deploy_eimo_solis_stage1.sh apply, verify with scripts/check_eimo_solis_stage1.sh, then delete this marker only after successful live verification.
