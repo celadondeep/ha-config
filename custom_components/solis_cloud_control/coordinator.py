@@ -13,12 +13,15 @@ _LOGGER = logging.getLogger(__name__)
 
 _COORDINATOR_NAME = "Solis Cloud Control"
 
-_UPDATE_INTERVAL = timedelta(minutes=5)
+# Stage-1 recovery: poll often enough to catch short SolisCloud availability
+# windows, but keep one normal batch request per minute.
+_UPDATE_INTERVAL = timedelta(minutes=1)
 
 _REQUEST_REFRESH_COOLDOWN_SECONDS = 10
 
-_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS = 180
-_UPDATE_DATA_MAX_RETRY_TIME_SECONDS = 60
+# Do not let a single failed cloud request occupy the coordinator for minutes.
+_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS = 30
+_UPDATE_DATA_MAX_RETRY_TIME_SECONDS = 30
 
 
 class SolisCloudControlData(dict[int, str | None]):
