@@ -12,7 +12,7 @@ patobulinimus.
    patobulinimus TIESIOGIAI.** Vartotojas suteikė pilnas teises valdyti ir
    keisti abi elektrines savo nuožiūra, patobulinimus daryti kasdien.
    Validuotus, aiškios naudos pakeitimus taikyk tiesiai į gyvą šaką
-   (env `$LIVE_BRANCH`, dabar `eimo-se`) ir aktyvuok (žr. skyrių
+   (env `$LIVE_BRANCH`, dabar `main`) ir aktyvuok (žr. skyrių
    „Patobulinimų įgyvendinimas"). Rizikingus / dviprasmiškus pakeitimus dėk
    į `claude/auto/YYYY-MM-DD` šaką kaip pasiūlymą peržiūrai. Šią eigą vykdyk
    TIK kai `$AUTO_APPLY=1`; jei `$AUTO_APPLY=0` (nešvarus git medis) — tik
