@@ -253,3 +253,19 @@ pakeista, KODĖL, kokie skaičiai tai pagrindė.
   `backup/dynamic-night-executor-20260909` (ha-config).
 - CI: Solis Python `py_compile` + invariantai SUCCESS; ha-config YAML +
   valdymo simuliacija SUCCESS.
+
+## 2026-09-09 — Minutės tikslumo ryto įjungimas
+
+- Pašalintas senas fiksuotas 30 min `MORNING_ON_MARGIN_MIN`.
+- Solcast `detailedForecast` 30 min vidutinės galios taškai interpretuojami
+  intervalo viduryje; tarp gretimų taškų atliekama linijinė interpolacija.
+- Inverterio ON timestamp = pirmoji pilna minutė, kai interpoliuota prognozė
+  pasiekia `>=100 W`; laikas apvalinamas į viršų, kad inverteris nebūtų
+  įjungtas prieš slenkstį.
+- HA ryto automatika papildyta 1 min catch-up: jei Solcast atnaujinimas
+  perstumia 100 W laiką į ką tik praėjusią minutę, inverteris įjungiamas per
+  artimiausią minutę, o ne laukia seno timestamp trigerio.
+- Rollback šakos:
+  `backup/morning-100w-interpolation-20260909` ir
+  `backup/morning-100w-executor-20260909`.
+- CI testuoja konkrečius 50→150 W ir neapvalaus kirtimo scenarijus; SUCCESS.
