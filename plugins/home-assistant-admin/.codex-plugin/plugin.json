@@ -1,0 +1,35 @@
+{
+  "name": "home-assistant-admin",
+  "version": "1.0.0",
+  "description": "Reusable Home Assistant administration, safe editing, validation, rollback, AppDaemon, custom integration, and Solis/Eimo troubleshooting workflow.",
+  "author": {
+    "name": "celadondeep",
+    "url": "https://github.com/celadondeep"
+  },
+  "homepage": "https://github.com/celadondeep/ha-config",
+  "repository": "https://github.com/celadondeep/ha-config",
+  "keywords": [
+    "home-assistant",
+    "home-automation",
+    "appdaemon",
+    "solis",
+    "eimo"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Home Assistant Admin",
+    "shortDescription": "Safely inspect, modify and troubleshoot Home Assistant.",
+    "longDescription": "A reusable workflow for Home Assistant configuration, automations, packages, AppDaemon, custom integrations, backups, validation, rollback, restarts, logs, and Solis/Eimo recovery.",
+    "developerName": "celadondeep",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Inspect my Home Assistant and fix the issue safely.",
+      "Update my HA configuration with backup and validation.",
+      "Diagnose my Solis/Eimo integration and restore communication."
+    ]
+  }
+}
