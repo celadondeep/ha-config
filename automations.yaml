@@ -1,1092 +1,606 @@
-# ---------------------------------------------------------------------------
-# Kintamieji (pakoreguok pagal poreikį):
-#   SLENKSTIS:      22 kWh  = baterija 14 kWh + ~8 kWh dienos sąnaudos
-#   NAMŲ SĄNAUDOS:  0.7 kW  = vidutinis naktinis sunaudojimas
-#   IŠKROVIMO SROVĖ:150 A   = baterijos iškrovimo greitis (NE eksporto riba —
-#                             atidavimą į tinklą inverteris riboja atskiru parametru)
-#   GAMYBOS PRADŽIA:dinaminė = native HA skaičiuoja pirmą Solcast >=100 W minutę
-# ---------------------------------------------------------------------------
+- id: solis_shadow_discharge_slots_guard
+  alias: Solis - Šešėlinių iškrovimo slotų apsauga
+  description: 'Centrinis branduolys naudoja tik 1-ą iškrovimo slotą. 2–6 slotai laikomi
+    išjungti, kad sena ar rankinė konfigūracija negalėtų apeiti atominio plano.
 
-- id: solis_morning_mode
-  alias: "Solis - Ryto režimas pagal prognozę"
-  description: >
-    06:00: nustato inverterio režimą pagal šiandienos Solcast prognozę.
-    Taip pat išjungia naktinį TOU iškrovimo slotą.
-  trigger:
-    - platform: time
-      at: "06:00:00"
-  condition:
-    # Rankinio valdymo režimu nesikišti — vartotojas pats valdo iškrovimą
-    - condition: state
-      entity_id: input_boolean.manual_tou_override
-      state: "off"
-  action:
-    - variables:
-        forecast_raw: "{{ states('sensor.solcast_pv_forecast_forecast_today') | float(0) }}"
-        # Adaptyvi korekcija — AppDaemon mokosi iš faktas/prognozė santykio
-        factor: "{{ states('sensor.solcast_correction_factor') | float(1) }}"
-        forecast_today: "{{ (forecast_raw * factor) | round(1) }}"
-        soc_now: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) | round(0) }}"
-        consumption_today: "{{ states('sensor.consumption_remaining_today') | float(0) | round(1) }}"
-        # DINAMINIS slenkstis (2026-07-18, vartotojo logika): Self-Use teisėtas
-        # tik jei visa dienos saulė tilptų į LAISVĄ baterijos vietą + namų
-        # šviesaus meto vartojimą (~50 % paros) be eksporto. Tuščiam kaupikliui
-        # tai ~14.4 + ~7.5 ≈ 22 kWh (sutampa su senu statiniu slenksčiu),
-        # pusiau pilnam — ~15 kWh. Viršijus → Feed-in Priority: eksportas nuo
-        # pirmų vatų, baterija pildosi tik iš >1 kW pertekliaus.
-        threshold: "{{ ((100 - soc_now) * 0.16 + consumption_today * 0.5) | round(1) }}"
-        target_soc: "{{ [states('sensor.target_soc_effective') | float(100) | round(0) | int, 5] | max }}"
-        # Naktinė iškrova dar nebaigta: slotas ON ir SOC virš tikslo. Tokiu
-        # atveju 06:00 nesikiša — morning_room_check (05:30/06:15/06:45) dar
-        # žemina target, langas iki 07:30, recalc atnaujina cut-off iki 07:00.
-        # (Iki 2026-07-17 slotas būdavo išjungiamas besąlygiškai ir vietos
-        # darymas nutrūkdavo 06:00, nors ryto patikros jo dar tikėjosi.)
-        night_discharge_active: >-
-          {{ is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on')
-             and soc_now > target_soc + 1 }}
-    # Nustatyti dienos režimą
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.storm_mode
-              state: "on"
-          sequence:
-            # Iškrovimo slotą išjungia pats script.solis_storm_reserve_apply
-            - service: script.solis_storm_reserve_apply
-            - service: notify.persistent_notification
-              data:
-                title: "Solis - Audros / ESO rezervo režimas ⚡🌩️"
-                message: >
-                  Audros/ESO rezervo režimas — visa saulė kraunama į bateriją,
-                  namus maitina tinklas, baterija namams neiškraunama, eksportas
-                  sustabdytas. Prognozė: {{ forecast_today }} kWh.
-                  Baterija: {{ soc_now }}%.
-        - conditions:
-            - condition: template
-              value_template: "{{ night_discharge_active }}"
-          sequence:
-            - service: notify.persistent_notification
-              data:
-                title: "Solis - Naktinė iškrova tęsiasi 🔋→⚡"
-                message: >
-                  06:00 režimas nekeičiamas: baterija {{ soc_now }}% dar virš
-                  tikslo {{ target_soc }}% — TOU iškrova toliau daro vietą
-                  šiandienos saulei (langas iki 07:30, cut-off atnaujinamas
-                  iki 07:00). Prognozė: {{ forecast_today }} kWh.
-      # 2026-07-22: ATKURTA Feed-in šaka (ankstesnis „vien Self-Use" rėmėsi
-      # klaidingu stebėjimu). Gyvai patikrinta: Feed-in Priority NEnukerpa —
-      # PV 5455 W, baterija kraunasi +4 kW IR į tinklą 1 kW (grid −1 kW).
-      # Aukštos gamybos dieną (prognozė > slenkstis) Feed-in atiduoda 1 kW į
-      # banką nuo pat ryto, o baterija kraunasi iš likučio (>1 kW). Kai visa
-      # diena tilptų (prognozė ≤ slenkstis) — Self-Use, kaupti savo vartojimui.
-        - conditions:
-            - condition: template
-              value_template: "{{ forecast_today > threshold }}"
-          sequence:
-            - service: select.select_option
-              target:
-                entity_id: select.solis_s6_eh3p_work_mode
-              data:
-                option: "Feed-in Priority"
-            - service: notify.persistent_notification
-              data:
-                title: "Solis - Saulėta diena: Feed-in ☀️→⚡"
-                message: >
-                  Prognozė {{ forecast_today }} kWh > riba {{ threshold }} kWh.
-                  Feed-in Priority: ~1 kW į banką visą dieną + baterija kraunasi
-                  iš likučio (>1 kW). Baterija: {{ soc_now }}%.
-      default:
-        - service: select.select_option
-          target:
-            entity_id: select.solis_s6_eh3p_work_mode
-          data:
-            option: "Self-Use"
-        - service: notify.persistent_notification
-          data:
-            title: "Solis - Nuosaiki diena: Self-Use 🔋"
-            message: >
-              Prognozė {{ forecast_today }} kWh ≤ riba {{ threshold }} kWh.
-              Self-Use — saulė pirma į bateriją, viskas tilps.
-              Baterija: {{ soc_now }}%.
-  mode: single
-
-- id: solis_evening_discharge
-  alias: "Solis - Dinaminio nakties plano startas"
-  description: >
-    19:30 nakties vykdymas perduodamas dinaminiam planui
-    sensor.energy_manager_night_plan. AppDaemon planą regeneruoja kas 5 min
-    pagal realų SOC, naujausią Solcast ir ryto PV pradžią. Ši automatika
-    neberašo TOU parametrų — tik pateikia vienkartinę plano būsenos informaciją.
-  trigger:
-    - platform: time
-      at: "19:30:00"
-  condition:
-    - condition: state
-      entity_id: input_boolean.manual_tou_override
-      state: "off"
-    - condition: state
-      entity_id: input_boolean.manual_soc_override
-      state: "off"
-  action:
-    - service: notify.persistent_notification
-      data:
-        title: "Solis - Dinaminis nakties planas"
-        message: >
-          Fazė: {{ states('sensor.energy_manager_night_plan') }}.
-          SOC {{ states('sensor.solis_s6_eh3p_battery_soc') }}% →
-          target {{ state_attr('sensor.energy_manager_night_plan', 'target_soc') }}%.
-          Sleep SOC {{ state_attr('sensor.energy_manager_night_plan', 'sleep_soc') }}%.
-          Planas perskaičiuojamas kas 5 min.
-  mode: single
-
-- id: solis_snapshot_daily_forecast
-  alias: "Solis - Įsiminti dienos prognozę (vakar prognozė)"
-  description: >
-    23:55: nusaugo šiandienos Solcast forecast_today reikšmę į
-    input_number.solcast_forecast_yesterday. Kitą dieną ši reikšmė rodoma
-    kaip „vakar prognozuota" ir lyginama su faktine vakar gamyba.
-  trigger:
-    - platform: time
-      at: "23:55:00"
-  condition:
-    - condition: template
-      value_template: >
-        {{ states('sensor.solcast_pv_forecast_forecast_today')
-           not in ['unavailable', 'unknown', 'none', ''] }}
-  action:
-    - service: input_number.set_value
-      target:
-        entity_id: input_number.solcast_forecast_yesterday
-      data:
-        value: "{{ states('sensor.solcast_pv_forecast_forecast_today') | float(0) | round(1) }}"
-  mode: single
-
-- id: solis_tou_recalc_5min
-  alias: "Solis - Dinaminis nakties vykdytojas kas 5 min"
-  description: >
-    Vykdo sensor.energy_manager_night_plan. EVENING_BOOST ir DAWN_FINISH:
-    inverteris ON, Feed-in + TOU, iki 1 kW eksportas ir dinaminis cut-off.
-    SLEEP: TOU OFF ir, jei leidžiamas night shutdown, inverteris OFF.
-    DONE: target pasiektas, TOU OFF ir galima miegoti iki ryto.
-    HOLD: aktyvus eksportas neutralizuojamas, inverteris paliekamas ON/Self-Use.
-  trigger:
-    - platform: time_pattern
-      minutes: "/5"
-    - platform: state
-      entity_id: sensor.energy_manager_night_plan
-  condition:
-    - condition: time
-      after: "19:29:59"
-      before: "07:30:01"
-    - condition: state
-      entity_id: input_boolean.storm_mode
-      state: "off"
-    - condition: state
-      entity_id: input_boolean.manual_tou_override
-      state: "off"
-    - condition: state
-      entity_id: input_boolean.manual_soc_override
-      state: "off"
-  action:
-    - variables:
-        plan: "{{ states('sensor.energy_manager_night_plan') }}"
-        plan_trusted: "{{ state_attr('sensor.energy_manager_night_plan', 'trusted') | bool(false) }}"
-        target_soc: >-
-          {{ [state_attr('sensor.energy_manager_night_plan', 'target_soc') | float(100) | round(0) | int, 12] | max }}
-        slot_on: "{{ is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on') }}"
-        slot_soc: "{{ states('number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1') | float(-1) | round(0) | int }}"
-        slot_current: "{{ states('number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1') | float(-1) }}"
-        slot_start: "{{ states('time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1') }}"
-        slot_end: "{{ states('time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1') }}"
-        mode_now: "{{ states('select.solis_s6_eh3p_work_mode') }}"
-        power_on: "{{ is_state('switch.solis_s6_eh3p_power_state', 'on') }}"
-        precise_morning: "{{ states('sensor.inverter_morning_on_time_precise') }}"
-        precise_morning_reached: >-
-          {% set t = as_datetime(states('sensor.inverter_morning_on_time_precise')) %}
-          {{ t is not none and now() >= as_local(t) }}
-    - choose:
-        # Aukščiausias prioritetas: realus native HA >=100 W momentas.
-        # Nuo šio momento nakties planas nebeturi teisės laikyti inverterio OFF.
-        - conditions:
-            - condition: template
-              value_template: "{{ precise_morning_reached }}"
-          sequence:
-            - if:
-                - condition: template
-                  value_template: "{{ slot_on }}"
-              then:
-                - service: switch.turn_off
-                  target:
-                    entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-            - if:
-                - condition: template
-                  value_template: "{{ slot_current | float(0) != 0 }}"
-              then:
-                - service: number.set_value
-                  target:
-                    entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
-                  data:
-                    value: 0
-            - if:
-                - condition: template
-                  value_template: "{{ not is_state('switch.solis_s6_eh3p_power_state', 'on') }}"
-              then:
-                - service: switch.turn_on
-                  target:
-                    entity_id: switch.solis_s6_eh3p_power_state
-
-        # Aktyvios iškrovimo fazės
-        - conditions:
-            - condition: template
-              value_template: "{{ plan_trusted and plan in ['EVENING_BOOST', 'DAWN_FINISH'] }}"
-          sequence:
-            - if:
-                - condition: template
-                  value_template: "{{ not power_on }}"
-              then:
-                - service: switch.turn_on
-                  target:
-                    entity_id: switch.solis_s6_eh3p_power_state
-                - delay: "00:00:03"
-            - if:
-                - condition: template
-                  value_template: "{{ slot_soc != target_soc }}"
-              then:
-                - service: number.set_value
-                  target:
-                    entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
-                  data:
-                    value: "{{ target_soc }}"
-            - if:
-                - condition: template
-                  value_template: "{{ slot_current | float(0) != 150 }}"
-              then:
-                - service: number.set_value
-                  target:
-                    entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
-                  data:
-                    value: 150
-            - if:
-                - condition: template
-                  value_template: "{{ slot_start != '19:30:00' }}"
-              then:
-                - service: time.set_value
-                  target:
-                    entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1
-                  data:
-                    time: "19:30:00"
-            - if:
-                - condition: template
-                  value_template: "{{ slot_end != '07:30:00' }}"
-              then:
-                - service: time.set_value
-                  target:
-                    entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
-                  data:
-                    time: "07:30:00"
-            - if:
-                - condition: template
-                  value_template: "{{ not slot_on }}"
-              then:
-                - service: switch.turn_on
-                  target:
-                    entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-            - if:
-                - condition: template
-                  value_template: "{{ mode_now != 'Feed-in + TOU' }}"
-              then:
-                - service: select.select_option
-                  target:
-                    entity_id: select.solis_s6_eh3p_work_mode
-                  data:
-                    option: "Feed-in + TOU"
-
-        # Vidurinis miego langas
-        - conditions:
-            - condition: template
-              value_template: "{{ plan_trusted and plan == 'SLEEP' }}"
-          sequence:
-            - if:
-                - condition: template
-                  value_template: "{{ slot_on }}"
-              then:
-                - service: switch.turn_off
-                  target:
-                    entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-            - if:
-                - condition: template
-                  value_template: "{{ slot_current | float(0) != 0 }}"
-              then:
-                - service: number.set_value
-                  target:
-                    entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
-                  data:
-                    value: 0
-            - if:
-                - condition: template
-                  value_template: "{{ mode_now != 'Self-Use' }}"
-              then:
-                - service: select.select_option
-                  target:
-                    entity_id: select.solis_s6_eh3p_work_mode
-                  data:
-                    option: "Self-Use"
-            - if:
-                - condition: template
-                  value_template: >
-                    {{ is_state('input_boolean.night_inverter_shutdown', 'on')
-                       and is_state('sun.sun', 'below_horizon')
-                       and is_state('switch.solis_s6_eh3p_power_state', 'on') }}
-              then:
-                - service: switch.turn_off
-                  target:
-                    entity_id: switch.solis_s6_eh3p_power_state
-
-        # Target pasiektas
-        - conditions:
-            - condition: template
-              value_template: "{{ plan_trusted and plan == 'DONE' }}"
-          sequence:
-            - if:
-                - condition: template
-                  value_template: "{{ slot_on }}"
-              then:
-                - service: switch.turn_off
-                  target:
-                    entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-            - if:
-                - condition: template
-                  value_template: "{{ slot_current | float(0) != 0 }}"
-              then:
-                - service: number.set_value
-                  target:
-                    entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
-                  data:
-                    value: 0
-            - if:
-                - condition: template
-                  value_template: "{{ mode_now != 'Self-Use' }}"
-              then:
-                - service: select.select_option
-                  target:
-                    entity_id: select.solis_s6_eh3p_work_mode
-                  data:
-                    option: "Self-Use"
-            - if:
-                - condition: template
-                  value_template: >
-                    {{ is_state('input_boolean.night_inverter_shutdown', 'on')
-                       and is_state('sun.sun', 'below_horizon')
-                       and is_state('switch.solis_s6_eh3p_power_state', 'on') }}
-              then:
-                - service: switch.turn_off
-                  target:
-                    entity_id: switch.solis_s6_eh3p_power_state
-
-        # Neaiškus / nepatikimas planas: jokių baterijos eksporto veiksmų.
-        - conditions:
-            - condition: template
-              value_template: "{{ plan in ['HOLD', 'unknown', 'unavailable'] or not plan_trusted }}"
-          sequence:
-            - if:
-                - condition: template
-                  value_template: "{{ slot_on }}"
-              then:
-                - service: switch.turn_off
-                  target:
-                    entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-            - if:
-                - condition: template
-                  value_template: "{{ slot_current | float(0) != 0 }}"
-              then:
-                - service: number.set_value
-                  target:
-                    entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
-                  data:
-                    value: 0
-            - if:
-                - condition: template
-                  value_template: "{{ mode_now != 'Self-Use' }}"
-              then:
-                - service: select.select_option
-                  target:
-                    entity_id: select.solis_s6_eh3p_work_mode
-                  data:
-                    option: "Self-Use"
-            - if:
-                - condition: state
-                  entity_id: switch.solis_s6_eh3p_power_state
-                  state: "off"
-              then:
-                - service: switch.turn_on
-                  target:
-                    entity_id: switch.solis_s6_eh3p_power_state
+    '
+  triggers:
+  - trigger: state
+    entity_id:
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_2
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_3
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_4
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_5
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_6
+    to: 'on'
+  - trigger: homeassistant
+    event: start
+  - trigger: time_pattern
+    minutes: /10
+  conditions:
+  - condition: template
+    value_template: "{{ is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_2',
+      'on')\n   or is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_3',
+      'on')\n   or is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_4',
+      'on')\n   or is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_5',
+      'on')\n   or is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_6',
+      'on') }}"
+  actions:
+  - action: switch.turn_off
+    target:
+      entity_id:
+      - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_2
+      - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_3
+      - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_4
+      - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_5
+      - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_6
+  - action: logbook.log
+    data:
+      name: ChatGPT HA priežiūra
+      message: 'Namai: išjungtas nevaldomas 2–6 iškrovimo slotas; paliktas tik branduolio
+        1-as slotas.'
   mode: restart
+- id: solis_plan_apply_mode
+  alias: Solis - Atominio energijos plano vykdymas
+  description: 'Vienintelis Namų inverterio Executor. Skaito vieną pilną sensor.solis_plan commit būseną ir saugia
+    tvarka suderina režimą, TOU iškrovimo slotą bei inverterio maitinimą. Sprendimų nedaro. Storm/manual/telemetry-hold
+    planų nevykdo. Kas 10 min tikrina dar kartą, bet tik jei Planner heartbeat šviežias.
 
-- id: solis_daytime_battery_protect
-  alias: "Solis - Baterija < 11%: stabdyti eksportą"
-  description: >
-    Dienos metu: jei baterija nukrinta iki 11% → keisti į Self-Use.
-    Taip stabdomas eksportas iš baterijos. Debesėlio epizodai čia
-    NESUREAGUOJA — triggeris tik į faktinį SOC, ne į saulės kritimą.
-    11% — 1% virš BMS fizinio dugno 10% (rodmuo 10 ≈ tikras 0, žemiau
-    neįmanoma; ankstesnis slenkstis 6% buvo nepasiekiamas = apsauga mirusi).
-  trigger:
-    - platform: numeric_state
-      entity_id: sensor.solis_s6_eh3p_battery_soc
-      below: 11
-  condition:
-    - condition: time
-      after: "07:00:00"
-      before: "20:00:00"
-    # Rankinio valdymo režimu nesikišti — vartotojas pats valdo iškrovimą
-    - condition: state
-      entity_id: input_boolean.manual_tou_override
-      state: "off"
-    - condition: template
-      value_template: >
-        {{ states('select.solis_s6_eh3p_work_mode')
-           in ['Feed-in Priority', 'Feed-in + TOU'] }}
-  action:
-    - service: select.select_option
-      target:
-        entity_id: select.solis_s6_eh3p_work_mode
-      data:
-        option: "Self-Use"
-    - service: notify.persistent_notification
-      data:
-        title: "Solis - Baterija išsikrovė 🔴"
-        message: >
-          Baterija: {{ states('sensor.solis_s6_eh3p_battery_soc') }}%.
-          Persijungta į Self-Use — eksportas iš baterijos sustabdytas.
-          Saulė užkraus bateriją ir eksportas atsinaujins automatiškai.
-  mode: single
+    13 % yra Namų inverterio baterijos saugos dugnas. Režimo readback su „+ TOU“ laikomas lygiaverčiu baziniam režimui
+    ir be reikalo neperrašomas.
 
-- id: solis_daytime_export_resume
-  alias: "Solis - Baterija > 15%: atnaujinti eksportą"
-  description: >
-    Grįžti į Feed-In Priority, kad perteklius būtų parduodamas. Riba 15%
-    (7 punktas, 2026-07-18): nuo dugno (BMS 10%) saulė pirma pakelia ~5 pp
-    buferį, tada eksportas atnaujinamas — nebelaukiama 30% (iki tol normalią
-    dieną baterija be reikalo ilgai stovėdavo žemai, o eksportas vėluodavo).
-    Persiskaičiuoja kas 15 min, todėl neužstringa Self-Use po midday dipo.
-  trigger:
-    - platform: numeric_state
-      entity_id: sensor.solis_s6_eh3p_battery_soc
-      above: 15
-    - platform: time_pattern
-      minutes: "/15"
-  condition:
-    - condition: time
-      after: "07:00:00"
-      before: "20:00:00"
-    # time_pattern trigeris suveikia nepriklausomai nuo SOC — patikrinam ribą.
-    - condition: template
-      value_template: >
-        {{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) > 15 }}
-    # Audros/ESO režimas — neatnaujinti eksporto, baterija lieka tik namams
-    - condition: state
-      entity_id: input_boolean.storm_mode
-      state: "off"
-    # Rankinio valdymo režimu nesikišti — vartotojas pats valdo iškrovimą
-    - condition: state
-      entity_id: input_boolean.manual_tou_override
-      state: "off"
-    # Modbus select po „Self-Use" nustatymo rodo „Self-Use + TOU" (TOU bitas —
-    # atvaizdavimo artefaktas), todėl vien state: "Self-Use" niekada nesutapdavo
-    # ir perjungimas į Feed-in Priority neveikė (2026-07-14 pastebėta: eksportas
-    # prasidėtų tik baterijai prisipildžius → vėlyvas saulės nukirpimas).
-    - condition: template
-      value_template: >
-        {{ states('select.solis_s6_eh3p_work_mode')
-           in ['Self-Use', 'Self-Use + TOU'] }}
-    # Perjungti tik kai PV jau dengia namus: deficito valandomis Feed-in
-    # Priority tik perkeltų namus ant tinklo (baterija stovėtų), eksportuoti
-    # vis tiek nebūtų ko (2026-07-14, vartotojo pastaba dėl vartojimo iš
-    # baterijos).
-    - condition: template
-      value_template: >
-        {{ states('sensor.solis_s6_eh3p_total_pv_power') | float(0)
-           > states('sensor.solis_s6_eh3p_household_load_power') | float(999999) }}
-    - condition: numeric_state
-      entity_id: sensor.solcast_pv_forecast_forecast_remaining_today
-      above: 2
-  action:
-    - service: select.select_option
-      target:
-        entity_id: select.solis_s6_eh3p_work_mode
-      data:
-        option: "Feed-in Priority"
-    - service: notify.persistent_notification
-      data:
-        title: "Solis - Eksportas atnaujintas ✅"
-        message: >
-          Baterija: {{ states('sensor.solis_s6_eh3p_battery_soc') }}%.
-          Likusios dienos prognozė: {{ states('sensor.solcast_pv_forecast_forecast_remaining_today') | round(1) }} kWh.
-          Grįžtama į Feed-In Priority.
-  mode: single
-
-- id: solis_daytime_feedin_tou
-  alias: "Solis - Dienos tolygus eksportas (Feed-in + TOU, pagal perteklių)"
-  description: >
-    Saulėtą dieną, kai REALIZAVIMO kriterijus rodo, kad likusi saulė netilps
-    į laisvą baterijos vietą + namus + 1 kW eksportą
-    (sensor.energy_manager_room_shortfall > 1 kWh; AppDaemon, su marža ir
-    intradienos santykiu) ir baterija pasiekė ribą+1%
-    (SOC ≥ daytime_export_floor + 1%), įjungia Feed-in + TOU: baterija
-    laikoma ~ties riba (TOU cut-off = floor, srovė 150A, langas 07:00–19:30),
-    perteklius tolygiai į tinklą. HISTEREZĖ (2026-07-08): trūkumui iškritus
-    <0.2 kWh — grąžinamas Self-Use ir slotas išjungiamas, baterija kaupia.
-    2026-07-14 perjungta nuo energy_manager_surplus (be vartojimo/eksporto
-    narių — armuodavo eksportą, kai vietos ir taip užtenka) prie
-    room_shortfall. Langas iki 19:30, kad nesikirstų su naktiniu
-    solis_tou_recalc_5min (20:05–07:00) ir solis_evening_discharge (20:00).
-  trigger:
-    - platform: time_pattern
-      minutes: "/15"
-  condition:
-    - condition: time
-      after: "07:00:00"
-      before: "19:30:00"
-    # Audros/ESO režimu nesikišti
-    - condition: state
-      entity_id: input_boolean.storm_mode
-      state: "off"
-    # Rankinio valdymo režimu nesikišti
-    - condition: state
-      entity_id: input_boolean.manual_tou_override
-      state: "off"
+    '
+  triggers:
+  - trigger: state
+    entity_id: sensor.solis_plan
+    id: plan_commit
+  - trigger: homeassistant
+    event: start
+    id: ha_start
+  - trigger: time_pattern
+    minutes: /10
+    id: reconcile
+  - trigger: state
+    entity_id: sensor.solis_executor_health
+    to: degraded
+    for: 00:01:00
+    id: feedback_retry
+  conditions:
+  - condition: state
+    entity_id: input_boolean.storm_mode
+    state: 'off'
+  - condition: state
+    entity_id: input_boolean.manual_tou_override
+    state: 'off'
+  - condition: state
+    entity_id: sensor.solis_planner_health
+    state: ok
+  - condition: state
+    entity_id: sensor.solis_plan
+    state:
+    - self_use
+    - feed_in
+    - night_export
+  - condition: state
+    entity_id: sensor.solis_plan
+    attribute: actionable
+    state: 'on'
+  - condition: template
+    value_template: "{% set raw = state_attr('sensor.solis_planner_health', 'last_checked') %} {% set checked =\
+      \ as_datetime(raw) if raw else none %} {{ checked is not none\n   and (now() - checked).total_seconds() <\
+      \ 600 }}"
+  actions:
+  - if:
     - condition: state
       entity_id: input_boolean.manual_soc_override
-      state: "off"
-  variables:
-    # Floor ≥ 12: BMS fizinis dugnas 10 % — 2026-07-14 inverteris ATMETĖ
-    # cut-off 6 įrašą (liko senas 57, baterija užšalo aktyviame slote).
-    floor: "{{ [states('input_number.daytime_export_floor') | float(12) | round(0) | int, 12] | max }}"
-    surplus: "{{ states('sensor.energy_manager_room_shortfall') | float(0) }}"
-    soc: "{{ states('sensor.solis_s6_eh3p_battery_soc') | float(0) }}"
-    # Reali sloto būsena (jungiklis + langas + režimas), ne vien režimo
-    # etiketė: 2026-07-01 užstrigo „Feed-in + TOU su išjungtu slotu" ir vien
-    # mode-sąlyga blokavo atsistatymą visą dieną. Taip pat pergaudo naktinį
-    # slotą (start 21:00), likusį ON po nebaigtos nakties iškrovos.
-    daytime_slot_active: >-
-      {{ is_state('switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1', 'on')
-         and states('time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1') == '07:00:00'
-         and is_state('select.solis_s6_eh3p_work_mode', 'Feed-in + TOU') }}
-    # Dabartinis sloto cut-off: ≥80 = „viršūnės skutimo" variantas (7 punktas),
-    # <80 = pertekliaus (floor) variantas — šakos pagal tai atskiriamos.
-    cutoff_now: "{{ states('number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1') | float(0) }}"
-    # SVEIKATOS ZONA (2026-07-18; apatinė 20→30 2026-07-21): nuosaikią dieną
-    # viršūnė skutama ties 80 % (kaupiklis 30–80 % ruože), aukštos gamybos
-    # dieną (koreguota prognozė > 28 kWh) — ties 90 % (realizavimui pilnas
-    # diapazonas iki 100).
-    shave_cutoff: >-
-      {{ 90 if (states('sensor.solcast_pv_forecast_forecast_today') | float(0)
-                * states('sensor.solcast_correction_factor') | float(1)) > 28
-         else 80 }}
-  action:
-    - choose:
-        # 1) Yra perteklius ir yra ką atiduoti — įjungti dienos eksportą,
-        #    jei dar nesukonfigūruotas (neperrašinėti kas 15 min). Gali
-        #    perimti ir viršūnės skutimo slotą (cutoff_now >= 90) — gilesnis
-        #    floor cut-off svarbesnis. Re-arm slenkstis floor+5 (7 punktas):
-        #    nuo dugno pirma pakylama ~5 pp iš saulės, tik tada vėl
-        #    eksportuojama.
-        - conditions:
-            - condition: template
-              value_template: >
-                {{ surplus > 1 and soc >= floor + 5
-                   and (not daytime_slot_active or cutoff_now >= 80) }}
-          sequence:
-            - service: number.set_value
-              target:
-                entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
-              data:
-                value: "{{ floor }}"
-            - service: number.set_value
-              target:
-                entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
-              data:
-                value: 150
-            - service: time.set_value
-              target:
-                entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1
-              data:
-                time: "07:00:00"
-            - service: time.set_value
-              target:
-                entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
-              data:
-                time: "19:30:00"
-            - service: switch.turn_on
-              target:
-                entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-            - service: select.select_option
-              target:
-                entity_id: select.solis_s6_eh3p_work_mode
-              data:
-                option: "Feed-in + TOU"
-            - service: notify.persistent_notification
-              data:
-                title: "Solis - Dienos tolygus eksportas ☀️→⚡"
-                message: >
-                  Vietos trūkumas saulei: {{ surplus }} kWh netilps
-                  (baterija + namai + 1 kW eksportas). Baterija: {{ soc }}%.
-                  Feed-in + TOU: baterija laikoma ~{{ floor }}%, perteklius
-                  tolygiai į tinklą (TOU 07:00–19:30, 150A).
-        # 2) VIRŠŪNĖS SKUTIMAS (7 punktas + sveikatos zona): SOC pasiekus
-        #    lubas (nuosaikią dieną 80%, aukštos gamybos — 90%) — laikyti
-        #    iškrovimo slotą aktyvų su cut-off ties lubomis. Mažina laiką
-        #    aukštame SOC (kalendorinis LFP senėjimas) ir sugeria debesų
-        #    susitelkimų svyravimus. Slotas lieka armuotas visai dienai.
-        - conditions:
-            - condition: template
-              value_template: >
-                {{ soc >= shave_cutoff + 1 and not daytime_slot_active }}
-          sequence:
-            - service: number.set_value
-              target:
-                entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
-              data:
-                value: "{{ shave_cutoff }}"
-            - service: number.set_value
-              target:
-                entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
-              data:
-                value: 150
-            - service: time.set_value
-              target:
-                entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1
-              data:
-                time: "07:00:00"
-            - service: time.set_value
-              target:
-                entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
-              data:
-                time: "19:30:00"
-            - service: switch.turn_on
-              target:
-                entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-            - service: select.select_option
-              target:
-                entity_id: select.solis_s6_eh3p_work_mode
-              data:
-                option: "Feed-in + TOU"
-            - service: notify.persistent_notification
-              data:
-                title: "Solis - Viršūnės skutimas ✂️🔋"
-                message: >
-                  Baterija {{ soc }}% — iškrovimo slotas aktyvuotas su
-                  cut-off {{ shave_cutoff }}%: viršum laikomas kiekis
-                  skutamas į tinklą (sveikatos zona / debesų buferis).
-        # 3) DUGNO ATSISTATYMAS (7 punktas): floor variantas pasiekė dugną —
-        #    išjungti slotą ir Self-Use, kad saulė pirma pakeltų SOC ~5 pp
-        #    (re-arm šakoje 1 reikalauja floor+5); tik tada vėl eksportas.
-        - conditions:
-            - condition: template
-              value_template: >
-                {{ daytime_slot_active and cutoff_now < 80 and soc <= floor }}
-          sequence:
-            - service: switch.turn_off
-              target:
-                entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-            - service: select.select_option
-              target:
-                entity_id: select.solis_s6_eh3p_work_mode
-              data:
-                option: "Self-Use"
-            - service: notify.persistent_notification
-              data:
-                title: "Solis - Dugnas pasiektas, kaupiam 🔋"
-                message: >
-                  Baterija {{ soc }}% ties dugnu {{ floor }}%. Slotas išjungtas,
-                  Self-Use — saulė pirma pakels iki {{ floor + 5 }}%, tada
-                  eksportas atsinaujins.
-        # 4) Pertekliaus nebėra (<0.2 kWh) — išjungti floor slotą ir grąžinti
-        #    Self-Use: baterija kaupia PV link target_soc. Viršūnės skutimo
-        #    varianto (cut-off 90) NELIEČIA — jis teisėtas ir be pertekliaus.
-        #    Vakare 20:00 logika perima kaip įprasta.
-        - conditions:
-            - condition: template
-              value_template: >
-                {{ surplus < 0.2 and daytime_slot_active and cutoff_now < 80 }}
-          sequence:
-            - service: switch.turn_off
-              target:
-                entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-            - service: select.select_option
-              target:
-                entity_id: select.solis_s6_eh3p_work_mode
-              data:
-                option: "Self-Use"
-            - service: notify.persistent_notification
-              data:
-                title: "Solis - Dienos eksportas sustabdytas 🔋"
-                message: >
-                  Vietos trūkumo nebėra ({{ surplus }} kWh) — likusi saulė
-                  tilps. Baterija {{ soc }}% kaupia link
-                  {{ states('sensor.energy_manager_target_soc') }}% tikslo.
-  mode: single
-
-- id: solis_storm_mode_toggle
-  alias: "Solis - Audros/ESO režimo perjungimas (greitas pritaikymas)"
-  description: >
-    Kai įjungiamas/išjungiamas Audros/ESO jungiklis — iškart pritaiko arba
-    panaikina rezervo režimą, nelaukiant 06:00 / 20:00. Įjungus: visa saulė į
-    bateriją, namus maitina tinklas, baterija namams neiškraunama, eksportas
-    sustabdytas. Išjungus: grąžinamas Self-Use, normali logika atsinaujins
-    kitą 06:00 / 20:00.
-  trigger:
-    - platform: state
+      state: 'off'
+    - condition: state
+      entity_id: sensor.solis_plan
+      state: 'on'
+      attribute: slot_active
+    - condition: state
+      entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+      state: 'on'
+    - condition: template
+      value_template: '{{ states(''number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1'') | float(-1)
+        != slot_cutoff_soc | float(-2) }}'
+    then:
+    - action: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+  - if:
+    - condition: state
+      entity_id: input_boolean.manual_soc_override
+      state: 'off'
+    - condition: state
+      entity_id: sensor.solis_plan
+      attribute: slot_active
+      state: 'off'
+    - condition: state
+      entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+      state: 'on'
+    then:
+    - action: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+  - alias: Keisti tik bazinį režimą, išsaugant teisėtą TOU būseną
+    choose:
+    - conditions:
+      - condition: state
+        entity_id: sensor.solis_plan
+        state:
+        - feed_in
+        - night_export
+      - condition: not
+        conditions:
+        - condition: state
+          entity_id: select.solis_s6_eh3p_work_mode
+          state:
+          - Feed-in Priority
+          - Feed-in Priority + TOU
+      sequence:
+      - action: select.select_option
+        target:
+          entity_id: select.solis_s6_eh3p_work_mode
+        data:
+          option: Feed-in Priority
+    - conditions:
+      - condition: state
+        entity_id: sensor.solis_plan
+        state: self_use
+      - condition: not
+        conditions:
+        - condition: state
+          entity_id: select.solis_s6_eh3p_work_mode
+          state:
+          - Self-Use
+          - Self-Use + TOU
+      sequence:
+      - action: select.select_option
+        target:
+          entity_id: select.solis_s6_eh3p_work_mode
+        data:
+          option: Self-Use
+  - if:
+    - condition: state
+      entity_id: input_boolean.manual_soc_override
+      state: 'off'
+    - condition: state
+      entity_id: sensor.solis_plan
+      attribute: slot_active
+      state: 'on'
+    - condition: template
+      value_template: "{{ slot_cutoff_soc is number\n   and 13 <= slot_cutoff_soc <= 100 }}"
+    then:
+    - if:
+      - condition: template
+        value_template: "{{ states('time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1')\n   != '00:00:00'\
+          \ }}"
+      then:
+      - action: time.set_value
+        target:
+          entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1
+        data:
+          time: 00:00:00
+    - if:
+      - condition: template
+        value_template: "{{ states('time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1')\n   != '23:59:00'\
+          \ }}"
+      then:
+      - action: time.set_value
+        target:
+          entity_id: time.solis_s6_eh3p_grid_time_of_use_discharge_end_slot_1
+        data:
+          time: '23:59:00'
+    - if:
+      - condition: template
+        value_template: '{{ states(''number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1'') | float(-1)
+          != slot_cutoff_soc | float(-2) }}'
+      then:
+      - action: number.set_value
+        target:
+          entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1
+        data:
+          value: '{{ slot_cutoff_soc }}'
+    - if:
+      - condition: template
+        value_template: "{{ (states('number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1')\n\
+          \    | float(-1)) != 150 }}"
+      then:
+      - action: number.set_value
+        target:
+          entity_id: number.solis_s6_eh3p_grid_time_of_use_discharge_battery_current_slot_1
+        data:
+          value: 150
+    - wait_template: '{{ states(''number.solis_s6_eh3p_grid_time_of_use_discharge_cut_off_soc_slot_1'') | float(-1)
+        == slot_cutoff_soc | float(-2) }}'
+      timeout: 00:00:45
+      continue_on_timeout: false
+    - condition: state
       entity_id: input_boolean.storm_mode
+      state: 'off'
+    - condition: state
+      entity_id: sensor.solis_plan
+      state: 'on'
+      attribute: actionable
+    - if:
+      - condition: state
+        entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+        state: 'off'
+      then:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+  - choose:
+    - conditions:
+      - condition: state
+        entity_id: sensor.solis_plan
+        attribute: inverter_on
+        state: 'on'
+      - condition: state
+        entity_id: switch.solis_s6_eh3p_power_state
+        state: 'off'
+      sequence:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.solis_s6_eh3p_power_state
+    - conditions:
+      - condition: state
+        entity_id: sensor.solis_plan
+        attribute: inverter_on
+        state: 'off'
+      - condition: state
+        entity_id: switch.solis_s6_eh3p_power_state
+        state: 'on'
+      sequence:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.solis_s6_eh3p_power_state
+  variables:
+    plan_mode: '{{ states(''sensor.solis_plan'') }}'
+    slot_cutoff_soc: '{{ state_attr(''sensor.solis_plan'', ''slot_cutoff_soc'') }}'
+  mode: restart
+- id: solis_snapshot_daily_forecast
+  alias: Solis - Įsiminti dienos prognozę (vakar prognozė)
+  description: '23:55: nusaugo šiandienos Solcast forecast_today reikšmę į input_number.solcast_forecast_yesterday.
+    Kitą dieną ši reikšmė rodoma kaip „vakar prognozuota" ir lyginama su faktine vakar
+    gamyba.
+
+    '
+  trigger:
+  - platform: time
+    at: '23:55:00'
+  condition:
+  - condition: template
+    value_template: "{{ states('sensor.solcast_pv_forecast_forecast_today')\n   not
+      in ['unavailable', 'unknown', 'none', ''] }}\n"
+  action:
+  - service: input_number.set_value
+    target:
+      entity_id: input_number.solcast_forecast_yesterday
+    data:
+      value: '{{ states(''sensor.solcast_pv_forecast_forecast_today'') | float(0)
+        | round(1) }}'
+  mode: single
+- id: solis_time_of_use_master_sync
+  alias: Solis - TOU master bito sinchronizavimas su slotais
+  description: '2026-08-28 radinys: register 43110 (Work Mode) bitas 1 (switch.solis_s6_eh3p_time_of_use,
+    „Time of Use") yra ATSKIRAS nuo kiekvieno konkretaus krovimo/iškrovimo sloto switch''o
+    (tie gyvena kitame registre, 43707) — tai MASTER TOU žymė, kurios jokia automatika
+    tiesiogiai nevaldė (tik atskirus period switch''us per solis_evening_ discharge
+    / solis_daytime_feedin_tou / storm skriptus). Dėl to ji likdavo įjungta neribotai
+    net kai VISI 12 period switch''ų off, o select.solis_s6_eh3p_work_mode / dashboard''as
+    toliau rodydavo „... + TOU", nors joks slotas realiai nebuvo aktyvus (vartotojo
+    pastaba: „vistiek rodo TOU vizualizacijoj"). Ši automatika laiko master bitą TEISINGĄ:
+    on tada ir tik tada, kai bent vienas iš 12 TOU period switch''ų (krovimo/iškrovimo,
+    1–6) yra on. Vien sinchronizacija, ne sprendimas — veikia visais režimais (audros/rankinis
+    nebloko).
+
+    '
+  trigger:
+  - platform: state
+    entity_id:
+    - switch.solis_s6_eh3p_grid_time_of_use_charging_period_1
+    - switch.solis_s6_eh3p_grid_time_of_use_charging_period_2
+    - switch.solis_s6_eh3p_grid_time_of_use_charging_period_3
+    - switch.solis_s6_eh3p_grid_time_of_use_charging_period_4
+    - switch.solis_s6_eh3p_grid_time_of_use_charging_period_5
+    - switch.solis_s6_eh3p_grid_time_of_use_charging_period_6
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_2
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_3
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_4
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_5
+    - switch.solis_s6_eh3p_grid_time_of_use_discharge_period_6
+  - platform: time_pattern
+    minutes: /10
+  variables:
+    any_period_on: "{{ expand(['switch.solis_s6_eh3p_grid_time_of_use_charging_period_1',\n
+      \   'switch.solis_s6_eh3p_grid_time_of_use_charging_period_2',\n    'switch.solis_s6_eh3p_grid_time_of_use_charging_period_3',\n
+      \   'switch.solis_s6_eh3p_grid_time_of_use_charging_period_4',\n    'switch.solis_s6_eh3p_grid_time_of_use_charging_period_5',\n
+      \   'switch.solis_s6_eh3p_grid_time_of_use_charging_period_6',\n    'switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1',\n
+      \   'switch.solis_s6_eh3p_grid_time_of_use_discharge_period_2',\n    'switch.solis_s6_eh3p_grid_time_of_use_discharge_period_3',\n
+      \   'switch.solis_s6_eh3p_grid_time_of_use_discharge_period_4',\n    'switch.solis_s6_eh3p_grid_time_of_use_discharge_period_5',\n
+      \   'switch.solis_s6_eh3p_grid_time_of_use_discharge_period_6'])\n   | selectattr('state',
+      'eq', 'on') | list | count > 0 }}"
+    master_on: '{{ is_state(''switch.solis_s6_eh3p_time_of_use'', ''on'') }}'
+  condition:
+  - condition: template
+    value_template: '{{ any_period_on != master_on }}'
+  action:
+  - service: switch.turn_{{ 'on' if any_period_on else 'off' }}
+    target:
+      entity_id: switch.solis_s6_eh3p_time_of_use
+  mode: single
+- id: solis_storm_mode_toggle
+  alias: Solis - Audros/ESO režimo perjungimas (greitas pritaikymas)
+  description: 'Kai įjungiamas/išjungiamas Audros/ESO jungiklis — iškart pritaiko
+    arba panaikina rezervo režimą, nelaukiant 06:00 / 20:00. Įjungus: visa saulė į
+    bateriją, namus maitina tinklas, baterija namams neiškraunama, eksportas sustabdytas.
+    Išjungus: grąžinamas Self-Use, normali logika atsinaujins kitą 06:00 / 20:00.
+
+    '
+  trigger:
+  - platform: state
+    entity_id: input_boolean.storm_mode
   condition: []
   action:
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.storm_mode
-              state: "on"
-          sequence:
-            - service: script.solis_storm_reserve_apply
-            - service: notify.persistent_notification
-              data:
-                title: "Solis - Audros / ESO rezervo režimas įjungtas ⚡🔋"
-                message: >
-                  Visa saulė kraunama į bateriją, namus maitina tinklas, baterija
-                  namams neiškraunama, eksportas sustabdytas. Baterija: {{
-                  states('sensor.solis_s6_eh3p_battery_soc') }}%.
-      default:
-        - service: script.solis_storm_reserve_clear
-        - service: notify.persistent_notification
-          data:
-            title: "Solis - Audros / ESO rezervo režimas išjungtas ✅"
-            message: >
-              Grąžinta į Self-Use. Normali dienos/nakties logika atsinaujins
-              kitą 06:00 / 20:00.
-  mode: single
+  - choose:
+    - conditions:
+      - condition: state
+        entity_id: input_boolean.storm_mode
+        state: 'on'
+      sequence:
+      - service: script.solis_storm_reserve_apply
+      - service: notify.persistent_notification
+        data:
+          title: "Solis - Audros / ESO rezervo režimas įjungtas ⚡\U0001F50B"
+          message: 'Visa saulė kraunama į bateriją, namus maitina tinklas, baterija
+            namams neiškraunama, eksportas sustabdytas. Baterija: {{ states(''sensor.solis_s6_eh3p_battery_soc'')
+            }}%.
 
-- id: solis_night_inverter_shutdown
-  alias: "Solis - Naktinis inverterio OFF pagal dinaminį planą"
-  description: >
-    Atsarginis vykdytojas: inverterį išjungia tik kai patikimas dinaminis
-    nakties planas yra SLEEP arba DONE. Aktyviose EVENING_BOOST/DAWN_FINISH
-    fazėse inverterio neišjungia. HOLD atveju taip pat neišjungia.
-  trigger:
-    - platform: time_pattern
-      minutes: "/5"
-    - platform: state
-      entity_id: sensor.energy_manager_night_plan
-  condition:
-    - condition: state
-      entity_id: input_boolean.night_inverter_shutdown
-      state: "on"
-    - condition: state
-      entity_id: input_boolean.storm_mode
-      state: "off"
-    - condition: state
-      entity_id: input_boolean.manual_tou_override
-      state: "off"
-    - condition: state
-      entity_id: input_boolean.manual_soc_override
-      state: "off"
-    - condition: state
-      entity_id: sun.sun
-      state: "below_horizon"
-    - condition: state
-      entity_id: switch.solis_s6_eh3p_power_state
-      state: "on"
-    - condition: template
-      value_template: >
-        {{ state_attr('sensor.energy_manager_night_plan', 'trusted') | bool(false)
-           and states('sensor.energy_manager_night_plan') in ['SLEEP', 'DONE'] }}
-    - condition: state
-      entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-      state: "off"
-    - condition: template
-      value_template: >
-        {% set t = as_datetime(states('sensor.inverter_morning_on_time_precise')) %}
-        {{ t is none or now() < as_local(t) }}
-  action:
-    - service: switch.turn_off
-      target:
-        entity_id: switch.solis_s6_eh3p_power_state
-  mode: single
-
-- id: solis_morning_inverter_power_on
-  alias: "Solis - Ryto inverterio įjungimas pagal Solcast gamybos pradžią"
-  description: >
-    Įjungia inverterį (power_state on) po naktinio išjungimo tą pirmą minutę,
-    kai pagal Solcast interpoliuotą pusvalandinę prognozę PV pasiekia >=100 W.
-    Laiką minutės tikslumu skaičiuoja native HA template
-    (sensor.inverter_morning_on_time_precise, timestamp). Birželį tai ~1–2 val. vėliau už saulėtekį, kas sutaupo
-    ~100 W tuščio veikimo. Realaus signalo trigeris: Eimo elektrinės faktinė
-    PV gamyba >200 W (10 min) — apsauga nuo Solcast ryto pesimizmo, kai
-    prognozuojamas 100 W perkirtimas vėluoja prieš tikrąją gamybos pradžią
-    (Solis su išjungtu inverteriu savo PV nemato; Eimo cloud sensorius čia
-    tik informacinis saulės signalas, ne valdymo maišymas tarp elektrinių).
-    Atsarginis trigeris 10:00, jei sensoriai nepasiekiami. Saugikliai:
-    įjungiama iškart, jei įjungiamas audros režimas (reikia backup) arba
-    išjungiamas naktinio išjungimo jungiklis.
-  trigger:
-    - platform: time
-      at: sensor.inverter_morning_on_time_precise
-      id: exact_100w_time
-    - platform: time_pattern
-      minutes: "/1"
-      id: minute_100w_catchup
-    - platform: state
-      entity_id: sensor.energy_manager_night_plan
-      to: "EVENING_BOOST"
-    - platform: state
-      entity_id: sensor.energy_manager_night_plan
-      to: "DAWN_FINISH"
-    - platform: state
-      entity_id: sensor.energy_manager_night_plan
-      to: "HOLD"
-    # Atidėto naktinio iškrovimo startas (7 punktas): jei inverteris buvo
-    # išjungtas laukimo metu — pažadinti, kad slotas realiai vykdytųsi.
-    # 2026-07-20: HA 2026.7 nebepriima `time.` domeno entity `at:` lauke
-    # (Expected input_datetime/sensor, Got None @ data['at'][0]) — dėl to
-    # visa automatika buvo išjungta ir inverteris ryte neįsijungdavo.
-    # Pakeista lygiaverčiu template triggeriu (suveikia laikrodžiui
-    # praėjus sloto pradžios laiką).
-    - platform: template
-      value_template: >
-        {% set t = states('time.solis_s6_eh3p_grid_time_of_use_discharge_start_slot_1') %}
-        {{ t not in ['unknown', 'unavailable', '00:00:00']
-           and now() >= today_at(t) }}
-    - platform: numeric_state
-      entity_id: sensor.eimo_pv_power
-      above: 200
-      for: "00:10:00"
-    # 2026-07-22: stipraus-saulės pažadinimas po dugno pailsėjimo — kai Eimo PV
-    # (saulės signalas) stipri, Šeškiniai gali REALIAI krautis, ne ciklauti.
-    - platform: numeric_state
-      entity_id: sensor.eimo_pv_power
-      above: 1200
-      for: "00:05:00"
-    - platform: time
-      at: "10:00:00"
-    - platform: state
-      entity_id: input_boolean.night_inverter_shutdown
-      to: "off"
-    - platform: state
-      entity_id: input_boolean.storm_mode
-      to: "on"
-  condition:
-    - condition: state
-      entity_id: switch.solis_s6_eh3p_power_state
-      state: "off"
-    # Jei Solcast 100 W momentą perskaičiavo į jau praėjusią minutę,
-    # timestamp triggerio nebebus. Minutinis catch-up leidžiamas tik trumpame
-    # 15 min lange po apskaičiuoto 100 W kirtimo; kitu metu jis nieko nedaro.
-    - condition: template
-      value_template: >
-        {% if trigger.id == 'minute_100w_catchup' %}
-          {% set morning_ts = as_datetime(states('sensor.inverter_morning_on_time_precise')) %}
-          {{ morning_ts is not none
-             and now() >= as_local(morning_ts)
-             and now() < as_local(morning_ts) + timedelta(minutes=15) }}
-        {% else %}
-          true
-        {% endif %}
-    # 2026-07-26: pašalinta 07-22 blokavimo sąlyga „SOC≤12 ir Eimo PV<1200 —
-    # neįjungti". Ji buvo pora su (jau pašalinta) dienine išjungimo šaka ir
-    # debesuotą rytą su tuščia baterija atidėdavo įjungimą iki 10:00 —
-    # prarandama ryto PV. Vartotojo taisyklė: įjungti kai Solcast valandinė
-    # >100 W, o įjungus — neišjunginėti iki vakaro (dugną saugo overdischarge).
-  action:
-    - service: switch.turn_on
-      target:
-        entity_id: switch.solis_s6_eh3p_power_state
+            '
+    default:
+    - service: script.solis_storm_reserve_clear
     - service: notify.persistent_notification
       data:
-        title: "Solis - Inverteris įjungtas ☀️"
-        message: >
-          Inverteris įjungtas po naktinio išjungimo
-          (baterija: {{ states('sensor.solis_s6_eh3p_battery_soc') }}%).
-          Solcast numato gamybos pradžią — inverteris pasiruošęs dienai.
-  mode: single
+        title: Solis - Audros / ESO rezervo režimas išjungtas ✅
+        message: 'Grąžinta į Self-Use. Normali dienos/nakties logika atsinaujins kitą
+          06:00 / 20:00.
 
+          '
+  mode: single
 - id: solis_low_soc_night_shutdown
-  alias: "Solis - Naktinis išjungimas žemo SOC juostoje (churn apsauga)"
-  description: >
-    Apsauga nuo nakties ciklavimo ties apatine riba. BMS/firmware naktį
-    laiko bateriją 10–15 % juostoje: inverteris trumpam prisikrauna iš
-    tinklo ir vėl išsikrauna (pjūklas 10↔15 %) — sekli ciklika, baterijos
-    dėvėjimas, round-trip nuostolis (2026-07-06 serijos max 5.9 kWh/naktį).
-    Senasis 5.5 % slenkstis niekada nesuveikdavo, nes BMS SOC žemiau 10 %
-    naktį nenuleidžia. Dvi pakopos: SOC ≤ 6 % — išjungiama bet kuriuo
-    nakties metu (senoji apsauga nuo force-charge ties 4–5 %); SOC ≤ 16 %
-    (churn juosta) — tik 20:30–10:00 lange, kad netrukdytų vakariniam TOU
-    eksportui žiemą. Išjungus namus maitina tinklas, baterija ilsisi.
-    Veikia NEPRIKLAUSOMAI nuo input_boolean.night_inverter_shutdown —
-    tai apsauga, ne ekonomika. Rytą įjungia solis_morning_inverter_power_on
-    (Solcast gamybos pradžia arba 10:00 atsarginis). Audros ir rankinio
-    valdymo režimais nevykdoma.
-  trigger:
-    - platform: numeric_state
-      entity_id: sensor.solis_s6_eh3p_battery_soc
-      below: 16
-    - platform: time_pattern
-      minutes: "/15"
-  condition:
-    - condition: state
-      entity_id: input_boolean.storm_mode
-      state: "off"
-    - condition: state
-      entity_id: input_boolean.manual_tou_override
-      state: "off"
-    - condition: state
-      entity_id: switch.solis_s6_eh3p_power_state
-      state: "on"
-    # TOU eksportas turi būti pasibaigęs (slotą išjungia solis_tou_recalc_5min)
-    - condition: state
-      entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
-      state: "off"
-    # TIK NAKTIS: churn juosta 20:30–10:00 arba SOC ≤ 6 bet kada.
-    # DIENINĖ šaka pašalinta 2026-07-24: `soc<=12 and pv<load` debesuotą rytą
-    # išjungdavo inverterį net esant naudingai PV (pvz. 290 W < 1847 W apkrovos)
-    # ir kas 15 min VĖL išjungdavo, nors vartotojas rankiniu būdu įjungdavo →
-    # prarandama ryto PV, namai vien iš tinklo. Apsauga nuo iškrovos žemiau
-    # dugno JAU užtikrinta overdischarge=11 % (BMS riba) — inverterio išjungti
-    # tam nereikia. Dieną inverteris lieka įjungtas ir naudoja bet kokią PV.
-    - condition: template
-      value_template: >
-        {% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(100) %}
-        {% set night = is_state('sun.sun', 'below_horizon') %}
-        {{ night and (soc <= 6 or (soc <= 16
-              and (now() >= today_at('20:30') or now() < today_at('10:00')))) }}
-  action:
-    - service: switch.turn_off
-      target:
-        entity_id: switch.solis_s6_eh3p_power_state
-    - service: notify.persistent_notification
-      data:
-        title: "Solis - Inverteris pailsi: žemas SOC + mažai saulės 🛡️"
-        message: >
-          Baterija {{ states('sensor.solis_s6_eh3p_battery_soc') }}% ties dugnu,
-          o saulės nepakanka jai krauti — inverteris išjungtas, kad baterija
-          nesiciklautų (namus maitina tinklas, overdischarge 11 % nepažeistas).
-          Įsijungs saulei sustiprėjus (arba {{ state_attr('sensor.inverter_morning_on_time', 'laikas') | default('gamybos pradžioje', true) }}).
-  mode: single
+  alias: Solis - Naktinis išjungimas žemo SOC juostoje (churn apsauga)
+  description: 'Apsauga nuo nakties ciklavimo ties apatine riba. BMS/firmware naktį
+    laiko bateriją 10–15 % juostoje: inverteris trumpam prisikrauna iš tinklo ir vėl
+    išsikrauna (pjūklas 10↔15 %) — sekli ciklika, baterijos dėvėjimas, round-trip
+    nuostolis (2026-07-06 serijos max 5.9 kWh/naktį). Senasis 5.5 % slenkstis niekada
+    nesuveikdavo, nes BMS SOC žemiau 10 % naktį nenuleidžia. Dvi pakopos: SOC ≤ 6
+    % — išjungiama bet kuriuo nakties metu (senoji apsauga nuo force-charge ties 4–5
+    %); SOC ≤ 16 % (churn juosta) — tik 20:30–10:00 lange, kad netrukdytų vakariniam
+    TOU eksportui žiemą. Išjungus namus maitina tinklas, baterija ilsisi. Nuo 2026-09-04
+    ši riba yra centriniame Planner branduolyje. Ši automatizacija liko tik avarine
+    atsarga ir fiziškai rašo tik tada, kai Planner nėra sveikas arba jo heartbeat
+    senesnis nei 10 min. Audros ir rankinio valdymo režimais nevykdoma.
 
-- id: solis_storm_export_at_high_soc
-  alias: "Solis - Audros režimas: eksportas kai SOC ≥ 95%"
-  description: >
-    Rezervo režimu eksportas išjungtas, bet kai baterija beveik pilna
-    (SOC ≥ 95%) — leidžiamas eksportas, kad saulės perteklius eitų į tinklą.
-    Histerezė: įjungia ties 95%, išjungia nukritus žemiau 90%.
+    '
   trigger:
-    - platform: numeric_state
-      entity_id: sensor.solis_s6_eh3p_battery_soc
-      above: 94
-    - platform: numeric_state
-      entity_id: sensor.solis_s6_eh3p_battery_soc
-      below: 90
+  - platform: numeric_state
+    entity_id: sensor.solis_s6_eh3p_battery_soc
+    below: 16
+  - platform: time_pattern
+    minutes: /15
   condition:
-    - condition: state
-      entity_id: input_boolean.storm_mode
-      state: "on"
+  - condition: state
+    entity_id: input_boolean.storm_mode
+    state: 'off'
+  - condition: state
+    entity_id: input_boolean.manual_tou_override
+    state: 'off'
+  - condition: state
+    entity_id: switch.solis_s6_eh3p_power_state
+    state: 'on'
+  - condition: template
+    value_template: "{% set raw = state_attr('sensor.solis_planner_health', 'last_checked')
+      %} {% set checked = as_datetime(raw) if raw else none %} {{ states('sensor.solis_planner_health')
+      != 'ok'\n   or checked is none\n   or (now() - checked).total_seconds() >= 600
+      }}"
+  - condition: state
+    entity_id: switch.solis_s6_eh3p_grid_time_of_use_discharge_period_1
+    state: 'off'
+  - condition: template
+    value_template: "{% set soc = states('sensor.solis_s6_eh3p_battery_soc') | float(100)
+      %} {% set night = is_state('sun.sun', 'below_horizon') %} {{ night and (soc
+      <= 6 or (soc <= 16\n      and (now() >= today_at('20:30') or now() < today_at('10:00'))))
+      }}\n"
   action:
-    - choose:
-        - conditions:
-            - condition: numeric_state
-              entity_id: sensor.solis_s6_eh3p_battery_soc
-              above: 94
-          sequence:
-            - service: switch.turn_on
-              target:
-                entity_id: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
-            - service: notify.persistent_notification
-              data:
-                title: "Solis - Audros režimas: eksportas leistas ☀️➡️"
-                message: >
-                  Baterija {{ states('sensor.solis_s6_eh3p_battery_soc') }}% (≥95%)
-                  — saulės perteklius eksportuojamas į tinklą.
-      default:
-        - service: switch.turn_off
+  - service: switch.turn_off
+    target:
+      entity_id: switch.solis_s6_eh3p_power_state
+  - service: notify.persistent_notification
+    data:
+      title: "Solis - Inverteris pailsi: žemas SOC + mažai saulės \U0001F6E1️"
+      message: 'Baterija {{ states(''sensor.solis_s6_eh3p_battery_soc'') }}% ties
+        nakties apsaugos riba, o centrinio Planner heartbeat nepatikimas. Avarinė
+        atsarga išjungė inverterį, kad baterija nesiciklautų. Overdischarge nustatymas
+        nebuvo keistas.
+
+        '
+  mode: single
+- id: solis_storm_export_at_high_soc
+  alias: Solis - Audros/ESO eksportas nuo 95% tik esant tinklui
+  description: 'Rezervas turi prioritetą: eksporto leidimas tik su šviežiais SOC >=95% ir trijų fazių tinklo matavimais.
+    Iškrovimo slotas lieka išjungtas; eksporto galios riba nekeičiama.'
+  triggers:
+  - trigger: state
+    entity_id:
+    - sensor.solis_s6_eh3p_battery_soc
+    - select.solis_s6_eh3p_work_mode
+    - input_boolean.storm_mode
+  - trigger: time_pattern
+    minutes: /1
+  - trigger: homeassistant
+    event: start
+  conditions:
+  - condition: state
+    entity_id: input_boolean.storm_mode
+    state: 'on'
+  - condition: state
+    entity_id: select.solis_s6_eh3p_work_mode
+    state:
+    - Self-Use
+    - Self-Use + TOU
+  - condition: state
+    entity_id: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
+    state:
+    - 'on'
+    - 'off'
+  actions:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ -60 <= as_timestamp(now()) - (as_timestamp(states(''sensor.solis_s6_eh3p_last_modbus_success''),
+          0)) <= 180 }}'
+      - condition: numeric_state
+        entity_id: sensor.solis_s6_eh3p_battery_soc
+        above: 94.99
+      - condition: numeric_state
+        entity_id: sensor.solis_s6_eh3p_meter_ac_voltage_a
+        above: 180
+        below: 270
+      - condition: numeric_state
+        entity_id: sensor.solis_s6_eh3p_meter_ac_voltage_b
+        above: 180
+        below: 270
+      - condition: numeric_state
+        entity_id: sensor.solis_s6_eh3p_meter_ac_voltage_c
+        above: 180
+        below: 270
+      - condition: numeric_state
+        entity_id: sensor.solis_s6_eh3p_grid_frequency
+        above: 45
+        below: 55
+      sequence:
+      - if:
+        - condition: state
+          entity_id: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
+          state: 'off'
+        then:
+        - action: switch.turn_on
           target:
             entity_id: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
-        - service: notify.persistent_notification
-          data:
-            title: "Solis - Audros režimas: eksportas sustabdytas 🔋"
-            message: >
-              Baterija {{ states('sensor.solis_s6_eh3p_battery_soc') }}% (<90%)
-              — eksportas vėl sustabdytas, visa saulė į bateriją.
-  mode: single
-
+    default:
+    - if:
+      - condition: state
+        entity_id: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
+        state: 'on'
+      then:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.solis_s6_eh3p_allow_export_switch_under_self_generation_and_self_use
+  mode: restart
 - id: solis_inverter_temp_alert
-  alias: "Solis - Inverterio temperatūros įspėjimas (>70°C)"
-  description: >
-    Įspėja, kai inverterio temperatūra 10 min laikosi virš 70°C — artėja
-    galios ribojimo (derating) zona, verta patikrinti vėdinimą. Trigeris
-    suveikia tik kertant ribą, todėl pranešimas nesikartoja, kol
-    temperatūra nenukrenta ir vėl nepakyla.
+  alias: Solis - Inverterio temperatūros įspėjimas (>70°C)
+  description: 'Įspėja, kai inverterio temperatūra 10 min laikosi virš 70°C — artėja
+    galios ribojimo (derating) zona, verta patikrinti vėdinimą. Trigeris suveikia
+    tik kertant ribą, todėl pranešimas nesikartoja, kol temperatūra nenukrenta ir
+    vėl nepakyla.
+
+    '
   trigger:
-    - platform: numeric_state
-      entity_id: sensor.solis_s6_eh3p_temperature
-      above: 70
-      for: "00:10:00"
+  - platform: numeric_state
+    entity_id: sensor.solis_s6_eh3p_temperature
+    above: 70
+    for: 00:10:00
   condition: []
   action:
-    - service: notify.persistent_notification
-      data:
-        title: "Solis - Aukšta inverterio temperatūra 🌡️"
-        message: >
-          Inverterio temperatūra {{ states('sensor.solis_s6_eh3p_temperature') }}°C
-          jau 10 min viršija 70°C. Artėjant ~75°C inverteris pradės riboti
-          galią. Patikrinkite vėdinimą / užtemdymą. PV galia:
-          {{ states('sensor.solis_s6_eh3p_total_pv_power') }} W.
-  mode: single
+  - service: notify.persistent_notification
+    data:
+      title: "Solis - Aukšta inverterio temperatūra \U0001F321️"
+      message: 'Inverterio temperatūra {{ states(''sensor.solis_s6_eh3p_temperature'')
+        }}°C jau 10 min viršija 70°C. Artėjant ~75°C inverteris pradės riboti galią.
+        Patikrinkite vėdinimą / užtemdymą. PV galia: {{ states(''sensor.solis_s6_eh3p_total_pv_power'')
+        }} W.
 
+        '
+  mode: single
 - id: solis_bms_fault_alert
-  alias: "Solis - Baterijos BMS gedimo įspėjimas"
-  description: >
-    BMS temperatūros baterija neperduoda (registras visada 0), todėl
-    sveikata stebima netiesiogiai: fault_status_1/2 registrai privalo būti
-    0 — bet kokia kita reikšmė yra BMS aliarmas (per aukšta/žema celių
-    įtampa, temperatūra, srovė). Trigeris kertant 0 ribą.
-  trigger:
-    - platform: numeric_state
-      entity_id:
-        - sensor.solis_s6_eh3p_battery_fault_status_1_bms
-        - sensor.solis_s6_eh3p_battery_fault_status_2_bms
-      above: 0
-  condition: []
-  action:
-    - service: notify.persistent_notification
-      data:
-        title: "Solis - Baterijos BMS aliarmas ⚠️"
-        message: >
-          BMS fault registrai: status_1 =
-          {{ states('sensor.solis_s6_eh3p_battery_fault_status_1_bms') }},
-          status_2 =
-          {{ states('sensor.solis_s6_eh3p_battery_fault_status_2_bms') }}.
-          SOC: {{ states('sensor.solis_s6_eh3p_battery_soc') }} %,
-          baterijos galia: {{ states('sensor.solis_s6_eh3p_battery_power') }} W,
-          BMS įtampa: {{ states('sensor.solis_s6_eh3p_battery_voltage_bms') }} V.
-          Patikrink baterijos būseną — nenulinis fault = BMS apsauga.
-  mode: single
+  alias: Solis - Baterijos BMS gedimo įspėjimas
+  description: 'BMS temperatūros baterija neperduoda (registras visada 0), todėl sveikata
+    stebima netiesiogiai: fault_status_1/2 registrai privalo būti 0 — bet kokia kita
+    reikšmė yra BMS aliarmas (per aukšta/žema celių įtampa, temperatūra, srovė). Trigeris
+    kertant 0 ribą.
 
-- id: eimo_inverter_temp_alert
-  alias: "Eimo - Inverterio temperatūros įspėjimas (>70°C)"
-  description: >
-    Solis Modbus analogo kopija Eimo elektrinei (cloud temperatūros
-    sensorius): 10 min virš 70°C — artėja galios ribojimo zona.
+    '
   trigger:
-    - platform: numeric_state
-      entity_id: sensor.solis_inverter_1033300254190112_solis_temperature
-      above: 70
-      for: "00:10:00"
+  - platform: numeric_state
+    entity_id:
+    - sensor.solis_s6_eh3p_battery_fault_status_1_bms
+    - sensor.solis_s6_eh3p_battery_fault_status_2_bms
+    above: 0
   condition: []
   action:
-    - service: notify.persistent_notification
-      data:
-        title: "Eimo - Aukšta inverterio temperatūra 🌡️"
-        message: >
-          Eimo inverterio temperatūra
-          {{ states('sensor.solis_inverter_1033300254190112_solis_temperature') }}°C
-          jau 10 min viršija 70°C. Artėjant ~75°C inverteris pradės riboti
-          galią. Patikrinkite vėdinimą / užtemdymą.
+  - service: notify.persistent_notification
+    data:
+      title: Solis - Baterijos BMS aliarmas ⚠️
+      message: 'BMS fault registrai: status_1 = {{ states(''sensor.solis_s6_eh3p_battery_fault_status_1_bms'')
+        }}, status_2 = {{ states(''sensor.solis_s6_eh3p_battery_fault_status_2_bms'')
+        }}. SOC: {{ states(''sensor.solis_s6_eh3p_battery_soc'') }} %, baterijos galia:
+        {{ states(''sensor.solis_s6_eh3p_battery_power'') }} W, BMS įtampa: {{ states(''sensor.solis_s6_eh3p_battery_voltage_bms'')
+        }} V. Patikrink baterijos būseną — nenulinis fault = BMS apsauga.
+
+        '
+  mode: single
+- id: eimo_inverter_temp_alert
+  alias: Eimo - Inverterio temperatūros įspėjimas (>70°C)
+  description: 'Solis Modbus analogo kopija Eimo elektrinei (cloud temperatūros sensorius):
+    10 min virš 70°C — artėja galios ribojimo zona.
+
+    '
+  trigger:
+  - platform: numeric_state
+    entity_id: sensor.solis_inverter_1033300254190112_solis_temperature
+    above: 70
+    for: 00:10:00
+  condition: []
+  action:
+  - service: notify.persistent_notification
+    data:
+      title: "Eimo - Aukšta inverterio temperatūra \U0001F321️"
+      message: 'Eimo inverterio temperatūra {{ states(''sensor.solis_inverter_1033300254190112_solis_temperature'')
+        }}°C jau 10 min viršija 70°C. Artėjant ~75°C inverteris pradės riboti galią.
+        Patikrinkite vėdinimą / užtemdymą.
+
+        '
+  mode: single
+- id: system_appdaemon_startup_watchdog
+  alias: Sistema - AppDaemon paleidimo sargyba
+  description: 'Vienkartinė HA paleidimo saviatkūra. Po 2 min. perkrauna tik AppDaemon,
+    jei Namų branduolio heartbeat nesukurtas arba pasenęs. Eimo debesies telemetrijos
+    gedimas šios sargybos nesuveikia.
+
+    '
+  trigger:
+  - platform: homeassistant
+    event: start
+  condition: []
+  action:
+  - delay: 00:02:00
+  - condition: template
+    value_template: "{% set raw = state_attr('sensor.solis_planner_health', 'last_checked')
+      %} {% set checked = as_datetime(raw) if raw else none %} {{ states('sensor.solis_planner_health')
+      in ['unknown', 'unavailable']\n   or checked is none\n   or (now() - checked).total_seconds()
+      > 180 }}"
+  - service: logbook.log
+    data:
+      name: ChatGPT HA priežiūra
+      message: 'Po HA paleidimo Namų Planner heartbeat neatsirado per 2 min.; automatiškai
+        perkraunamas tik AppDaemon priedas.
+
+        '
+      entity_id: automation.sistema_appdaemon_paleidimo_sargyba
+  - service: hassio.app_restart
+    data:
+      app: a0d7b954_appdaemon
   mode: single

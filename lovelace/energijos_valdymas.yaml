@@ -158,6 +158,10 @@ views:
               # Baterija — su žaibu kai kraunasi, be žaibo kai iškrauna/rimsta; lygis pagal SOC (10 % žingsniu)
               - type: custom:button-card
                 entity: sensor.solis_s6_eh3p_battery_power_net
+                update_timer: 5s
+                extra_styles: |
+                  @keyframes se-battery-pulse { 50% { opacity: .4; } }
+                  @media (prefers-reduced-motion: reduce) { #icon { animation: none !important; } }
                 size: 24px
                 show_state: true
                 name: |
@@ -171,7 +175,8 @@ views:
                   [[[
                     var p = parseFloat(entity.state);
                     var s = states['sensor.solis_s6_eh3p_battery_soc'];
-                    var soc = s ? parseFloat(s.state) : 0;
+                    var soc = s ? parseFloat(s.state) : NaN;
+                    if (!Number.isFinite(soc)) return 'mdi:battery-unknown';
                     var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
                     // Kraunasi → su žaibu; kitaip → paprasta baterija pagal SOC.
                     if (p < -20) return lvl <= 0 ? 'mdi:battery-charging-outline' : 'mdi:battery-charging-' + lvl;
@@ -191,6 +196,14 @@ views:
                     - font-size: 1em
                     - color: var(--primary-text-color)
                   icon:
+                    - animation: |
+                        [[[
+                          const at = Date.parse(states['sensor.solis_s6_eh3p_last_modbus_success']?.state);
+                          const age = Date.now() - at;
+                          const moving = Math.abs(Number(entity?.state)) > 20;
+                          return Number.isFinite(at) && age >= -60000 && age < 180000 && moving
+                            ? 'se-battery-pulse 1.8s ease-in-out infinite' : 'none';
+                        ]]]
                     - color: |
                         [[[
                           var p = parseFloat(entity.state);
@@ -254,43 +267,88 @@ views:
 
           - type: entities
             show_header_toggle: false
-            title: Automacijos būsena
+            state_color: true
+            title: Centrinis valdymo branduolys
             entities:
-              - entity: sensor.energy_manager_status
-                name: Režimas
+              - entity: sensor.solis_plan
+                name: Atominis planas
                 secondary_info: last-changed
-              - entity: sensor.energy_manager_decision
-                name: Paskutinis sprendimas
-                secondary_info: last-changed
+              - type: attribute
+                entity: sensor.solis_planner_health
+                attribute: reason
+                name: Dabartinio sprendimo priežastis
+                icon: mdi:text-box-check-outline
+              - type: attribute
+                entity: sensor.solis_plan
+                attribute: target_soc
+                name: Tikslinis SOC
+                suffix: " %"
+                icon: mdi:bullseye-arrow
+              - type: attribute
+                entity: sensor.solis_plan
+                attribute: slot_active
+                name: Iškrovimo slotas
+                icon: mdi:battery-arrow-down
+              - type: attribute
+                entity: sensor.solis_plan
+                attribute: slot_cutoff_soc
+                name: Sloto cut-off SOC
+                suffix: " %"
+                icon: mdi:battery-lock
+              - type: attribute
+                entity: sensor.solis_plan
+                attribute: inverter_on
+                name: Pageidaujamas inverterio maitinimas
+                icon: mdi:power
+              - entity: sensor.solis_planner_health
+                name: Planner sveikata
+                secondary_info: last-updated
+              - entity: sensor.solis_executor_health
+                name: Executor grįžtamasis ryšys
+                secondary_info: last-updated
+              - entity: automation.solis_planas_bazinio_rezimo_vykdymas
+                name: Fizinio plano vykdytojas
+                secondary_info: last-triggered
               - entity: sensor.energy_manager_boiler_status
-                name: Boilerio valdymas
-              # Audros/ESO režimo jungiklis perkeltas į bendrą „Audros / ESO
-              # rezervas" kortelę (2026-07-18) — nebedubliuojamas čia.
+                name: Boilerio periferija
               - entity: input_select.energy_season
                 name: Sezonas
 
-          # Dinaminis nakties planas — AppDaemon regeneruoja kas 5 min.
+          - type: markdown
+            title: Valdymo grandinė
+            content: >
+              **Telemetrija + prognozės + vartojimas** → **bendras Planner**
+              → **atominis planas** → **HA Executor** → **Solis registrai**.
+
+              **Executor health** kas minutę palygina norą su faktu. Jei registras
+              nepriėmė komandos, būsena tampa `degraded`, o vykdytojas bando
+              susitaikyti iš naujo; periodinis 10 min patikrinimas lieka atsarga.
+
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.solis_executor_health
+                state_not: "ok"
+            card:
+              type: markdown
+              title: Vykdymo neatitikimas
+              content: >
+                Būsena: **{{ states('sensor.solis_executor_health') }}**  
+                Neatitikimai:
+                **{{ state_attr('sensor.solis_executor_health', 'mismatches') | default([], true) }}**
+
+          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager.py):
+          # kada apsimoka išjungti inverterį ir kada jį vėl įjungti ryte.
           - type: markdown
             title: Naktinis planas 💤
             content: >
-              **Fazė: {{ states('sensor.energy_manager_night_plan') }}**
-              {% set trusted = state_attr('sensor.energy_manager_night_plan', 'trusted') %}
-              {{ '✅ patikimas' if trusted else '⚠️ nepatikimas / HOLD' }}
+              **{{ states('sensor.inverter_night_economics') }}**
 
-              - SOC: **{{ state_attr('sensor.energy_manager_night_plan', 'soc') | default('—', true) }}%**
-                → target **{{ state_attr('sensor.energy_manager_night_plan', 'target_soc') | default('—', true) }}%**
-                · sleep **{{ state_attr('sensor.energy_manager_night_plan', 'sleep_soc') | default('—', true) }}%**
-              - Dar reikia pašalinti: **{{ state_attr('sensor.energy_manager_night_plan', 'energy_remaining_kwh') | default('—', true) }} kWh**
-              - Finalinio lango startas:
-                **{{ as_datetime(state_attr('sensor.energy_manager_night_plan', 'dawn_start')) | as_local | string if state_attr('sensor.energy_manager_night_plan', 'dawn_start') else '—' }}**
-              - **Tikslus inverterio ON (PV ≥100 W):**
-                **{{ states('sensor.inverter_morning_on_time_precise') | as_timestamp(none) | timestamp_custom('%H:%M', true, '—') }}**
-              - Horizon plano senas ryto orientyras (diagnostika):
-                {{ as_datetime(state_attr('sensor.energy_manager_night_plan', 'morning_on')) | as_local | string if state_attr('sensor.energy_manager_night_plan', 'morning_on') else '—' }}
-              - Plano priežastis: {{ state_attr('sensor.energy_manager_night_plan', 'reason') | default('—', true) }}
-              - Atnaujinta: {{ state_attr('sensor.energy_manager_night_plan', 'generated_at') | default('—', true) }}
-
-              **Ekonomika:** {{ states('sensor.inverter_night_economics') }}
+              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
+                išjungtas: **{{ (state_attr('sensor.inverter_night_economics', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
+              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics', 'baterijos_kwh_verte') }}
+              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta') }}**
+              - Ryto įjungimas (Solcast >100 W): **{{ state_attr('sensor.inverter_morning_on_time', 'laikas') | default('—', true) }}**
 
       # ── 2. VALDYMAS ──────────────────────────────────────────────────
       - type: grid
@@ -327,8 +385,6 @@ views:
             entities:
               - entity: select.solis_s6_eh3p_work_mode
                 name: Darbo režimas
-              - entity: input_boolean.night_inverter_shutdown
-                name: Naktinis išjungimas (idle 130 W → 30 W)
               - entity: switch.solis_s6_eh3p_power_state
                 name: Inverterio maitinimas
 
@@ -453,8 +509,9 @@ views:
                   name: Krovimo slotas (audros rež.)
 
       # ── 3. ESO PASAUGOJIMO BANKAS (kairė kolona po „Dabar" sekcijos) ──
-      # ESO oficialūs įvado duomenys — TIK Modbus elektrinė (obj. 220588,
-      # Šeškinių įvadas); Eimo įvado ESO paskyra dar nepajungta.
+      # ESO oficialūs įvado duomenys — Modbus elektrinė (obj. 220588,
+      # Šeškinių įvadas). Eimo įvadas (obj. 266493) — atskira paskyra,
+      # kortelės Eimo SE skydelyje (packages/eso_eimo.yaml).
       - type: grid
         cards:
           - type: heading
@@ -1122,7 +1179,9 @@ views:
           ### Namų vartojimo profilis
 
           Paros vidurkis **{{ state_attr('sensor.consumption_profile','daily_avg') }} kWh**
-          · duomenų **{{ state_attr('sensor.consumption_profile','data_days') }} d.**
+          · istorijos **{{ state_attr('sensor.consumption_profile','data_days') }} d.**
+          · modeliui naudota **{{ state_attr('sensor.consumption_profile','usable_days') }} d.**
+          · anomalijų **{{ state_attr('sensor.consumption_profile','anomaly_count') | default(0, true) }}**
           · valandinio mokymosi **{{ states('sensor.consumption_profile') }} d.**
       - type: custom:apexcharts-card
         header:
