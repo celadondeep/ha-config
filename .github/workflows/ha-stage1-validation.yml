@@ -9,7 +9,6 @@ on:
       - "scripts/check_eimo_solis_stage1.sh"
       - "scripts/deploy_morning_100w.sh"
       - "scripts/recover_control_plans.sh"
-      - "scripts/deploy_morning_100w.sh"
       - ".agents/skills/home-assistant-admin/**"
       - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
       - "automations.yaml"
@@ -22,6 +21,8 @@ on:
       - "custom_components/solis_cloud_control/**"
       - "scripts/deploy_eimo_solis_stage1.sh"
       - "scripts/check_eimo_solis_stage1.sh"
+      - "scripts/deploy_morning_100w.sh"
+      - "scripts/recover_control_plans.sh"
       - ".agents/skills/home-assistant-admin/**"
       - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
       - "automations.yaml"
@@ -42,7 +43,12 @@ jobs:
 
       - name: Validate Stage-1 Python syntax
         run: |
-          python3 -m py_compile             custom_components/solis_cloud_control/__init__.py             custom_components/solis_cloud_control/coordinator.py             custom_components/solis_cloud_control/entity.py             custom_components/solis_cloud_control/inverters/inverter_factory.py
+          python3 -m py_compile \
+            custom_components/solis_cloud_control/__init__.py \
+            custom_components/solis_cloud_control/api/solis_api.py \
+            custom_components/solis_cloud_control/coordinator.py \
+            custom_components/solis_cloud_control/entity.py \
+            custom_components/solis_cloud_control/inverters/inverter_factory.py
 
       - name: Validate deploy and diagnostic scripts
         run: |
@@ -51,7 +57,7 @@ jobs:
           bash -n scripts/recover_control_plans.sh
           bash -n scripts/deploy_morning_100w.sh
 
-      - name: Verify Eimo recovery is scoped to one inverter
+      - name: Verify Eimo recovery and stability invariants
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -59,6 +65,7 @@ jobs:
           sn = "1033300254190112"
           factory = Path("custom_components/solis_cloud_control/inverters/inverter_factory.py").read_text()
           coordinator = Path("custom_components/solis_cloud_control/coordinator.py").read_text()
+          api = Path("custom_components/solis_cloud_control/api/solis_api.py").read_text()
           init = Path("custom_components/solis_cloud_control/__init__.py").read_text()
           entity = Path("custom_components/solis_cloud_control/entity.py").read_text()
 
@@ -66,17 +73,21 @@ jobs:
           assert sn in coordinator
           assert sn in init
           assert 'tou_v2_mode="43605"' in factory
-          assert "timedelta(minutes=1)" in coordinator
-          assert "timedelta(minutes=5)" in coordinator
+          assert "_EIMO_UPDATE_INTERVAL = timedelta(minutes=5)" in coordinator
+          assert "_EIMO_REQUEST_REFRESH_COOLDOWN_SECONDS = 30" in coordinator
+          assert "_MIN_DEVICE_REQUEST_INTERVAL_SECONDS = 0.75" in api
+          assert "_CONTROL_SETTLE_SECONDS = 2.5" in api
           assert "async_config_entry_first_refresh()" in init
           assert "async_refresh()" in init
           assert "self.coordinator.data is None" in entity
-          print("Eimo-only Stage-1 invariants OK")
+          print("Eimo recovery/stability invariants OK")
           PY
 
       - name: Verify repo skill mirror
         run: |
-          diff -ru             plugins/home-assistant-admin/skills/home-assistant-admin             .agents/skills/home-assistant-admin
+          diff -ru \
+            plugins/home-assistant-admin/skills/home-assistant-admin \
+            .agents/skills/home-assistant-admin
 
       - name: Validate Home Assistant YAML syntax
         run: |
