@@ -44,6 +44,14 @@ class SolisCloudControlApiClient:
     _CONCURRENT_REQUESTS = 1
     _MAX_RETRY_TIME_SECONDS = 30
 
+    # Solis documents 2 req/s for device-control interfaces. In practice Eimo's
+    # device/control channel is less tolerant during daytime command bursts, so
+    # stay well below the published ceiling. Reads are spaced by >=0.75 s and a
+    # successful/failed control reserves a 2.5 s settle window before the next
+    # device-control request is allowed to leave this client.
+    _MIN_DEVICE_REQUEST_INTERVAL_SECONDS = 0.75
+    _CONTROL_SETTLE_SECONDS = 2.5
+
     _RETRY_POLICY = RetryPolicy(retryable_exception=SolisCloudControlApiError)
 
     def __init__(
@@ -63,6 +71,7 @@ class SolisCloudControlApiClient:
         self._timeout = timeout
         self._retry_policy = retry_policy
         self._request_semaphore = asyncio.Semaphore(concurrent_requests)
+        self._next_device_request_at = 0.0
 
     async def read(self, inverter_sn: str, cid: int, max_retry_time: float = _MAX_RETRY_TIME_SECONDS) -> str:
         async def read_operation() -> str:
@@ -208,24 +217,55 @@ class SolisCloudControlApiClient:
 
         _LOGGER.debug("API request '%s': %s", endpoint, json.dumps(payload, indent=2))
 
+        loop = asyncio.get_running_loop()
+
         try:
-            async with asyncio.timeout(self._timeout):
-                async with self._request_semaphore:
-                    async with self._session.post(url, headers=headers, json=payload) as response:
-                        if response.status != 200:
-                            error_text = await response.text()
-                            raise SolisCloudControlApiError(error_text, status_code=response.status)
+            async with self._request_semaphore:
+                wait_seconds = max(0.0, self._next_device_request_at - loop.time())
+                if wait_seconds > 0:
+                    _LOGGER.debug("Pacing SolisCloud request '%s' for %.2fs", endpoint, wait_seconds)
+                    await asyncio.sleep(wait_seconds)
 
-                        response_json = await response.json()
+                started_at = loop.time()
+                try:
+                    # Timeout begins only after the request reaches the head of
+                    # the local queue; time deliberately spent pacing requests
+                    # must not consume the HTTP timeout budget.
+                    async with asyncio.timeout(self._timeout):
+                        async with self._session.post(url, headers=headers, json=payload) as response:
+                            if response.status != 200:
+                                error_text = await response.text()
+                                raise SolisCloudControlApiError(error_text, status_code=response.status)
 
-                        _LOGGER.debug("API response: %s", json.dumps(response_json, indent=2))
+                            response_json = await response.json()
 
-                        code = response_json.get("code", "Unknown code")
-                        if str(code) != "0":
-                            error_msg = response_json.get("msg", "Unknown error")
-                            raise SolisCloudControlApiError(f"API operation failed: {error_msg}", response_code=code)
+                            _LOGGER.debug("API response: %s", json.dumps(response_json, indent=2))
 
-                        return response_json.get("data")
+                            code = response_json.get("code", "Unknown code")
+                            if str(code) != "0":
+                                error_msg = response_json.get("msg", "Unknown error")
+                                raise SolisCloudControlApiError(
+                                    f"API operation failed: {error_msg}", response_code=code
+                                )
+
+                            return response_json.get("data")
+                finally:
+                    elapsed = loop.time() - started_at
+                    settle = (
+                        self._CONTROL_SETTLE_SECONDS
+                        if endpoint == self._CONTROL_ENDPOINT
+                        else self._MIN_DEVICE_REQUEST_INTERVAL_SECONDS
+                    )
+                    self._next_device_request_at = max(
+                        self._next_device_request_at,
+                        loop.time() + settle,
+                    )
+                    if endpoint == self._CONTROL_ENDPOINT:
+                        _LOGGER.info(
+                            "SolisCloud control request finished in %.2fs; next device request after %.2fs settle",
+                            elapsed,
+                            settle,
+                        )
         except TimeoutError as err:
             raise SolisCloudControlApiError(f"Timeout accessing {url}") from err
         except aiohttp.ClientError as err:
