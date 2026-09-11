@@ -11,15 +11,29 @@ if [[ ! -d "$CONFIG_DIR/.git" ]]; then
   exit 1
 fi
 
+# Stage-1 recovery + 2026-09-11 daytime cloud stability layer.
 FILES=(
   "custom_components/solis_cloud_control/__init__.py"
+  "custom_components/solis_cloud_control/api/solis_api.py"
   "custom_components/solis_cloud_control/coordinator.py"
   "custom_components/solis_cloud_control/entity.py"
   "custom_components/solis_cloud_control/inverters/inverter_factory.py"
+  "custom_components/solis_cloud_control/utils/retry_policy.py"
 )
 
 ACTION="${1:-apply}"
 BACKUP_ROOT="$CONFIG_DIR/.eimo_stage1_backup"
+
+compile_files() {
+  local root="$1"
+  python3 -m py_compile \
+    "$root/custom_components/solis_cloud_control/__init__.py" \
+    "$root/custom_components/solis_cloud_control/api/solis_api.py" \
+    "$root/custom_components/solis_cloud_control/coordinator.py" \
+    "$root/custom_components/solis_cloud_control/entity.py" \
+    "$root/custom_components/solis_cloud_control/inverters/inverter_factory.py" \
+    "$root/custom_components/solis_cloud_control/utils/retry_policy.py"
+}
 
 apply_stage1() {
   local ts backup_dir stage_dir
@@ -28,35 +42,43 @@ apply_stage1() {
   stage_dir="$(mktemp -d)"
   trap 'rm -rf "$stage_dir"' RETURN
 
-  echo "[1/6] Fetching origin/main..."
+  echo "[1/7] Fetching origin/main..."
   git -C "$CONFIG_DIR" fetch origin main
 
-  echo "[2/6] Staging exact Stage-1 files from origin/main..."
+  echo "[2/7] Staging exact Eimo recovery/stability files from origin/main..."
   for rel in "${FILES[@]}"; do
     mkdir -p "$stage_dir/$(dirname "$rel")"
     git -C "$CONFIG_DIR" show "origin/main:$rel" > "$stage_dir/$rel"
   done
 
-  echo "[3/6] Python syntax validation..."
-  python3 -m py_compile     "$stage_dir/custom_components/solis_cloud_control/__init__.py"     "$stage_dir/custom_components/solis_cloud_control/coordinator.py"     "$stage_dir/custom_components/solis_cloud_control/entity.py"     "$stage_dir/custom_components/solis_cloud_control/inverters/inverter_factory.py"
+  echo "[3/7] Python syntax validation..."
+  compile_files "$stage_dir"
 
-  echo "[4/6] Backing up current live files to $backup_dir ..."
+  echo "[4/7] Verifying stability markers..."
+  grep -q '_EIMO_UPDATE_INTERVAL = timedelta(minutes=5)' "$stage_dir/custom_components/solis_cloud_control/coordinator.py"
+  grep -q '_EIMO_REQUEST_REFRESH_COOLDOWN_SECONDS = 30' "$stage_dir/custom_components/solis_cloud_control/coordinator.py"
+  grep -q '_MIN_DEVICE_REQUEST_INTERVAL_SECONDS = 0.75' "$stage_dir/custom_components/solis_cloud_control/api/solis_api.py"
+  grep -q '_CONTROL_SETTLE_SECONDS = 2.5' "$stage_dir/custom_components/solis_cloud_control/api/solis_api.py"
+  grep -q 'non_retryable_response_codes={"B0072"}' "$stage_dir/custom_components/solis_cloud_control/api/solis_api.py"
+  grep -q 'control skipped (already confirmed)' "$stage_dir/custom_components/solis_cloud_control/coordinator.py"
+
+  echo "[5/7] Backing up current live files to $backup_dir ..."
   for rel in "${FILES[@]}"; do
     mkdir -p "$backup_dir/$(dirname "$rel")"
     cp -a "$CONFIG_DIR/$rel" "$backup_dir/$rel"
   done
   printf '%s\n' "$ts" > "$BACKUP_ROOT/LATEST"
 
-  echo "[5/6] Installing Stage-1 files..."
+  echo "[6/7] Installing Eimo recovery/stability files..."
   for rel in "${FILES[@]}"; do
     cp -a "$stage_dir/$rel" "$CONFIG_DIR/$rel"
   done
   find "$CONFIG_DIR/custom_components/solis_cloud_control" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
-  echo "[6/6] Verifying installed files..."
-  python3 -m py_compile     "$CONFIG_DIR/custom_components/solis_cloud_control/__init__.py"     "$CONFIG_DIR/custom_components/solis_cloud_control/coordinator.py"     "$CONFIG_DIR/custom_components/solis_cloud_control/entity.py"     "$CONFIG_DIR/custom_components/solis_cloud_control/inverters/inverter_factory.py"
+  echo "[7/7] Verifying installed files..."
+  compile_files "$CONFIG_DIR"
 
-  echo "Stage-1 installed successfully."
+  echo "Eimo recovery/stability layer installed successfully."
   echo "Backup: $backup_dir"
 
   if command -v ha >/dev/null 2>&1; then
@@ -91,7 +113,7 @@ rollback_stage1() {
     cp -a "$backup_dir/$rel" "$CONFIG_DIR/$rel"
   done
 
-  python3 -m py_compile     "$CONFIG_DIR/custom_components/solis_cloud_control/__init__.py"     "$CONFIG_DIR/custom_components/solis_cloud_control/coordinator.py"     "$CONFIG_DIR/custom_components/solis_cloud_control/entity.py"     "$CONFIG_DIR/custom_components/solis_cloud_control/inverters/inverter_factory.py"
+  compile_files "$CONFIG_DIR"
 
   find "$CONFIG_DIR/custom_components/solis_cloud_control" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
