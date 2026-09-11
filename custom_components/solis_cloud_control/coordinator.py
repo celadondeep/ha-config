@@ -67,6 +67,7 @@ class SolisCloudControlCoordinator(DataUpdateCoordinator[SolisCloudControlData])
         )
         self._api_client = api_client
         self._inverter = inverter
+        self._is_eimo = is_eimo
         self._batch_retry_seconds = (
             _EIMO_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS
             if is_eimo
@@ -107,6 +108,23 @@ class SolisCloudControlCoordinator(DataUpdateCoordinator[SolisCloudControlData])
         old_value: str | None = None,
     ) -> None:
         inverter_sn = self._inverter.info.serial_number
+
+        # Eimo-only traffic suppression: many HA automation branches request a
+        # complete slot configuration even when only one field really changed.
+        # If our last confirmed cloud value already equals the requested value,
+        # do not spend a /control call. This keeps YAML simple while collapsing
+        # common 4-5 write bursts to the actual changed CIDs only.
+        if self._is_eimo and self.data is not None:
+            confirmed_value = self.data.get(cid)
+            if confirmed_value is not None and str(confirmed_value) == str(value):
+                _LOGGER.info(
+                    "SolisCloud control skipped (already confirmed) SN=%s CID=%s value=%s",
+                    inverter_sn,
+                    cid,
+                    value,
+                )
+                return
+
         _LOGGER.info("SolisCloud control SN=%s CID=%s value=%s", inverter_sn, cid, value)
 
         try:
