@@ -1,2 +1,5 @@
-Eimo SolisCloud Stage-1 one-time live deployment requested on 2026-09-09.
-Run scripts/deploy_eimo_solis_stage1.sh apply, verify with scripts/check_eimo_solis_stage1.sh, then delete this marker only after successful live verification.
+Eimo SolisCloud recovery + daytime stability live deployment requested.
+Run scripts/deploy_eimo_solis_stage1.sh apply.
+Then run scripts/check_eimo_solis_stage1.sh and, after daytime operation, scripts/analyze_eimo_cloud_log.py against HA Core logs.
+Success criteria: cached-profile Stage-1 active; atReadBatch about every 5 min; redundant controls skipped; request pacing active; B0072 not hammered by rapid retry; HA values change only after confirmed control.
+Delete this marker only after successful live verification.
