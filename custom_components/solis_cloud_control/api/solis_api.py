@@ -52,7 +52,13 @@ class SolisCloudControlApiClient:
     _MIN_DEVICE_REQUEST_INTERVAL_SECONDS = 0.75
     _CONTROL_SETTLE_SECONDS = 2.5
 
-    _RETRY_POLICY = RetryPolicy(retryable_exception=SolisCloudControlApiError)
+    # B0072 means the device-side control channel reports the inverter offline.
+    # Immediate 1/2/4/8-second retries only add traffic while the cloud/device
+    # channel is in that state. Let the normal coordinator cycle recover later.
+    _RETRY_POLICY = RetryPolicy(
+        retryable_exception=SolisCloudControlApiError,
+        non_retryable_response_codes={"B0072"},
+    )
 
     def __init__(
         self,
