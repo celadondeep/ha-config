@@ -14,9 +14,17 @@ _LOGGER = logging.getLogger(__name__)
 _COORDINATOR_NAME = "Solis Cloud Control"
 
 _DEFAULT_UPDATE_INTERVAL = timedelta(minutes=5)
-_EIMO_UPDATE_INTERVAL = timedelta(minutes=1)
+# SolisCloud device telemetry is refreshed on a ~5 minute cadence. Polling Eimo
+# every minute created 5x control-channel traffic without reliably newer data and
+# overlapped with daytime write bursts. Keep periodic polling aligned with the
+# cloud/device refresh cadence; explicit post-control refresh remains available.
+_EIMO_UPDATE_INTERVAL = timedelta(minutes=5)
 
-_REQUEST_REFRESH_COOLDOWN_SECONDS = 10
+_DEFAULT_REQUEST_REFRESH_COOLDOWN_SECONDS = 10
+# Eimo cloud is noticeably more fragile during daytime control activity. Multiple
+# entity writes are issued as separate /control requests, so coalesce their
+# confirmation read into one delayed refresh after the write burst has settled.
+_EIMO_REQUEST_REFRESH_COOLDOWN_SECONDS = 30
 
 _DEFAULT_UPDATE_BATCH_DATA_MAX_RETRY_TIME_SECONDS = 180
 _DEFAULT_UPDATE_DATA_MAX_RETRY_TIME_SECONDS = 60
@@ -49,7 +57,11 @@ class SolisCloudControlCoordinator(DataUpdateCoordinator[SolisCloudControlData])
             request_refresh_debouncer=Debouncer(
                 hass,
                 _LOGGER,
-                cooldown=_REQUEST_REFRESH_COOLDOWN_SECONDS,
+                cooldown=(
+                    _EIMO_REQUEST_REFRESH_COOLDOWN_SECONDS
+                    if is_eimo
+                    else _DEFAULT_REQUEST_REFRESH_COOLDOWN_SECONDS
+                ),
                 immediate=False,
             ),
         )
@@ -101,6 +113,10 @@ class SolisCloudControlCoordinator(DataUpdateCoordinator[SolisCloudControlData])
 
         try:
             inverter_sn = self._inverter.info.serial_number
+            _LOGGER.info("SolisCloud control SN=%s CID=%s value=%s", inverter_sn, cid, value)
             await self._api_client.control(inverter_sn, cid, value, old_value)
         finally:
+            # Debounced. For Eimo this is intentionally delayed 30 s so a group
+            # of related slot writes produces one confirmation read instead of
+            # read-after-every-write traffic.
             await self.async_request_refresh()
