@@ -7,6 +7,7 @@ on:
       - "custom_components/solis_cloud_control/**"
       - "scripts/deploy_eimo_solis_stage1.sh"
       - "scripts/check_eimo_solis_stage1.sh"
+      - "scripts/analyze_eimo_cloud_log.py"
       - "scripts/deploy_morning_100w.sh"
       - "scripts/recover_control_plans.sh"
       - ".agents/skills/home-assistant-admin/**"
@@ -21,6 +22,7 @@ on:
       - "custom_components/solis_cloud_control/**"
       - "scripts/deploy_eimo_solis_stage1.sh"
       - "scripts/check_eimo_solis_stage1.sh"
+      - "scripts/analyze_eimo_cloud_log.py"
       - "scripts/deploy_morning_100w.sh"
       - "scripts/recover_control_plans.sh"
       - ".agents/skills/home-assistant-admin/**"
@@ -48,7 +50,9 @@ jobs:
             custom_components/solis_cloud_control/api/solis_api.py \
             custom_components/solis_cloud_control/coordinator.py \
             custom_components/solis_cloud_control/entity.py \
-            custom_components/solis_cloud_control/inverters/inverter_factory.py
+            custom_components/solis_cloud_control/inverters/inverter_factory.py \
+            custom_components/solis_cloud_control/utils/retry_policy.py \
+            scripts/analyze_eimo_cloud_log.py
 
       - name: Validate deploy and diagnostic scripts
         run: |
@@ -66,6 +70,7 @@ jobs:
           factory = Path("custom_components/solis_cloud_control/inverters/inverter_factory.py").read_text()
           coordinator = Path("custom_components/solis_cloud_control/coordinator.py").read_text()
           api = Path("custom_components/solis_cloud_control/api/solis_api.py").read_text()
+          retry = Path("custom_components/solis_cloud_control/utils/retry_policy.py").read_text()
           init = Path("custom_components/solis_cloud_control/__init__.py").read_text()
           entity = Path("custom_components/solis_cloud_control/entity.py").read_text()
 
@@ -75,8 +80,12 @@ jobs:
           assert 'tou_v2_mode="43605"' in factory
           assert "_EIMO_UPDATE_INTERVAL = timedelta(minutes=5)" in coordinator
           assert "_EIMO_REQUEST_REFRESH_COOLDOWN_SECONDS = 30" in coordinator
+          assert "control skipped (already confirmed)" in coordinator
+          assert "keeping last confirmed coordinator value" in coordinator
           assert "_MIN_DEVICE_REQUEST_INTERVAL_SECONDS = 0.75" in api
           assert "_CONTROL_SETTLE_SECONDS = 2.5" in api
+          assert 'non_retryable_response_codes={"B0072"}' in api
+          assert "_non_retryable_response_codes" in retry
           assert "async_config_entry_first_refresh()" in init
           assert "async_refresh()" in init
           assert "self.coordinator.data is None" in entity
