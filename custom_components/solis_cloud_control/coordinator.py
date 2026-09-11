@@ -106,15 +106,27 @@ class SolisCloudControlCoordinator(DataUpdateCoordinator[SolisCloudControlData])
         value: str,
         old_value: str | None = None,
     ) -> None:
-        if self.data:
-            new_data = SolisCloudControlData(self.data)
-            new_data[cid] = value
-            self.async_set_updated_data(new_data)
+        inverter_sn = self._inverter.info.serial_number
+        _LOGGER.info("SolisCloud control SN=%s CID=%s value=%s", inverter_sn, cid, value)
 
         try:
-            inverter_sn = self._inverter.info.serial_number
-            _LOGGER.info("SolisCloud control SN=%s CID=%s value=%s", inverter_sn, cid, value)
+            # Do not publish the requested value before Solis confirms the
+            # command. Previously a B0072/timeout could leave HA showing the
+            # desired state even though the inverter never accepted it.
             await self._api_client.control(inverter_sn, cid, value, old_value)
+
+            if self.data:
+                new_data = SolisCloudControlData(self.data)
+                new_data[cid] = value
+                self.async_set_updated_data(new_data)
+        except SolisCloudControlApiError:
+            _LOGGER.warning(
+                "SolisCloud control NOT confirmed SN=%s CID=%s value=%s; keeping last confirmed coordinator value",
+                inverter_sn,
+                cid,
+                value,
+            )
+            raise
         finally:
             # Debounced. For Eimo this is intentionally delayed 30 s so a group
             # of related slot writes produces one confirmation read instead of
