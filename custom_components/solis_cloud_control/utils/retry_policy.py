@@ -23,12 +23,14 @@ class RetryPolicy:
         delay_multiplier: float = 2.0,
         monotonic_time: MonotonicTimeProvider = time.monotonic,
         sleep: SleepFunction = asyncio.sleep,
+        non_retryable_response_codes: frozenset[str] | set[str] | None = None,
     ) -> None:
         self._initial_delay_seconds = initial_delay_seconds
         self._delay_multiplier = delay_multiplier
         self._retryable_exception = retryable_exception
         self._monotonic_time = monotonic_time
         self._sleep = sleep
+        self._non_retryable_response_codes = frozenset(non_retryable_response_codes or ())
 
     async def __call__(
         self,
@@ -44,6 +46,15 @@ class RetryPolicy:
             try:
                 return await operation_closure()
             except self._retryable_exception as err:
+                response_code = getattr(err, "response_code", None)
+                if response_code is not None and str(response_code) in self._non_retryable_response_codes:
+                    _LOGGER.warning(
+                        "Not retrying API response code %s; leave recovery to the next scheduled cycle: %s",
+                        response_code,
+                        str(err),
+                    )
+                    raise err
+
                 elapsed_time = self._monotonic_time() - start_time
 
                 if elapsed_time >= max_retry_time:
