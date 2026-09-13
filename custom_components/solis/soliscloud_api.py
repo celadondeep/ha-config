@@ -446,11 +446,18 @@ class SoliscloudAPI(BaseAPI):
         if self.is_online:
             if self._inverter_list is not None and inverter_serial in self._inverter_list:
                 device_id = self._inverter_list[inverter_serial]
+                dynamic = self.health.dynamic_telemetry
+                if dynamic and self.health.delay(self.health.TELEMETRY, {"sn": inverter_serial}):
+                    return None
+                extra = dynamic and self.health.telemetry_schedule(inverter_serial).phase == "late_retry"
                 # Throttle http calls to avoid 502 error
                 await asyncio.sleep(1)
                 payload = await self._get_inverter_details(device_id, inverter_serial)
-                await asyncio.sleep(1)
-                payload_detail = await self._get_station_details(self.config.plant_id)
+                payload_detail = None
+                if not dynamic or (payload is not None and not extra and not
+                        self.health.delay("/v1/api/stationDetail", {"id": self.config.plant_id})):
+                    await asyncio.sleep(1)
+                    payload_detail = await self._get_station_details(self.config.plant_id)
                 if payload is not None:
                     self._inverter_models[inverter_serial] = str(payload.get("data", {}).get("model", ""))
                     self.health.telemetry(payload.get("data", {}).get("dataTimestamp"))
@@ -834,7 +841,9 @@ class SoliscloudAPI(BaseAPI):
                 detail = f"HTTP {result.get(STATUS_CODE)}; API {content.get('code') if isinstance(content, dict) else 'none'}"
                 if not ok and result.get(SUCCESS):
                     detail += "; rejected or incomplete protocol response"
-                self.health.finish(canonicalized_resource, params, ok, detail)
+                data = content.get("data") if isinstance(content, dict) else None
+                self.health.finish(canonicalized_resource, params, ok, detail,
+                    timestamp=data.get("dataTimestamp") if isinstance(data, dict) else None)
                 return result
             except asyncio.CancelledError:
                 self.health.finish(canonicalized_resource, params, False, cancelled=True)

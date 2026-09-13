@@ -190,6 +190,7 @@ class InverterService:
             if self._stopped:
                 return
             if self._discovery_callback and self._discovery_cookie:
+                self._last_updated = datetime.now()
                 self._discovery_callback(capabilities, self._discovery_cookie)
             self._retry_delay_seconds = 0
             self._discovery_complete = True
@@ -265,7 +266,7 @@ class InverterService:
         else:
             self._subscriptions[serial][attribute].append(subscriber)
 
-    async def update_devices(self, data: GinlongData) -> None:
+    async def update_devices(self, data: GinlongData, only=None) -> None:
         """Update all registered sensors."""
         if self._stopped:
             return
@@ -314,7 +315,8 @@ class InverterService:
                                     # SC sometimes produces zeros in the evening, ignore
                                     continue
                 for subscriber in self._subscriptions[serial][attribute]:
-                    subscriber.data_updated(value, self.last_updated)
+                    if only is None or subscriber is only:
+                        subscriber.data_updated(value, self.last_updated)
 
     async def async_update(self, *_) -> None:
         if self._stopped or self._cycle_lock.locked():
@@ -327,6 +329,9 @@ class InverterService:
                 await self._run_update()
         except Exception:
             _LOGGER.exception("Update failed; preserving the scheduled recovery cycle")
+            if self.confirmed_hub and self._api.health.dynamic_telemetry:
+                for serial in self._api.inverters or ():
+                    self._api.health.telemetry_schedule(serial).failed(300)
             self.schedule_update(timedelta(seconds=self._schedule_nok))
         finally:
             self._active_tasks.discard(task)
@@ -334,6 +339,7 @@ class InverterService:
     async def _run_update(self) -> None:
         """Update the data from Ginlong portal."""
         update = timedelta(seconds=self._schedule_nok)
+        only_extra = bool(self.confirmed_hub and self._api.health.dynamic_telemetry)
         # Login using username and password, but only every HRS_BETWEEN_LOGIN hours
         if await self._login():
             inverters = self._api.inverters
@@ -341,6 +347,11 @@ class InverterService:
                 self.schedule_update(update)
                 return
             for inverter_serial in inverters:
+                if self.confirmed_hub and self._api.health.dynamic_telemetry:
+                    if self._api.health.delay(self._api.health.TELEMETRY, {"sn": inverter_serial}):
+                        continue
+                    if self._api.health.telemetry_schedule(inverter_serial).phase != "late_retry":
+                        only_extra = False
                 data = await self._api.fetch_inverter_data(inverter_serial)
                 if self._stopped:
                     return
@@ -364,7 +375,7 @@ class InverterService:
                     # Keep known device metadata through transient read failures.
                     # Rediscovery adds traffic without repairing the network.
 
-        if self.confirmed_hub and not self._stopped:
+        if self.confirmed_hub and not self._stopped and not only_extra:
             await self.confirmed_hub.refresh_all()
         self.schedule_update(update)
 
@@ -380,7 +391,12 @@ class InverterService:
         if self._stopped:
             return
         if self.confirmed_hub:
-            td = max(td, timedelta(seconds=max(300, self._api.health.delay())))
+            if self._api.health.dynamic_telemetry and self._api.inverters:
+                td = timedelta(seconds=max(1, min(
+                    self._api.health.delay(self._api.health.TELEMETRY, {"sn": serial})
+                    for serial in self._api.inverters)))
+            else:
+                td = max(td, timedelta(seconds=max(300, self._api.health.delay())))
             self.confirmed_hub.changed()
         self._cancel_timer("_cancel_update")
         nxt = dt_util.utcnow() + td

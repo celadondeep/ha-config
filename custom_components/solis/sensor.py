@@ -176,6 +176,7 @@ class SolisSensor(ServiceSubscriber, SensorEntity):
         # Initialize the sensor.
         self._measured: datetime | None = None
         self._entity_type = "sensor"
+        self._service = ginlong_service
         self._attributes = dict(EMPTY_ATTR)
         self._attributes[SERIAL] = inverter_sn
         self._attributes[API_NAME] = ginlong_service.api_name
@@ -190,6 +191,15 @@ class SolisSensor(ServiceSubscriber, SensorEntity):
         self._attr_state_class = SENSOR_TYPES[sensor_type][4]
         self._attr_unique_id = f"{inverter_sn}{self._name}".replace(" ", "_")
         ginlong_service.subscribe(self, inverter_sn, SENSOR_TYPES[sensor_type][5])
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        if self._service.confirmed_hub:
+            cached = self._service.api._latest_inverter_data.get(self._attributes[SERIAL])
+            if cached is not None:
+                # Discovery already paid for this response. Publish locally;
+                # do not wait for or initiate another five-minute cloud cycle.
+                await self._service.update_devices(cached, only=self)
 
     def do_update(self, value: Any, last_updated: datetime) -> bool:
         """Update the sensor."""

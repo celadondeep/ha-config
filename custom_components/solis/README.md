@@ -1,20 +1,24 @@
-# Eimo Solis Inverter 4.2.1
+# Eimo Solis Inverter 4.3.0
 
 Site-specific extension of hultenvp/solis-sensor 4.0.1 (Apache-2.0), based
 on commit `6e360a073b8276bfa3140f003e9c0eeb3d10f63c`.
 
 The `single_slot_control` configuration option replaces the upstream control
 entities with confirmed controls and one charge/discharge slot. Telemetry
-and controls share one HTTP client, a 300-second read budget and adaptive
+and controls share one HTTP client, bounded read budgets and adaptive
 300/600/1200-second error recovery. Every physical write waits at least
 360 seconds and a later matching register read before another write.
 An accepted API response is never presented as a confirmed device state.
 
-Version 4.2.1 also enforces 300 seconds of network silence after startup or
-reload. Reading is scheduled from response completion, not from telemetry
-timestamps or fixed clock-aligned five-minute frames. Early, delayed and
-repeated telemetry cannot open or move those request deadlines. Confirmation
-reads also honor the monotonic write-settling deadline.
+Version 4.3.0 keeps 300 seconds of network silence after startup/reload.
+Inverter telemetry is aligned to the source timestamp plus its learned
+roughly 300-second cadence and a 15–90-second margin. A successful response
+with old data permits one extra telemetry-only read after 60 seconds, then
+returns to the normal cadence. Hard limit: two telemetry requests in any
+rolling 300 seconds, at least 60 seconds apart. Errors never get fast probes.
+Station/register reads keep a 300-second completion-to-start budget;
+confirmation reads also honor the monotonic write-settling deadline.
+Discovery data is published locally without waiting for a second cloud cycle.
 
 The Eimo model 3330 uses the readable CID 5162 ON/OFF variant and a
 100-watt unit for CID 499. These model-specific choices have live evidence;

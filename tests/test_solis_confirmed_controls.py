@@ -560,5 +560,192 @@ class RecoveryBudget(unittest.TestCase):
         self.h.begin(self.endpoint, self.params)
 
 
+class DynamicTelemetry(unittest.TestCase):
+    def setUp(self):
+        self.now = 10000.0
+        self.wall = 1700000000.0
+        self.h = Health(lambda: self.now, lambda: self.wall)
+        self.h.dynamic_telemetry = True
+        self.endpoint, self.params = self.h.TELEMETRY, {"sn": "test"}
+        self.plan = self.h.telemetry_schedule("test")
+
+    def advance(self, seconds):
+        self.now += seconds
+        self.wall += seconds
+
+    def read(self, source, success=True):
+        self.h.begin(self.endpoint, self.params)
+        self.h.finish(self.endpoint, self.params, success, timestamp=source)
+
+    def test_align_to_source_not_request_completion(self):
+        self.read(self.wall-45)
+        self.assertEqual(self.h.delay(self.endpoint, self.params), 270)
+        self.advance(30)  # Slow station/register reads do not add another 300 s.
+        self.assertEqual(self.h.delay(self.endpoint, self.params), 240)
+
+    def test_successful_old_data_gets_one_extra_read(self):
+        source = self.wall-15
+        self.read(source)
+        self.advance(300)
+        self.read(source)
+        self.assertEqual(self.plan.phase, "late_retry")
+        self.assertEqual(self.plan.delay(), 60)
+        self.advance(60)
+        self.read(source)
+        self.assertEqual(self.plan.extra_reads, 1)
+        self.assertEqual(self.plan.phase, "scheduled")
+        self.assertGreater(self.plan.delay(), 60)
+
+    def test_late_arrival_reanchors_without_another_five_minutes(self):
+        source = self.wall-15
+        self.read(source)
+        self.advance(300)
+        self.read(source)
+        self.advance(60)
+        self.read(source+300)
+        self.assertEqual(self.plan.period, 300)
+        self.assertEqual(self.plan.margin, 30)
+        self.assertEqual(self.plan.delay(), 255)
+
+    def test_first_new_but_already_late_sample_has_only_one_probe(self):
+        self.read(self.wall-400)
+        self.assertEqual(self.plan.delay(), 60)
+        self.advance(60)
+        self.read(self.wall-400)
+        self.assertEqual(self.plan.phase, "scheduled")
+
+    def test_early_source_reanchors_but_does_not_learn_246_second_period(self):
+        source = self.wall-15
+        self.read(source)
+        self.advance(300)
+        self.read(source+246.5)
+        self.assertEqual(self.plan.period, 300)
+        self.assertEqual(self.plan.source, source+246.5)
+        self.assertEqual(self.plan.delay(), 246.5)
+
+    def test_skipped_sample_does_not_learn_ten_minute_period(self):
+        self.plan.observe(self.wall-615)
+        self.plan.observe(self.wall-15)
+        self.assertEqual(self.plan.period, 300)
+
+    def test_error_cancels_fast_probe_and_uses_backoff(self):
+        source = self.wall-15
+        self.read(source)
+        self.advance(300)
+        self.read(source)
+        self.h.begin('/v2/api/atReadBatch', self.params)
+        self.h.finish('/v2/api/atReadBatch', self.params, False)
+        self.assertEqual(self.plan.phase, 'error_wait')
+        self.assertEqual(self.plan.delay(), 300)
+        self.advance(60)
+        with self.assertRaises(CloudDeferred):
+            self.read(source)
+
+    def test_rolling_budget_blocks_bursts_even_if_scheduler_misbehaves(self):
+        for i in range(2):
+            self.plan.deadline = 0
+            self.read(self.wall-10)
+            self.advance(60)
+        self.plan.deadline = 0
+        for _ in range(100):
+            with self.assertRaises(CloudDeferred):
+                self.read(self.wall-10)
+        self.assertEqual(self.h.requests, 2)
+        self.assertEqual(self.h.delay(self.endpoint, self.params), 180)
+
+    def test_other_reads_and_writes_keep_original_budgets(self):
+        for path, interval in [('/v1/api/stationDetail',300),('/v2/api/atReadBatch',300),(self.h.CONTROL,360)]:
+            self.h.begin(path, self.params)
+            self.h.finish(path, self.params, True)
+            self.assertEqual(self.h.delay(path, self.params), interval)
+
+    def test_startup_and_monotonic_gate_survive_wall_clock_jump(self):
+        self.h.hold_startup()
+        self.wall += 86400
+        self.advance(299)
+        with self.assertRaises(CloudDeferred):
+            self.read(self.wall-10)
+        self.advance(1)
+        self.read(self.wall-10)
+        self.wall -= 86400
+        self.assertGreaterEqual(self.h.delay(self.endpoint, self.params), 300)
+
+    def test_invalid_source_never_enters_a_fast_loop(self):
+        for source in [None, float('nan'), -1, self.wall+3600]:
+            self.plan.observe(source)
+            self.assertGreaterEqual(self.plan.delay(), 300)
+
+    def test_out_of_order_source_does_not_rewind_telemetry(self):
+        self.h.telemetry(self.wall)
+        self.h.telemetry(self.wall-500)
+        self.assertEqual(self.h.last_telemetry, self.wall)
+
+    def test_margin_is_bounded_after_many_missing_frames(self):
+        source = self.wall-15
+        self.plan.observe(source)
+        for _ in range(100):
+            self.advance(self.plan.delay())
+            self.plan.observe(source)
+        self.assertLessEqual(self.plan.margin, 90)
+        self.assertGreaterEqual(self.plan.margin, 15)
+
+
+class DynamicPlumbing(unittest.IsolatedAsyncioTestCase):
+    async def test_detail_timestamp_is_forwarded_to_scheduler(self):
+        test = ApiRegressions()
+        await test.asyncSetUp()
+        api = test.api
+        api._single_slot_control = True
+        api.health.dynamic_telemetry = True
+        api._request_lock = asyncio.Lock()
+        api._next_request_at = 0
+        source = time.time()-30
+        api._post_data_json_once = AsyncMock(return_value={"success":True, "content":{"code":"0", "data":{"dataTimestamp":source*1000}}})
+        await api._post_data_json(api.health.TELEMETRY, {"sn":"test"})
+        self.assertAlmostEqual(api.health.telemetry_schedule('test').source, source)
+        self.assertLess(api.health.delay(api.health.TELEMETRY, {"sn":"test"}), 300)
+
+    async def test_extra_probe_does_not_fetch_station_or_controls(self):
+        ns = dict(asyncio=types.SimpleNamespace(sleep=AsyncMock()),
+                  _LOGGER=logging.getLogger('test'), HMI_VERSION_ALL='hmi',
+                  INVERTER_SERIAL='serial', GinlongData=lambda values: values)
+        cls = load_methods('soliscloud_api.py', 'SoliscloudAPI', {'fetch_inverter_data'}, ns)
+        api = cls()
+        api.is_online = True
+        api._inverter_list = {'test':'id'}
+        api._hmi_fb00 = {'test':False}
+        api._inverter_models = {}
+        api._latest_inverter_data = {}
+        api._token = 'test'
+        api._single_slot_control = True
+        api.config = types.SimpleNamespace(plant_id='station')
+        api.health = Health()
+        api.health.dynamic_telemetry = True
+        api.health.telemetry_schedule('test').phase = 'late_retry'
+        api._get_inverter_details = AsyncMock(return_value={'data':{'dataTimestamp':time.time()}})
+        api._get_station_details = AsyncMock()
+        api.get_control_data = AsyncMock()
+        api._collect_inverter_data = lambda payload: api._data.update(serial='test')
+        api._post_process = Mock()
+        await api.fetch_inverter_data('test')
+        api._get_inverter_details.assert_awaited_once()
+        api._get_station_details.assert_not_awaited()
+        api.get_control_data.assert_not_awaited()
+
+    async def test_cached_sensor_publication_updates_only_added_subscriber(self):
+        ns = dict(INVERTER_SERIAL='serial', INVERTER_ACPOWER='ac', INVERTER_STATE='state',
+                  INVERTER_ENERGY_TODAY='energy', datetime=datetime, timedelta=timedelta)
+        cls = load_methods('service.py', 'InverterService', {'update_devices'}, ns)
+        svc = cls()
+        a, b = Mock(), Mock()
+        svc._stopped = False
+        svc.last_updated = datetime.now()
+        svc._subscriptions = {'test':{'soc':[a,b]}}
+        data = types.SimpleNamespace(serial='test', soc=70, keys=lambda:['soc'])
+        await svc.update_devices(data, only=a)
+        a.data_updated.assert_called_once_with(70, svc.last_updated)
+        b.data_updated.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

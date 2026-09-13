@@ -122,6 +122,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if single_slot_control and portal_control:
         from .confirmed_hub import ConfirmedControlHub
         service.api._single_slot_control = True
+        service.api.health.dynamic_telemetry = True
         service.api.health.hold_startup()
         service.confirmed_hub = ConfirmedControlHub(hass, entry, service)
         service._schedule_ok = max(300, refresh_ok)

@@ -5,6 +5,8 @@ from collections import Counter, deque
 from datetime import datetime, timezone
 import time
 
+from .telemetry_schedule import TelemetrySchedule
+
 
 class CloudDeferred(Exception):
     """No HTTP request was sent; a local request budget is still closed."""
@@ -15,6 +17,7 @@ class CloudDeferred(Exception):
 
 
 class CloudHealth:
+    TELEMETRY = "/v1/api/inverterDetail"
     READ_ENDPOINTS = {
         "/v1/api/inverterList", "/v1/api/inverterDetail",
         "/v1/api/stationDetail", "/v2/api/atReadBatch", "/v2/api/atRead",
@@ -37,6 +40,14 @@ class CloudHealth:
         self.last_success = self.last_request = self.last_telemetry = None
         self.last_error = None
         self.in_flight = False
+        self.dynamic_telemetry = False
+        self.telemetry_schedules = {}
+
+    def telemetry_schedule(self, serial):
+        key = str(serial)
+        if key not in self.telemetry_schedules:
+            self.telemetry_schedules[key] = TelemetrySchedule(self.monotonic, self.wall)
+        return self.telemetry_schedules[key]
 
     def hold_startup(self, seconds=300):
         """Prevent a new client from bypassing its predecessor's read budget.
@@ -58,6 +69,15 @@ class CloudHealth:
             interval = 360 if endpoint == self.CONTROL else (300 if endpoint in self.READ_ENDPOINTS else 1)
             if key in self.completed:
                 remaining = max(remaining, self.completed[key] + interval - now)
+            if self.dynamic_telemetry and endpoint == self.TELEMETRY:
+                # Only inverter telemetry may use the dynamic exception.
+                remaining = max(max(self.cooldown_until, self.startup_until) - now,
+                                self.completed.get(key, -1e30) + 60 - now,
+                                self.telemetry_schedule(key[1]).delay())
+                recent = [event[0] for event in self.events
+                          if event[1] == endpoint and event[2] == key[1] and now - event[0] < 300]
+                if len(recent) >= 2:
+                    remaining = max(remaining, recent[-2] + 300 - now)
         return max(0.0, remaining)
 
     def begin(self, endpoint, params):
@@ -72,8 +92,10 @@ class CloudHealth:
         self.last_request = self.wall()
         self.events.append((self.monotonic(), endpoint, self.identity(params)))
         self.in_flight = True
+        if self.dynamic_telemetry and endpoint == self.TELEMETRY:
+            self.telemetry_schedule(self.identity(params)).started()
 
-    def finish(self, endpoint, params, success, error=None, *, cancelled=False):
+    def finish(self, endpoint, params, success, error=None, *, cancelled=False, timestamp=None):
         now = self.monotonic()
         self.completed[(endpoint, self.identity(params))] = now
         self.in_flight = False
@@ -88,6 +110,9 @@ class CloudHealth:
             self.endpoint_failures[(endpoint, self.identity(params))] = 0
             if endpoint in self.READ_ENDPOINTS:
                 self.probing_needed = False
+            if self.dynamic_telemetry and endpoint == self.TELEMETRY:
+                self.telemetry_schedule(self.identity(params)).observe(timestamp)
+                self.telemetry(timestamp)
         else:
             self.failures += 1
             self.consecutive_failures += 1
@@ -99,6 +124,8 @@ class CloudHealth:
             delay = min(1200, 300 * 2 ** min(failures - 1, 2))
             self.cooldown_until = now + delay
             self.last_error = str(error or "request_failed")[:160]
+            for schedule in self.telemetry_schedules.values():
+                schedule.failed(delay)
 
     def write_confirmed(self, serial):
         self.endpoint_failures[(self.CONTROL, str(serial))] = 0
@@ -108,7 +135,7 @@ class CloudHealth:
             value = float(timestamp)
             if value > 1e12:
                 value /= 1000
-            if 0 < value <= self.wall() + 60:
+            if 0 < value <= self.wall() + 60 and (self.last_telemetry is None or value > self.last_telemetry):
                 self.last_telemetry = value
         except (ValueError, TypeError):
             pass
@@ -127,7 +154,7 @@ class CloudHealth:
                  else "recovering" if any(self.endpoint_failures.values()) else "healthy")
         def iso(value):
             return datetime.fromtimestamp(value, timezone.utc).isoformat() if value else None
-        return {
+        result = {
             "state": state,
             "requests_total": self.requests,
             "successes_total": self.successes,
@@ -151,3 +178,18 @@ class CloudHealth:
             "minimum_write_interval": 360,
             "minimum_startup_quiet_interval": 300,
         }
+        if self.dynamic_telemetry:
+            schedule = self.telemetry_schedule(serial)
+            result.update({
+                "telemetry_strategy": "source_aligned",
+                "next_telemetry_request": iso(self.wall() + self.delay(self.TELEMETRY, {"sn": serial})),
+                "telemetry_phase": schedule.phase,
+                "telemetry_period_seconds": round(schedule.period, 2),
+                "telemetry_margin_seconds": schedule.margin,
+                "extra_telemetry_reads_total": schedule.extra_reads,
+                "telemetry_requests_last_5min": sum(now - e[0] < 300 and e[1] == self.TELEMETRY and e[2] == str(serial) for e in recent),
+                "maximum_telemetry_reads_per_5min": 2,
+                "minimum_telemetry_interval": 60,
+                "minimum_register_read_interval": 300,
+            })
+        return result
