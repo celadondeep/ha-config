@@ -92,3 +92,11 @@ Eimo automatinis vykdytojas buvo įjungtas 03:09, 09:03:07 išjungtas,
 o 09:31:52 vėl įjungtas. Pastarųjų dviejų pakeitimų ši kadrų patikra
 nesiuntė. Per 4.2.1 diegimą išsaugota vėliausia gyva nuostata; patikra
 neperrašo lygiagrečiai pakeisto vykdytojo pasirinkimo.
+
+09:46 LT baigiamoji patikra: API `healthy`, eilė `idle`, planuotojas ir
+vykdytojas `ok`, vykdytojas įjungtas, telemetrija šviežia. Aštuonios
+užklausos po paleidimo sėkmingos, nereikalingų valdymo įrašų — 0.
+[GitHub patikros](https://github.com/celadondeep/ha-config/actions/runs/34743489726)
+praėjo: 43 regresijos, Python, YAML, skriptų ir valdymo simuliacijos patikros.
+Integracijos / HA kodas: `2327c56339cb9fa15311896085f100c8a9344771`;
+AppDaemon kontrolinis taškas: `8a0d41ad20713a676275d373d67dc97fb0c668ab`.
