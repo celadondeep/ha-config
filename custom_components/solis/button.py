@@ -23,9 +23,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
     """Setup sensors from a config entry created in the integrations UI."""
     # Prepare the sensor entities.
     plant_id = config_entry.data["portal_plant_id"]
-    _LOGGER.debug(f"config_entry.data: {config_entry.data}")
     _LOGGER.debug(f"Domain: {DOMAIN}")
     service = hass.data[DOMAIN][config_entry.entry_id]
+    if service.confirmed_hub:
+        service.confirmed_hub.register_platform("button", async_add_entities)
+        return
 
     _LOGGER.info(f"Waiting for discovery of controls for plant {plant_id}")
     await asyncio.sleep(RETRY_WAIT)

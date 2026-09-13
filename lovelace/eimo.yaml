@@ -163,6 +163,10 @@ views:
               # Baterija — su žaibu kai kraunasi; lygis pagal SOC (10 % žingsniu)
               - type: custom:button-card
                 entity: sensor.solis_inverter_1033300254190112_solis_battery_power
+                update_timer: 5s
+                extra_styles: |
+                  @keyframes se-battery-pulse { 50% { opacity: .4; } }
+                  @media (prefers-reduced-motion: reduce) { #icon { animation: none !important; } }
                 size: 24px
                 show_state: true
                 name: |
@@ -176,7 +180,8 @@ views:
                   [[[
                     var p = parseFloat(entity.state);
                     var s = states['sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity'];
-                    var soc = s ? parseFloat(s.state) : 0;
+                    var soc = s ? parseFloat(s.state) : NaN;
+                    if (!Number.isFinite(soc)) return 'mdi:battery-unknown';
                     var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
                     if (p > 20) return lvl <= 0 ? 'mdi:battery-charging-outline' : 'mdi:battery-charging-' + lvl;
                     if (lvl >= 100) return 'mdi:battery';
@@ -195,6 +200,14 @@ views:
                     - font-size: 1em
                     - color: var(--primary-text-color)
                   icon:
+                    - animation: |
+                        [[[
+                          const at = Number(states['sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received']?.state)*1000;
+                          const age = Date.now() - at;
+                          const moving = Math.abs(Number(entity?.state)) > 20;
+                          return Number.isFinite(at) && age >= -60000 && age < 900000 && moving
+                            ? 'se-battery-pulse 1.8s ease-in-out infinite' : 'none';
+                        ]]]
                     - color: |
                         [[[
                           var p = parseFloat(entity.state);
@@ -260,6 +273,79 @@ views:
                 max: 100
                 needle: true
 
+          # Vienas pilnas Planner commit, jo sveikata ir fizinis vykdytojas.
+          - type: entities
+            show_header_toggle: false
+            state_color: true
+            title: Centrinis valdymo branduolys
+            entities:
+              - entity: sensor.eimo_plan
+                name: Atominis planas
+                secondary_info: last-changed
+              - type: attribute
+                entity: sensor.eimo_planner_health
+                attribute: reason
+                name: Dabartinio sprendimo priežastis
+                icon: mdi:text-box-check-outline
+              - type: attribute
+                entity: sensor.eimo_plan
+                attribute: target_soc
+                name: Tikslinis SOC
+                suffix: " %"
+                icon: mdi:bullseye-arrow
+              - type: attribute
+                entity: sensor.eimo_plan
+                attribute: slot_active
+                name: Iškrovimo slotas
+                icon: mdi:battery-arrow-down
+              - type: attribute
+                entity: sensor.eimo_plan
+                attribute: slot_cutoff_soc
+                name: Sloto cut-off SOC
+                suffix: " %"
+                icon: mdi:battery-lock
+              - type: attribute
+                entity: sensor.eimo_plan
+                attribute: inverter_on
+                name: Plano pageidaujama būsena
+                icon: mdi:power-settings
+              - entity: sensor.eimo_planner_health
+                name: Planner sveikata
+                secondary_info: last-updated
+              - entity: sensor.eimo_executor_health
+                name: Executor grįžtamasis ryšys
+                secondary_info: last-updated
+              - entity: automation.eimo_planas_bazinio_rezimo_vykdymas
+                name: Fizinio plano vykdytojas
+                secondary_info: last-triggered
+
+          - type: markdown
+            title: Valdymo grandinė
+            content: >
+              **Eimo telemetrija + koreguota prognozė + vartojimas** →
+              **bendras Planner** → **atominis planas** → **Cloud Executor**
+              → **SolisCloud registrai**.
+
+              Valdymo būsena rodoma pagal inverterio patvirtintus duomenis.
+              Po kiekvienos komandos laukiama bent **6 min.** ir naujo skaitymo.
+              Kol komanda nepatvirtinta, kitos komandos nesiunčiamos.
+
+              Prognozės šaltinis:
+              **{{ state_attr('sensor.eimo_executor_health', 'forecast_source') }}**
+
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.eimo_executor_health
+                state_not: "ok"
+            card:
+              type: markdown
+              title: Vykdymo neatitikimas
+              content: >
+                Būsena: **{{ states('sensor.eimo_executor_health') }}**  
+                Neatitikimai:
+                **{{ state_attr('sensor.eimo_executor_health', 'mismatches') | default([], true) }}**
+
           # Ką automatika suskaičiavo ir kur link veda bateriją.
           # Sprendimas — pirmoje eilėje (svarbiausia); Solcast korekcijos
           # rodikliai perkelti į Prognozių skiltį (grupavimas pagal temą).
@@ -290,23 +376,18 @@ views:
                 name: Rytojaus suvartojimas
                 icon: mdi:calendar-arrow-right
 
-          # Dinaminis Eimo nakties planas — targetas regeneruojamas kas 5 min.
+          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager_eimo.py),
+          # analogiška Modbus kortelei.
           - type: markdown
             title: Naktinis planas 💤
             content: >
-              **Fazė: {{ states('sensor.energy_manager_eimo_night_plan') }}**
-              {% set trusted = state_attr('sensor.energy_manager_eimo_night_plan', 'trusted') %}
-              {{ '✅ patikimas' if trusted else '⚠️ nepatikimas / HOLD' }}
+              **{{ states('sensor.inverter_night_economics_eimo') }}**
 
-              - SOC: **{{ state_attr('sensor.energy_manager_eimo_night_plan', 'soc') | default('—', true) }}%**
-                → target **{{ state_attr('sensor.energy_manager_eimo_night_plan', 'target_soc') | default('—', true) }}%**
-              - Dar reikia pašalinti: **{{ state_attr('sensor.energy_manager_eimo_night_plan', 'energy_remaining_kwh') | default('—', true) }} kWh**
-              - Ryto PV orientyras:
-                **{{ as_datetime(state_attr('sensor.energy_manager_eimo_night_plan', 'morning_on')) | as_local | string if state_attr('sensor.energy_manager_eimo_night_plan', 'morning_on') else '—' }}**
-              - Plano priežastis: {{ state_attr('sensor.energy_manager_eimo_night_plan', 'reason') | default('—', true) }}
-              - Atnaujinta: {{ state_attr('sensor.energy_manager_eimo_night_plan', 'generated_at') | default('—', true) }}
-
-              **Ekonomika:** {{ states('sensor.inverter_night_economics_eimo') }}
+              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
+                išjungtas: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
+              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics_eimo', 'baterijos_kwh_verte') }}
+              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta_eimo') }}**
+              - Ryto įjungimas: **{{ states('sensor.inverter_morning_on_time_eimo') | as_timestamp(none) | timestamp_custom('%H:%M', true, '—') }}**
 
           # Šiandienos rezultatai — kairės kolonos apačioje (kolonų aukščio
           # balansui; atskira „Prognozių" sekcija palikdavo tuščią tarpą).
@@ -373,34 +454,57 @@ views:
                 icon: mdi:cash-plus
 
           # Ką inverteris REALIAI turi nustatyta slot1 (automacijos jį valdo).
-          # Slot1 — vienintelis automatikos naudojamas; slot2–6 palikti seni
-          # rankiniai įrašai su OFF jungikliais.
+          # Rodomas vienas įkrovimo ir vienas iškrovimo slotas.
           - type: entities
             show_header_toggle: false
-            title: Slot1 (inverterio registrai)
+            title: Solis valdymas (patvirtinimas po ≥6 min.)
             entities:
-              - entity: select.inverter_control_1033300254190112_storage_mode
+              - entity: sensor.solis_inverter_1033300254190112_cloud_command_status
+                name: Komandų vykdymo būsena
+              - entity: sensor.solis_inverter_1033300254190112_cloud_api_health
+                name: Ryšio ir API priežiūra
+              - type: attribute
+                entity: sensor.solis_inverter_1033300254190112_cloud_api_health
+                attribute: writes_last_5min
+                name: Tikrų įrašų per 5 min.
+              - type: attribute
+                entity: sensor.solis_inverter_1033300254190112_cloud_api_health
+                attribute: blocked_requests_total
+                name: Sustabdyti pertekliniai bandymai
+              - type: attribute
+                entity: sensor.solis_inverter_1033300254190112_cloud_api_health
+                attribute: next_retry
+                name: Kitas ryšio bandymas
+              - entity: switch.solis_inverter_1033300254190112_inverter_on_off
+                name: Inverteris įjungtas
+              - entity: select.solis_inverter_1033300254190112_storage_mode
                 name: Inverterio režimas
                 icon: mdi:cog
-              - entity: switch.inverter_control_1033300254190112_slot1_discharge
+              - entity: switch.solis_inverter_1033300254190112_slot1_discharge
                 name: Iškrovimo slotas
                 icon: mdi:battery-arrow-down
-              - entity: text.inverter_control_1033300254190112_slot1_discharge_time
+              - entity: text.solis_inverter_1033300254190112_slot1_discharge_time
                 name: Iškrovimo langas
                 icon: mdi:clock-outline
-              - entity: number.inverter_control_1033300254190112_slot1_discharge_soc
+              - entity: number.solis_inverter_1033300254190112_slot1_discharge_soc
                 name: Iškrovimo cut-off SOC
                 icon: mdi:battery-low
-              - entity: number.inverter_control_1033300254190112_slot1_discharge_current
+              - entity: number.solis_inverter_1033300254190112_slot1_discharge_current
                 name: Iškrovimo srovė
                 icon: mdi:current-dc
-              - entity: switch.inverter_control_1033300254190112_slot1_charge
+              - entity: switch.solis_inverter_1033300254190112_slot1_charge
                 name: Krovimo slotas (audros rež.)
                 icon: mdi:battery-arrow-up
-              - entity: switch.inverter_control_1033300254190112_allow_grid_charging
+              - entity: text.solis_inverter_1033300254190112_slot1_charge_time
+                name: Krovimo langas
+              - entity: number.solis_inverter_1033300254190112_slot1_charge_soc
+                name: Krovimo tikslinis SOC
+              - entity: number.solis_inverter_1033300254190112_slot1_charge_current
+                name: Krovimo srovė
+              - entity: switch.solis_inverter_1033300254190112_allow_grid_charging
                 name: Krovimas iš tinklo leidžiamas
                 icon: mdi:transmission-tower-export
-              - entity: switch.inverter_control_1033300254190112_allow_export
+              - entity: switch.solis_inverter_1033300254190112_allow_export
                 name: Eksportas leidžiamas
                 icon: mdi:transmission-tower-import
 
@@ -423,9 +527,11 @@ views:
               - entity: sensor.solis_inverter_1033300254190112_solis_state
                 name: Inverterio būsena
                 icon: mdi:information-outline
-              - entity: switch.inverter_control_1033300254190112_inverter_on_off
-                name: Inverteris (on/off)
-                icon: mdi:power
+              - type: attribute
+                entity: sensor.eimo_plan
+                attribute: inverter_on
+                name: Plano pageidaujama būsena
+                icon: mdi:power-settings
 
           # Solcast + korekcijos rodikliai vienoje vietoje (dešinės kolonos
           # apačioje — kolonų aukščio balansui).
@@ -456,6 +562,110 @@ views:
                 name: Intradienos santykis (faktas/prognozė)
                 icon: mdi:chart-line
                 secondary_info: last-updated
+
+      # ── 3. ESO PASAUGOJIMO BANKAS (obj. 266493, Gražiškiai) ─────────
+      # Paskyra prijungta 2026-08-06; sensoriai — packages/eso_eimo.yaml,
+      # oficialus banko likutis — custom_components/eso (eso_bankas_266493).
+      - type: grid
+        cards:
+          - type: heading
+            heading: ESO pasaugojimo bankas (įvadas 266493)
+            heading_style: title
+            icon: mdi:bank
+
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.eso_bankas_likutis_eimo
+                name: Banko likutis
+                secondary_info: last-updated
+              - entity: sensor.eso_bankas_266493
+                name: Oficialus ESO likutis (uždaryto mėn.)
+              - entity: sensor.eso_bankas_verte_eimo
+                name: Banko vertė
+              - entity: sensor.eso_ivado_eksportas_eimo
+                name: Eksportuota banko metais (nuo bal. 1)
+              - entity: sensor.eso_ivado_importas_eimo
+                name: Atsiimta iš banko metais
+              - entity: input_number.eso_bankas_pradzia_eimo
+                name: Rankinė korekcija (normaliai 0)
+
+          # Atjungimai ir rezervo grandinė (automatika: packages/eso_eimo.yaml,
+          # rezervą vykdo storm_mode_eimo).
+          - type: entities
+            show_header_toggle: false
+            title: ESO atjungimai ir rezervas
+            entities:
+              - entity: sensor.eso_atjungimai_eimo
+                name: ESO planuojami atjungimai
+              - entity: input_boolean.eso_rezervo_planas_eimo
+                name: Rezervo planas (automatinis)
+              - type: conditional
+                conditions:
+                  - condition: state
+                    entity: input_boolean.eso_rezervo_planas_eimo
+                    state: "on"
+                row:
+                  entity: input_datetime.eso_atjungimas_nuo_eimo
+                  name: Atjungimas nuo
+              - type: conditional
+                conditions:
+                  - condition: state
+                    entity: input_boolean.eso_rezervo_planas_eimo
+                    state: "on"
+                row:
+                  entity: input_datetime.eso_atjungimas_iki_eimo
+                  name: Atjungimas iki
+
+          # Banko metų faktinė trajektorija — ESO uždarytų mėnesių likučiai
+          # (serija atribute). Prognozės linijos (kaip Šeškinių) dar nėra —
+          # mėnesių įverčių lentelės bus sudarytos sukaupus banko metų faktą.
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Banko metai — likutis (faktas)
+            graph_span: 1y
+            span:
+              start: year
+              offset: +3month
+            update_interval: 1h
+            now:
+              show: true
+              label: šiandien
+            apex_config:
+              chart:
+                height: 220
+                animations:
+                  enabled: false
+            yaxis:
+              - id: kwh
+                min: 0
+                decimals: 0
+                apex_config:
+                  title:
+                    text: 'kWh'
+            series:
+              - entity: sensor.eso_bankas_266493
+                name: Faktas (ESO)
+                yaxis_id: kwh
+                color: '#4caf50'
+                stroke_width: 3
+                extend_to: false
+                show:
+                  extremas: false
+                data_generator: |
+                  const s = entity.attributes.serija || {};
+                  const now = new Date();
+                  const bankStart = (now.getMonth() + 1 >= 4)
+                    ? `${now.getFullYear()}-04`
+                    : `${now.getFullYear() - 1}-04`;
+                  const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                  return Object.keys(s).sort()
+                    .filter(k => k >= bankStart && k < cur)
+                    .map(k => {
+                      const [y, m] = k.split('-').map(Number);
+                      return [new Date(y, m, 1).getTime(), s[k]];
+                    });
 
       # Grafikai per visą plotį — cloud duomenys ~5 min žingsniu.
       - type: grid
@@ -574,6 +784,37 @@ views:
                   func: max
                   duration: 1d
 
+          # ESO oficialūs įvado srautai — valandinės eso:energy_*_266493
+          # statistikos (savitarnos duomenys vėluoja ~1–2 paras). Native
+          # statistics-graph (ECharts) leidžia zoom/slinkti per datas.
+          - type: statistics-graph
+            title: ESO tinklo srautas (valandinis)
+            chart_type: bar
+            period: hour
+            days_to_show: 7
+            stat_types:
+              - change
+            entities:
+              - entity: eso:energy_consumed_266493
+                name: Iš tinklo (pirkta)
+              - entity: eso:energy_returned_266493
+                name: Į tinklą (parduota)
+
+          # Mėnesinis balansas nuo elektrinės starto (istorija importuota
+          # nuo 2026-01-01; elektrinė veikia nuo vasario).
+          - type: statistics-graph
+            title: ESO mėnesinis balansas (importas / eksportas)
+            chart_type: bar
+            period: month
+            days_to_show: 365
+            stat_types:
+              - change
+            entities:
+              - entity: eso:energy_consumed_266493
+                name: Iš tinklo (pirkta)
+              - entity: eso:energy_returned_266493
+                name: Į tinklą (parduota)
+
   - title: Vartojimas
     path: vartojimas
     icon: mdi:chart-bar
@@ -583,7 +824,9 @@ views:
           ### Eimo vartojimo profilis
 
           Paros vidurkis **{{ state_attr('sensor.consumption_profile_eimo','daily_avg') }} kWh**
-          · duomenų **{{ state_attr('sensor.consumption_profile_eimo','data_days') }} d.**
+          · istorijos **{{ state_attr('sensor.consumption_profile_eimo','data_days') }} d.**
+          · modeliui naudota **{{ state_attr('sensor.consumption_profile_eimo','usable_days') }} d.**
+          · anomalijų **{{ state_attr('sensor.consumption_profile_eimo','anomaly_count') | default(0, true) }}**
           · valandinio mokymosi **{{ states('sensor.consumption_profile_eimo') }} d.**
       - type: custom:apexcharts-card
         header:

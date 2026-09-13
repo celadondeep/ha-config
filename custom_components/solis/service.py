@@ -6,6 +6,7 @@ For more information: https://github.com/hultenvp/solis-sensor/
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -77,7 +78,8 @@ class InverterService:
     """Serves all plantId's and inverters on a Ginlong account"""
 
     def __init__(
-        self, portal_config: PortalConfig, hass: HomeAssistant, refresh_ok: int = 300, refresh_nok: int = 60
+        self, portal_config: PortalConfig, hass: HomeAssistant, refresh_ok: int = 300, refresh_nok: int = 60,
+        max_discovery_delay: int = MAX_RETRY_DELAY_SECONDS
     ) -> None:
         self._schedule_ok: int = refresh_ok
         self._schedule_nok: int = refresh_nok
@@ -89,6 +91,13 @@ class InverterService:
         self._discovery_cookie: dict[str, Any] = {}
         self._discovery_complete: bool = False
         self._retry_delay_seconds = 0
+        self.confirmed_hub = None
+        self._max_discovery_delay = max_discovery_delay
+        self._stopped = False
+        self._cancel_update = None
+        self._cancel_discovery = None
+        self._cycle_lock = asyncio.Lock()
+        self._active_tasks = set()
         self._controllable: bool = False
         self._controls: dict[str, dict[str, list[tuple]]] = {}
         # self._active_times: dict[str, dict] = {}
@@ -148,21 +157,46 @@ class InverterService:
         self._logintime = None
 
     async def async_discover(self, *_) -> None:
+        if self._stopped or self._discovery_complete or self._cycle_lock.locked():
+            return
+        self._cancel_timer("_cancel_discovery")
+        task = asyncio.current_task()
+        self._active_tasks.add(task)
+        try:
+            async with self._cycle_lock:
+                await self._run_discovery()
+        except Exception:
+            _LOGGER.exception("Discovery failed; retrying on the configured recovery cadence")
+            self.schedule_discovery(self._discovery_callback, self._discovery_cookie, self._max_discovery_delay)
+        finally:
+            self._active_tasks.discard(task)
+
+    async def _run_discovery(self) -> None:
         """Try to discover and retry if needed."""
+        if self.confirmed_hub and self._api.health.delay():
+            self.schedule_discovery(self._discovery_callback, self._discovery_cookie,
+                                    max(1, self._api.health.delay()))
+            return
         capabilities: dict[str, list[str]] = {}
         capabilities = await self._do_discover()
+        if self._stopped:
+            return
 
         if capabilities:
-            if self.controllable:
+            if self.controllable or self.confirmed_hub:
                 inverter_serials = list(capabilities.keys())
                 await self._discover_controls(inverter_serials)
 
+            if self._stopped:
+                return
             if self._discovery_callback and self._discovery_cookie:
                 self._discovery_callback(capabilities, self._discovery_cookie)
             self._retry_delay_seconds = 0
-            self._dicovery_complete = True
+            self._discovery_complete = True
         else:
-            self._retry_delay_seconds = min(MAX_RETRY_DELAY_SECONDS, self._retry_delay_seconds + RETRY_DELAY_SECONDS)
+            self._retry_delay_seconds = min(self._max_discovery_delay, self._retry_delay_seconds + RETRY_DELAY_SECONDS)
+            if self.confirmed_hub:
+                self._retry_delay_seconds = max(300, self._retry_delay_seconds)
             _LOGGER.warning(
                 "Failed to discover, scheduling retry in %s seconds.",
                 self._retry_delay_seconds,
@@ -175,6 +209,9 @@ class InverterService:
             )
 
     async def _discover_controls(self, inverter_serials: list[str]):
+        if self.confirmed_hub:
+            await self.confirmed_hub.discover(inverter_serials)
+            return
         _LOGGER.debug(f"Starting controls discovery")
         controls = {}
         control_lookup = {CONTROL_TYPES[platform]: platform for platform in CONTROL_TYPES}
@@ -206,7 +243,11 @@ class InverterService:
             if inverters is None:
                 return capabilities
             for inverter_serial in inverters:
-                data = await self._api.fetch_inverter_data(inverter_serial, controls=False)
+                # Login already retrieved capabilities. Avoid another immediate
+                # telemetry cycle during single-channel startup.
+                data = self._api._latest_inverter_data.get(inverter_serial) if self.confirmed_hub else None
+                if data is None:
+                    data = await self._api.fetch_inverter_data(inverter_serial, controls=False)
                 if data is not None:
                     capabilities[inverter_serial] = data.keys()
         return capabilities
@@ -226,6 +267,8 @@ class InverterService:
 
     async def update_devices(self, data: GinlongData) -> None:
         """Update all registered sensors."""
+        if self._stopped:
+            return
         try:
             serial = getattr(data, INVERTER_SERIAL)
         except AttributeError:
@@ -274,15 +317,33 @@ class InverterService:
                     subscriber.data_updated(value, self.last_updated)
 
     async def async_update(self, *_) -> None:
+        if self._stopped or self._cycle_lock.locked():
+            return
+        self._cancel_timer("_cancel_update")
+        task = asyncio.current_task()
+        self._active_tasks.add(task)
+        try:
+            async with self._cycle_lock:
+                await self._run_update()
+        except Exception:
+            _LOGGER.exception("Update failed; preserving the scheduled recovery cycle")
+            self.schedule_update(timedelta(seconds=self._schedule_nok))
+        finally:
+            self._active_tasks.discard(task)
+
+    async def _run_update(self) -> None:
         """Update the data from Ginlong portal."""
         update = timedelta(seconds=self._schedule_nok)
         # Login using username and password, but only every HRS_BETWEEN_LOGIN hours
         if await self._login():
             inverters = self._api.inverters
-            if inverters is None:
+            if not inverters:
+                self.schedule_update(update)
                 return
             for inverter_serial in inverters:
                 data = await self._api.fetch_inverter_data(inverter_serial)
+                if self._stopped:
+                    return
 
                 if data is not None:
                     # And finally get the inverter details
@@ -300,32 +361,66 @@ class InverterService:
                     await self.update_devices(data)
                 else:
                     update = timedelta(seconds=self._schedule_nok)
-                    # Reset session and try to login again next time
-                    await self._logout()
+                    # Keep known device metadata through transient read failures.
+                    # Rediscovery adds traffic without repairing the network.
 
+        if self.confirmed_hub and not self._stopped:
+            await self.confirmed_hub.refresh_all()
         self.schedule_update(update)
 
-        if self._logintime is not None:
+        # HMAC telemetry is stateless; the confirmed channel renews the control
+        # token on Z0001. Periodic logout could invalidate a queued write.
+        if self._logintime is not None and not self.confirmed_hub:
             if (self._logintime + HRS_BETWEEN_LOGIN) < (datetime.now()):
                 # Time to login again
                 await self._logout()
 
     def schedule_update(self, td: timedelta) -> None:
         """Schedule an update after td time."""
+        if self._stopped:
+            return
+        if self.confirmed_hub:
+            td = max(td, timedelta(seconds=max(300, self._api.health.delay())))
+            self.confirmed_hub.changed()
+        self._cancel_timer("_cancel_update")
         nxt = dt_util.utcnow() + td
         _LOGGER.debug("Scheduling next update in %s, at %s", str(td), nxt)
-        async_track_point_in_utc_time(self._hass, self.async_update, nxt)
+        self._cancel_update = async_track_point_in_utc_time(self._hass, self.async_update, nxt)
 
     def schedule_discovery(self, callback, cookie: dict[str, Any], seconds: int = 1):
         """Schedule a discovery after seconds seconds."""
+        if self._stopped or self._discovery_complete:
+            return
+        if self.confirmed_hub:
+            seconds = max(seconds, self._api.health.delay())
+        self._cancel_timer("_cancel_discovery")
         _LOGGER.debug("Scheduling discovery in %s seconds.", seconds)
         self._discovery_callback = callback
         self._discovery_cookie = cookie
         nxt = dt_util.utcnow() + timedelta(seconds=seconds)
-        async_track_point_in_utc_time(self._hass, self.async_discover, nxt)
+        self._cancel_discovery = async_track_point_in_utc_time(self._hass, self.async_discover, nxt)
+
+    def _cancel_timer(self, attribute):
+        cancel = getattr(self, attribute)
+        if cancel is not None:
+            setattr(self, attribute, None)
+            cancel()
 
     async def shutdown(self):
-        """Shutdown the service"""
+        """Cancel pending and in-flight work before releasing the API session."""
+        self._stopped = True
+        self._cancel_timer("_cancel_update")
+        self._cancel_timer("_cancel_discovery")
+        tasks = [task for task in self._active_tasks if task is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        if self.confirmed_hub:
+            await self.confirmed_hub.shutdown()
+        self._discovery_callback = None
+        self._discovery_cookie = {}
+        self._subscriptions.clear()
         await self._logout()
 
     @property

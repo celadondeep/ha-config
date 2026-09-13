@@ -1,0 +1,106 @@
+--- a/appdaemon/apps/energy_system/profiles.py
++++ b/appdaemon/apps/energy_system/profiles.py
+@@ -183,8 +183,8 @@
+     CONSUMPTION_TODAY_IS_TOTAL=True,
+     SITE_LABEL="Eimo",
+     SOC_BUFFER={
+-        "min": "number.inverter_control_1033300254190112_battery_over_discharge_soc",
+-        "max": "number.inverter_control_1033300254190112_battery_max_charge_soc",
++        "min": "number.solis_inverter_1033300254190112_battery_over_discharge_soc",
++        "max": "number.solis_inverter_1033300254190112_battery_max_charge_soc",
+         "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+         "max_age": 900,
+         "voltages": ["sensor.solis_inverter_1033300254190112_solis_meter_item_" + p + "_volt" for p in "abc"],
+@@ -217,7 +217,8 @@
+     DASHBOARD_VISIBILITY_DEFAULT={"overview": True, "forecast": True, "diagnostics": True, "boiler": False},
+     BOILER_ENABLED=False,
+     BATTERY_DISCHARGE_SIGN=-1.0,
+-    INVERTER_CONTROL_AVAILABLE=False,
++    INVERTER_CONTROL_AVAILABLE=True,  # CID 5162 OFF/ON readbacks verified 2026-09-12.
++    COMMAND_STATUS_ENTITY="sensor.solis_inverter_1033300254190112_cloud_command_status",
+     SEASON_SOC_MIN={"žiema": 80, "pavasaris": 60, "vasara": 5, "ruduo": 60},
+     CONSUMPTION_TOMORROW_SENSOR="sensor.consumption_forecast_tomorrow_eimo",
+     CONSUMPTION_REMAINING_SENSOR="sensor.consumption_remaining_today_eimo",
+@@ -238,7 +239,7 @@
+         "consumption_today": "sensor.eimo_house_energy",
+         "solcast_today_total": "sensor.solcast_pv_forecast_forecast_today",
+         "battery_power": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+-        "power_state": "switch.inverter_control_1033300254190112_inverter_on_off",
++        "power_state": "switch.solis_inverter_1033300254190112_inverter_on_off",
+         "price_buy": "input_number.electricity_price_buy_eimo",
+         "price_sell": "input_number.electricity_price_sell_eimo",
+         "daytime_export_floor": "input_number.daytime_export_floor_eimo",
+@@ -247,27 +248,24 @@
+         "sun": "sun.sun",
+     },
+     ACTUATOR={
+-        "mode": "select.inverter_control_1033300254190112_storage_mode",
++        "mode": "select.solis_inverter_1033300254190112_storage_mode",
+         "mode_by_plan": {
+             "self_use": "Self-Use",
+             "feed_in": "Feed-In Priority",
+             "night_export": "Feed-In Priority",
+         },
+-        "slot": "switch.inverter_control_1033300254190112_slot1_discharge",
++        "slot": "switch.solis_inverter_1033300254190112_slot1_discharge",
+         "slot_cutoff": (
+-            "number.inverter_control_1033300254190112_slot1_discharge_soc"
++            "number.solis_inverter_1033300254190112_slot1_discharge_soc"
+         ),
+         # Eimo taip pat naudoja sveikų procentų SOC nustatymą.
+         "slot_cutoff_tolerance": 1.0,
+-        # Seni 2–6 iškrovimo slotai negali veikti greta atominio 1-o sloto.
+-        "exclusive_off": tuple(
+-            f"switch.inverter_control_1033300254190112_slot{slot}_discharge"
+-            for slot in range(2, 7)
+-        ),
+-        "power": "switch.inverter_control_1033300254190112_inverter_on_off",
++        # Integracijos eilė tikrina visų paslėptų 2–6 įkrovimo ir iškrovimo slotų OFF.
++        "exclusive_off": (),
++        "power": "switch.solis_inverter_1033300254190112_inverter_on_off",
+     },
+     EXECUTOR_ENTITY="automation.eimo_planas_bazinio_rezimo_vykdymas",
+-    EXECUTOR_SETTLE_SECONDS=120,
++    EXECUTOR_SETTLE_SECONDS=420,
+     OUTPUT={
+         "decision": "sensor.energy_manager_eimo_decision",
+         "balance": "sensor.energy_manager_eimo_balance",
+@@ -370,8 +368,8 @@
+     KEY="eimo",
+     SITE_LABEL="Eimo",
+     SOC_BUFFER={
+-        "min": "number.inverter_control_1033300254190112_battery_over_discharge_soc",
+-        "max": "number.inverter_control_1033300254190112_battery_max_charge_soc",
++        "min": "number.solis_inverter_1033300254190112_battery_over_discharge_soc",
++        "max": "number.solis_inverter_1033300254190112_battery_max_charge_soc",
+         "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+         "max_age": 900,
+         "voltages": ["sensor.solis_inverter_1033300254190112_solis_meter_item_" + p + "_volt" for p in "abc"],
+--- a/appdaemon/apps/energy_system/supervisor.py
++++ b/appdaemon/apps/energy_system/supervisor.py
+@@ -150,7 +150,15 @@
+             )
+             state = check.state
+             age = monotonic() - self.last_plan_committed_monotonic
+-            if state == "degraded" and age < settle_seconds:
++            command_entity = profile.get("COMMAND_STATUS_ENTITY")
++            command_status = self.get_state(command_entity) if command_entity else None
++            observed["command_status"] = command_status
++            if command_entity:
++                if command_status in {"sending", "settling", "cooldown", "ready"} and state == "degraded":
++                    state = "applying"
++                elif command_status in {"not_confirmed", "awaiting_confirmation", "waiting_for_cloud", "cloud_backoff", "storage_error", "unsupported_profile", "unknown", "unavailable", None} and state != "paused":
++                    state = "degraded"
++            elif state == "degraded" and age < settle_seconds:
+                 state = "applying"
+ 
+             limitations = []
+@@ -169,7 +177,7 @@
+                     "last_checked": datetime.now().astimezone().isoformat(),
+                     "mismatches": list(check.mismatches),
+                     "desired": check.desired,
+-                    "observed": check.observed,
++                    "observed": observed,
+                     "settle_seconds": settle_seconds,
+                     "slot_cutoff_tolerance": slot_cutoff_tolerance,
+                     "mode_aliases": actuator.get("mode_aliases", {}),

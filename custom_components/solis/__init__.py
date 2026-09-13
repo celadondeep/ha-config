@@ -112,8 +112,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         refresh_error = config[CONF_REFRESH_NOK]
     except KeyError:
         pass
-    service: InverterService = InverterService(portal_config, hass, refresh_ok, refresh_error)
+    single_slot_control = bool(config.get("single_slot_control", False))
+    if single_slot_control:
+        logging.getLogger("custom_components.solis.cloud_diagnostics").setLevel(logging.INFO)
+    service: InverterService = InverterService(
+        portal_config, hass, refresh_ok, refresh_error,
+        **({"max_discovery_delay": 300} if single_slot_control else {}),
+    )
+    if single_slot_control and portal_control:
+        from .confirmed_hub import ConfirmedControlHub
+        service.api._single_slot_control = True
+        service.api.health.hold_startup()
+        service.confirmed_hub = ConfirmedControlHub(hass, entry, service)
+        service._schedule_ok = max(300, refresh_ok)
+        service._schedule_nok = max(300, refresh_error)
     hass.data[DOMAIN][entry.entry_id] = service
+
+    control_platforms = (
+        [Platform.SELECT, Platform.NUMBER, Platform.SWITCH, Platform.TEXT, Platform.DATETIME, Platform.BUTTON]
+        if service.confirmed_hub else CONTROL_PLATFORMS
+    )
+    service.loaded_platforms = [Platform.SENSOR, *control_platforms] if portal_control else [Platform.SENSOR]
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     # Forward the setup to the sensor platform.
     await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
@@ -121,24 +141,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     #     asyncio.sleep(1)
     _LOGGER.debug("Sensor setup complete")
     if portal_control:
-        await hass.config_entries.async_forward_entry_setups(entry, CONTROL_PLATFORMS)
+        await hass.config_entries.async_forward_entry_setups(entry, control_platforms)
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Unload a config entry."""
 
-    platforms = [Platform.SENSOR]
-    try:
-        if entry.data[CONF_CONTROL]:
-            platforms = PLATFORMS
-    except KeyError:
-        pass
-    unload_ok = all(
-        await asyncio.gather(
-            *[hass.config_entries.async_forward_entry_unload(entry, component) for component in platforms]
-        )
-    )
-
-    await hass.data[DOMAIN][entry.entry_id].shutdown()
+    service = hass.data[DOMAIN][entry.entry_id]
+    # Options may already contain a new control flag; unload what was loaded.
+    await service.shutdown()
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, service.loaded_platforms)
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
     return unload_ok

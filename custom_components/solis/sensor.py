@@ -127,6 +127,8 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
     # Prepare the sensor entities.
     inverter_name = config_entry.data[CONF_NAME]
     service = hass.data[DOMAIN][config_entry.entry_id]
+    if service.confirmed_hub:
+        service.confirmed_hub.register_platform("sensor", async_add_entities)
     cookie: dict[str, Any] = {
         "name": inverter_name,
         "service": service,
@@ -154,7 +156,8 @@ def on_discovered(capabilities, cookie):
     hass_sensors = create_sensors(discovered_sensors, cookie["service"], cookie["name"])
     cookie["async_add_entities"](hass_sensors)
     # schedule the first update in 1 minute from now:
-    cookie["service"].schedule_update(timedelta(minutes=1))
+    service = cookie["service"]
+    service.schedule_update(timedelta(seconds=service._schedule_ok) if service.confirmed_hub else timedelta(minutes=1))
 
 
 class SolisSensor(ServiceSubscriber, SensorEntity):
@@ -182,6 +185,8 @@ class SolisSensor(ServiceSubscriber, SensorEntity):
         self._attr_native_value = None
         self._attr_native_unit_of_measurement = SENSOR_TYPES[sensor_type][1]
         self._attr_device_class = SENSOR_TYPES[sensor_type][3]
+        if ginlong_service.confirmed_hub and self._attr_device_class == "battery":
+            self._attr_device_class = None
         self._attr_state_class = SENSOR_TYPES[sensor_type][4]
         self._attr_unique_id = f"{inverter_sn}{self._name}".replace(" ", "_")
         ginlong_service.subscribe(self, inverter_sn, SENSOR_TYPES[sensor_type][5])

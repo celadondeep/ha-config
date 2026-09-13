@@ -1,34 +1,30 @@
-name: HA Stage-1 Validation
+name: HA Control Validation
 
 on:
   push:
     branches: [main]
     paths:
-      - "custom_components/solis_cloud_control/**"
-      - "scripts/deploy_eimo_solis_stage1.sh"
-      - "scripts/check_eimo_solis_stage1.sh"
-      - "scripts/analyze_eimo_cloud_log.py"
-      - "scripts/deploy_morning_100w.sh"
-      - "scripts/recover_control_plans.sh"
+      - "custom_components/solis/**"
+      - "tests/test_solis_confirmed_controls.py"
+      - "scripts/**"
       - ".agents/skills/home-assistant-admin/**"
       - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
       - "automations.yaml"
       - "packages/eimo.yaml"
+      - "lovelace/eimo.yaml"
       - "claude/tests/valdymo_simuliacija.py"
       - "AGENTS.md"
       - ".github/workflows/ha-stage1-validation.yml"
   pull_request:
     paths:
-      - "custom_components/solis_cloud_control/**"
-      - "scripts/deploy_eimo_solis_stage1.sh"
-      - "scripts/check_eimo_solis_stage1.sh"
-      - "scripts/analyze_eimo_cloud_log.py"
-      - "scripts/deploy_morning_100w.sh"
-      - "scripts/recover_control_plans.sh"
+      - "custom_components/solis/**"
+      - "tests/test_solis_confirmed_controls.py"
+      - "scripts/**"
       - ".agents/skills/home-assistant-admin/**"
       - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
       - "automations.yaml"
       - "packages/eimo.yaml"
+      - "lovelace/eimo.yaml"
       - "claude/tests/valdymo_simuliacija.py"
       - "AGENTS.md"
       - ".github/workflows/ha-stage1-validation.yml"
@@ -43,16 +39,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Stage-1 Python syntax
+      - name: Validate unified Solis Python syntax
         run: |
-          python3 -m py_compile \
-            custom_components/solis_cloud_control/__init__.py \
-            custom_components/solis_cloud_control/api/solis_api.py \
-            custom_components/solis_cloud_control/coordinator.py \
-            custom_components/solis_cloud_control/entity.py \
-            custom_components/solis_cloud_control/inverters/inverter_factory.py \
-            custom_components/solis_cloud_control/utils/retry_policy.py \
-            scripts/analyze_eimo_cloud_log.py
+          python3 -m compileall -q custom_components/solis
+          python3 -m py_compile scripts/analyze_eimo_cloud_log.py
 
       - name: Validate deploy and diagnostic scripts
         run: |
@@ -61,36 +51,8 @@ jobs:
           bash -n scripts/recover_control_plans.sh
           bash -n scripts/deploy_morning_100w.sh
 
-      - name: Verify Eimo recovery and stability invariants
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          sn = "1033300254190112"
-          factory = Path("custom_components/solis_cloud_control/inverters/inverter_factory.py").read_text()
-          coordinator = Path("custom_components/solis_cloud_control/coordinator.py").read_text()
-          api = Path("custom_components/solis_cloud_control/api/solis_api.py").read_text()
-          retry = Path("custom_components/solis_cloud_control/utils/retry_policy.py").read_text()
-          init = Path("custom_components/solis_cloud_control/__init__.py").read_text()
-          entity = Path("custom_components/solis_cloud_control/entity.py").read_text()
-
-          assert sn in factory
-          assert sn in coordinator
-          assert sn in init
-          assert 'tou_v2_mode="43605"' in factory
-          assert "_EIMO_UPDATE_INTERVAL = timedelta(minutes=5)" in coordinator
-          assert "_EIMO_REQUEST_REFRESH_COOLDOWN_SECONDS = 30" in coordinator
-          assert "control skipped (already confirmed)" in coordinator
-          assert "keeping last confirmed coordinator value" in coordinator
-          assert "_MIN_DEVICE_REQUEST_INTERVAL_SECONDS = 0.75" in api
-          assert "_CONTROL_SETTLE_SECONDS = 2.5" in api
-          assert 'non_retryable_response_codes={"B0072"}' in api
-          assert "_non_retryable_response_codes" in retry
-          assert "async_config_entry_first_refresh()" in init
-          assert "async_refresh()" in init
-          assert "self.coordinator.data is None" in entity
-          print("Eimo recovery/stability invariants OK")
-          PY
+      - name: Verify confirmed command sequencing and cloud recovery
+        run: python3 -m unittest discover -s tests -p test_solis_confirmed_controls.py
 
       - name: Verify repo skill mirror
         run: |
@@ -103,12 +65,11 @@ jobs:
           python3 -m pip install --quiet pyyaml
           python3 - <<'PY'
           import yaml
-          for path in ("automations.yaml", "packages/eimo.yaml"):
+          for path in ("automations.yaml", "packages/eimo.yaml", "lovelace/eimo.yaml"):
               with open(path, "r", encoding="utf-8") as f:
                   yaml.safe_load(f)
               print(f"{path}: YAML OK")
           PY
 
       - name: Run control logic simulation
-        run: |
-          python3 claude/tests/valdymo_simuliacija.py
+        run: python3 claude/tests/valdymo_simuliacija.py

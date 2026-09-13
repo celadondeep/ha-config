@@ -1,0 +1,27 @@
+set_plan:
+  name: Set confirmed inverter plan
+  description: >-
+    Replace pending automatic targets. Refresh the plan at least once every
+    three minutes. Each write waits at least six minutes and a later device
+    read before the next write. Cancel removes unsent automatic targets.
+  fields:
+    entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: solis
+    inverter_sn:
+      name: Inverter serial number
+      required: true
+      selector:
+        text:
+    targets:
+      name: Desired settings
+      description: Dictionary of control keys and their desired values.
+      selector:
+        object:
+    cancel:
+      name: Cancel unsent automatic targets
+      default: false
+      selector:
+        boolean:

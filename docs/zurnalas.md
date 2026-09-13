@@ -4,6 +4,10 @@ Chronologinis svarbių pakeitimų ir atradimų sąrašas (naujausi viršuje).
 Auditas ir sesijos pildo po kiekvieno reikšmingo pakeitimo: data, kas
 pakeista, KODĖL, kokie skaičiai tai pagrindė.
 
+## 2026-09-13 — Eimo viena Solis integracija ir ryšio apsaugos
+
+Įdiegta pritaikyta Solis Inverter 4.2.1, papildomai apsaugant skaitymų ribą po perkrovimo. Atskira solis_cloud_control pašalinta po atsarginės kopijos. Skaitymai ribojami iki vieno to paties API adreso / įrenginio bandymo per 300 s nuo atsakymo pabaigos; įrašui būtinos 360 s ir vėlesnis tikras patvirtinimas. Klaidos sukelia 300 → 600 → 1200 s pauzę, atsistatymas tikrinamas skaitymu. Pridėti API skaitikliai, eilės darbuotojo atkūrimas ir HA pranešimai. 43 testai praėjo, įskaitant 100 vienalaikių bandymų ribojimą iki vienos HTTP užklausos po klaidos. CID 5162 fizinis OFF/ON ciklas patvirtintas rugsėjo 12 d.; Eimo plano vykdytojas įjungtas 03:09; 09:03 jis išjungtas, o 09:31:52 vėl įjungtas ne šios patikros metu; išsaugota vėliausia gyva nuostata. Palikti trys režimai ir vienas įkrovimo bei iškrovimo slotas. Senas Stage-1 diegimas atšauktas, jo CI pakeistas naujos integracijos patikromis, išlaikant kitus tikrinimus. [Diegimo įrodymai ir atkūrimas](eimo_unified_solis_2026-09-12.md).
+
 ## 2026-08-01 (auditas)
 
 - **Banko likučio mėnesio-ribos artefaktas (atradimas, NE pataisa).**

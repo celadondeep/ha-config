@@ -26,9 +26,11 @@ import yaml
 from aiohttp import ClientError, ClientSession
 
 from .ginlong_base import BaseAPI, GinlongData, PortalConfig
+from .cloud_health import CloudDeferred, CloudHealth
 from .soliscloud_const import *
 
 _LOGGER = logging.getLogger(__name__)
+_DIAGNOSTICS = logging.getLogger("custom_components.solis.cloud_diagnostics")
 
 # VERSION
 VERSION = "0.6.2"
@@ -311,6 +313,14 @@ class SoliscloudAPI(BaseAPI):
         self._inverter_list: dict[str, str] | None = None
         self._token = ""
         self._hmi_fb00 = {}
+        self._request_count = 0
+        self._single_slot_control = False
+        self._request_lock = asyncio.Lock()
+        self._next_request_at = 0.0
+        self._login_lock = asyncio.Lock()
+        self._latest_inverter_data = {}
+        self._inverter_models = {}
+        self.health = CloudHealth()
 
     @property
     def api_name(self) -> str:
@@ -331,6 +341,12 @@ class SoliscloudAPI(BaseAPI):
         return self._is_online
 
     async def login(self, session: ClientSession) -> bool:
+        async with self._login_lock:
+            if self._is_online and self._session is not None:
+                return True
+            return await self._login(session)
+
+    async def _login(self, session: ClientSession) -> bool:
         """See if we can build a list of inverters"""
         self._session = session
         self._inverter_list = None
@@ -348,7 +364,7 @@ class SoliscloudAPI(BaseAPI):
             _LOGGER.debug("Found inverters: %s", list(self._inverter_list.keys()))
             self._is_online = True
             for inv in list(self._inverter_list):
-                data = await self.fetch_inverter_data(inv)
+                data = await self.fetch_inverter_data(inv, controls=False)
                 try:
                     self._plant_name = getattr(data, INVERTER_PLANT_NAME)
                 except AttributeError:
@@ -371,7 +387,7 @@ class SoliscloudAPI(BaseAPI):
                         _LOGGER.info("Failed to acquire CSRF token")
                     else:
                         _LOGGER.debug("CSRF token acquired")
-            except:
+            except Exception:
                 _LOGGER.info("Failed to acquire CSRF token")
 
         return self.is_online
@@ -381,6 +397,7 @@ class SoliscloudAPI(BaseAPI):
         self._session = None
         self._is_online = False
         self._inverter_list = None
+        self._token = ""
 
     async def fetch_inverter_list(self, plant_id: str) -> dict[str, str]:
         """
@@ -435,6 +452,8 @@ class SoliscloudAPI(BaseAPI):
                 await asyncio.sleep(1)
                 payload_detail = await self._get_station_details(self.config.plant_id)
                 if payload is not None:
+                    self._inverter_models[inverter_serial] = str(payload.get("data", {}).get("model", ""))
+                    self.health.telemetry(payload.get("data", {}).get("dataTimestamp"))
                     self._collect_inverter_data(payload)
                     if inverter_serial not in self._hmi_fb00:
                         hmi_flag = self._data[HMI_VERSION_ALL]
@@ -448,7 +467,7 @@ class SoliscloudAPI(BaseAPI):
                                 f"HMI firmware version ({hmi_flag}) <4B00 for Inverter SN {inverter_serial} "
                             )
 
-                if (self._token != "") and controls:
+                if (self._token != "") and controls and not self._single_slot_control:
                     _LOGGER.debug(f"Fetching control data for SN:{inverter_serial}")
                     control_data = await self.get_control_data(inverter_serial)
 
@@ -457,7 +476,9 @@ class SoliscloudAPI(BaseAPI):
 
                 if self._data is not None and INVERTER_SERIAL in self._data:
                     self._post_process()
-                    return GinlongData(self._data | control_data)
+                    data = GinlongData(self._data | control_data)
+                    self._latest_inverter_data[inverter_serial] = data
+                    return data
 
                 _LOGGER.debug("Unexpected response from server: %s", payload)
         return None
@@ -742,7 +763,7 @@ class SoliscloudAPI(BaseAPI):
         if self._session is None:
             return result
         try:
-            async with async_timeout.timeout(10):
+            async with async_timeout.timeout(30 if self._single_slot_control else 10):
                 resp = await self._session.get(url, params=params)
 
                 result[STATUS_CODE] = resp.status
@@ -784,7 +805,47 @@ class SoliscloudAPI(BaseAPI):
         }
         return header
 
-    async def _post_data_json(
+    async def _post_data_json(self, canonicalized_resource, params, csrf=False):
+        if not self._single_slot_control:
+            return await self._post_data_json_once(canonicalized_resource, params, csrf)
+        async with self._request_lock:
+            loop = asyncio.get_running_loop()
+            delay = self._next_request_at - loop.time()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            try:
+                self.health.begin(canonicalized_resource, params)
+            except CloudDeferred as error:
+                return {SUCCESS: False, MESSAGE: str(error), "defer_seconds": error.seconds}
+            try:
+                result = await self._post_data_json_once(canonicalized_resource, params, csrf)
+                content = result.get(CONTENT)
+                ok = bool(result.get(SUCCESS)) and isinstance(content, dict) and str(content.get("code", "0")) == "0"
+                if ok and canonicalized_resource == CONTROL:
+                    items = content.get("data")
+                    ok = isinstance(items, list) and bool(items) and all(isinstance(item, dict) and str(item.get("code")) == "0" for item in items)
+                if ok and canonicalized_resource == "/v2/api/atReadBatch":
+                    groups = content.get("data")
+                    ok = isinstance(groups, list) and any(
+                        isinstance(item, dict) and item.get("cid") is not None and item.get("msg") is not None
+                        and str(item.get("code", "0")) == "0"
+                        and str(item.get("needLoop", "false")).lower() != "true"
+                        for group in groups for item in (group if isinstance(group, list) else [group]))
+                detail = f"HTTP {result.get(STATUS_CODE)}; API {content.get('code') if isinstance(content, dict) else 'none'}"
+                if not ok and result.get(SUCCESS):
+                    detail += "; rejected or incomplete protocol response"
+                self.health.finish(canonicalized_resource, params, ok, detail)
+                return result
+            except asyncio.CancelledError:
+                self.health.finish(canonicalized_resource, params, False, cancelled=True)
+                raise
+            except Exception as error:
+                self.health.finish(canonicalized_resource, params, False, type(error).__name__)
+                raise
+            finally:
+                self._next_request_at = loop.time() + 1.0
+
+    async def _post_data_json_once(
         self, canonicalized_resource: str, params: dict[str, Any], csrf: bool = False
     ) -> dict[str, Any]:
         """Http-post data to specified domain/canonicalized_resource."""
@@ -798,8 +859,12 @@ class SoliscloudAPI(BaseAPI):
         resp = None
         if self._session is None:
             return result
+        self._request_count += 1
+        request_id = self._request_count
+        started = asyncio.get_running_loop().time()
+        outcome = "cancelled"
         try:
-            async with async_timeout.timeout(10):
+            async with async_timeout.timeout(30 if self._single_slot_control else 10):
                 url = f"{self.config.domain}{canonicalized_resource}"
                 resp = await self._session.post(url, json=params, headers=header)
 
@@ -810,13 +875,22 @@ class SoliscloudAPI(BaseAPI):
                     result[MESSAGE] = "OK"
                 else:
                     result[MESSAGE] = "Got http statuscode: %d" % (resp.status)
-        except (asyncio.TimeoutError, ClientError) as err:
+                outcome = "response"
+        except (asyncio.TimeoutError, ClientError, ValueError) as err:
+            outcome = type(err).__name__
             result[MESSAGE] = f"{repr(err)}"
             _LOGGER.debug("Error from URI (%s) : %s", canonicalized_resource, result[MESSAGE])
         finally:
             if resp is not None:
-                await resp.release()
-            return result
+                resp.release()
+            content = result.get(CONTENT)
+            code = content.get("code", "-") if isinstance(content, dict) else "-"
+            _DIAGNOSTICS.info(
+                "Solis request=%d endpoint=%s http=%s api=%s outcome=%s duration=%.2fs",
+                request_id, canonicalized_resource, result.get(STATUS_CODE), code, outcome,
+                asyncio.get_running_loop().time() - started,
+            )
+        return result
 
     async def _fetch_token(self, username: str, password: str) -> str:
         """
@@ -833,7 +907,7 @@ class SoliscloudAPI(BaseAPI):
             if "csrfToken" in jsondata:
                 return jsondata["csrfToken"]
             else:
-                _LOGGER.info(f"({AUTHENTICATE:s} responded with error: {jsondata}")
+                _LOGGER.info("Solis authentication failed: %s", jsondata.get("code", "invalid_response"))
         else:
             _LOGGER.info("Unable to fetch authentication token with username and password")
         return ""
@@ -862,3 +936,80 @@ class SoliscloudAPI(BaseAPI):
                 )
         else:
             _LOGGER.info(f"  cid: {str(cid):5s} - {CONTROL} responded with error: {result[MESSAGE]}")
+
+    def export_power_unit_w(self, device_serial):
+        # S6-EH3P10K02-NV-YD-L (3330): register 43074 is in 100 W units.
+        # Limit this correction to the verified model, not every hybrid.
+        return 100 if self._inverter_models.get(device_serial) == "3330" else 1
+
+    async def read_confirmed_controls(self, device_serial: str) -> dict[int, str]:
+        """One batch read on the existing Solis authenticated connection."""
+        from .confirmed_controls import READ_CIDS
+        if not self._token:
+            self._token = await self._fetch_token(self.config.username, self.config._password)
+        if not self._token:
+            raise ValueError("Solis control authentication is unavailable")
+        result = await self._post_data_json(
+            "/v2/api/atReadBatch",
+            {"inverterSn": str(device_serial), "cids": ",".join(map(str, READ_CIDS))},
+            csrf=True,
+        )
+        content = self._checked_control_response(result)
+        groups = content.get("data")
+        if not isinstance(groups, list) or not groups:
+            raise ValueError("Solis control snapshot is empty")
+        values = {}
+        for group in groups:
+            for item in (group if isinstance(group, list) else [group]):
+                if isinstance(item, dict) and item.get("cid") is not None and item.get("msg") is not None:
+                    if item.get("code") is not None and str(item["code"]) != "0":
+                        continue
+                    if str(item.get("needLoop", "false")).lower() == "true":
+                        continue
+                    values[int(item["cid"])] = str(item["msg"])
+        if not values:
+            raise ValueError("Solis control snapshot contains no registers")
+        if 499 in values:
+            values[499] = str(float(values[499]) * self.export_power_unit_w(device_serial))
+        return values
+
+    def _checked_control_response(self, result):
+        if result.get("defer_seconds"):
+            raise CloudDeferred(result["defer_seconds"])
+        if not result.get(SUCCESS):
+            raise ValueError("Solis HTTP/transport failure: " + str(result.get(STATUS_CODE) or result.get(MESSAGE)))
+        content = result.get(CONTENT)
+        if not isinstance(content, dict) or str(content.get("code")) != "0":
+            code = content.get("code") if isinstance(content, dict) else "invalid_json"
+            if code == "Z0001":
+                self._token = ""
+            raise ValueError("Solis API failure: " + str(code))
+        return content
+
+    async def send_confirmed_control(self, device_serial, request):
+        """Send exactly once. The queue performs a separate read after 6 minutes."""
+        if not self._token:
+            raise ValueError("Solis control authentication is unavailable")
+        params = {"inverterSn": str(device_serial), "cid": str(request["cid"]), "value": request["value"]}
+        if int(request["cid"]) == 499:
+            unit = self.export_power_unit_w(device_serial)
+            value = float(request["value"])
+            if value % unit:
+                raise ValueError(f"Export power must use {unit} W steps")
+            params["value"] = str(int(value / unit))
+        if request.get("old_value") is not None:
+            params["yuanzhi"] = request["old_value"]
+        result = await self._post_data_json(CONTROL, params, csrf=True)
+        content = self._checked_control_response(result)
+        items = content.get("data")
+        if isinstance(items, list):
+            # Protocol receipt only: never log tokens, account or device details.
+            receipts = [{k: item[k] for k in ("code", "recv", "command") if k in item}
+                        for item in items if isinstance(item, dict)]
+            _DIAGNOSTICS.info("Solis command receipt cid=%s protocol=%s", request["cid"], receipts)
+        if not isinstance(items, list) or not items or any(
+            not isinstance(item, dict) or str(item.get("code")) != "0" for item in items
+        ):
+            codes = [str(item.get("code")) for item in (items or []) if isinstance(item, dict)]
+            raise ValueError("Solis command not accepted: " + ",".join(codes))
+        return True

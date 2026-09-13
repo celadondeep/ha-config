@@ -58,6 +58,7 @@ class SolisOptionsFlowHandler(OptionsFlow):
             if new_pw:  # only overwrite if user actually typed something
                 updated_config[CONF_PASSWORD] = new_pw
 
+            updated_config["single_slot_control"] = user_input.get("single_slot_control", updated_config.get("single_slot_control", False))
             updated_config[CONF_CONTROL] = control_section.get(
                 CONF_CONTROL, updated_config.get(CONF_CONTROL, False))
             updated_config[CONF_REFRESH_OK] = user_input.get(
@@ -71,8 +72,10 @@ class SolisOptionsFlowHandler(OptionsFlow):
                 data=updated_config,
                 title=self.config_entry.title,
             )
+            return self.async_create_entry(title="", data={})
 
         data_schema = {
+            vol.Optional("single_slot_control", default=self.config_entry.data.get("single_slot_control", False)): bool,
             vol.Required(CONF_REFRESH_OK, default=self.config_entry.data.get(
                             CONF_REFRESH_OK, 300)): cv.positive_int,
             vol.Required(CONF_REFRESH_NOK, default=self.config_entry.data.get(
@@ -82,8 +85,7 @@ class SolisOptionsFlowHandler(OptionsFlow):
                     {
                         vol.Required(CONF_CONTROL, default=self.config_entry.data.get(
                             CONF_CONTROL, False)): bool,
-                        vol.Optional(CONF_PASSWORD, default=self.config_entry.data.get(
-                            CONF_PASSWORD, "")): cv.string,
+                        vol.Optional(CONF_PASSWORD, default=""): cv.string,
                     }
                 ),
                 # Whether or not the section is initially collapsed (default = False)
@@ -190,4 +192,3 @@ class SolisConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(data_schema),
             errors=errors,
         )
-

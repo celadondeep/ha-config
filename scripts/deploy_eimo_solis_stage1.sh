@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Superseded by the unified Solis integration on 2026-09-12.
+echo "Retired Eimo deployment: use docs/eimo_unified_solis_2026-09-12.md" >&2
+exit 2
 set -euo pipefail
 
 CONFIG_DIR="${CONFIG_DIR:-/config}"
@@ -135,3 +139,4 @@ case "$ACTION" in
     exit 2
     ;;
 esac
+
