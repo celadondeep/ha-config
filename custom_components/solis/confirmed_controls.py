@@ -133,18 +133,23 @@ def wire_request(key, target, raw, desired):
     old_value = None
     expected = {key: target}
     expected_raw = {}
+    mode_mask = None
     if key in MODE_KEYS:
         bits = int(raw[636])
         expected = {k: v for k, v in desired.items() if k in MODE_KEYS}
         expected[key] = target
+        mode_mask = 0
         if "storage_mode" in expected:
+            mode_mask |= 1 | 4 | 64
             bits &= ~(1 | 4 | 64)
             bits |= {"Self-Use": 1, "Feed-In Priority": 64, "Off-Grid": 4}[expected["storage_mode"]]
         for name, bit in MODE_BITS.items():
             if name in expected:
+                mode_mask |= 1 << bit
                 bits = bits | (1 << bit) if expected[name] else bits & ~(1 << bit)
         if desired.get("slot1_charge") is True or desired.get("slot1_discharge") is True:
             bits |= 2
+            mode_mask |= 2
         value = str(bits)
         expected_raw = {"636": value}
     elif key == "inverter_on_off":
@@ -167,4 +172,4 @@ def wire_request(key, target, raw, desired):
     else:
         value = str(target)
     return {"key": key, "cid": write_cid, "value": value, "old_value": old_value,
-            "expected": expected, "expected_raw": expected_raw}
+            "expected": expected, "expected_raw": expected_raw, "mode_mask": mode_mask}

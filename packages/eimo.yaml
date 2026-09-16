@@ -406,7 +406,7 @@ automation:
                 value_template: >-
                   {% set checked = as_datetime(state_attr('sensor.eimo_planner_health', 'last_checked')) %}
                   {% set cutoff = state_attr('sensor.eimo_plan', 'slot_cutoff_soc') %}
-                  {{ checked is not none and -60 <= (now() - checked).total_seconds() < 600
+                  {{ checked is not none and -60 <= (now() - checked).total_seconds() < 180
                      and state_attr('sensor.eimo_plan', 'inverter_on') in ['on', 'off']
                      and (state_attr('sensor.eimo_plan', 'slot_active') == 'off'
                           or (state_attr('sensor.eimo_plan', 'slot_active') == 'on'
@@ -432,6 +432,7 @@ automation:
                         slot1_discharge_current=150) %}
                     {% endif %}
                     {{ targets }}
+                  valid_until: "{{ as_timestamp(state_attr('sensor.eimo_plan', 'valid_until'), 0) }}"
         default:
           - action: solis.set_plan
             data:
@@ -469,12 +470,12 @@ automation:
         id: problem
       - trigger: state
         entity_id: sensor.solis_inverter_1033300254190112_cloud_api_health
-        to: [backoff, stale_telemetry, worker_stopped, unavailable]
+        to: [backoff, stale_telemetry, worker_stopped, command_stalled, control_degraded, storage_error, unavailable]
         for: '00:15:00'
         id: problem
       - trigger: state
         entity_id: sensor.solis_inverter_1033300254190112_cloud_command_status
-        to: [not_confirmed, storage_error, waiting_for_cloud, unsupported_profile]
+        to: [not_confirmed, storage_error, waiting_for_cloud, unsupported_profile, retry_wait, conflicting_targets]
         for: '00:15:00'
         id: problem
       - trigger: state

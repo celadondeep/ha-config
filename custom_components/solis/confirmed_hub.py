@@ -28,6 +28,7 @@ class Device:
     storage_failed: bool = False
     read_not_before_monotonic: float = 0.0
     worker_restarts: int = 0
+    storage_retry_monotonic: float = 0.0
 
 class ConfirmedControlHub:
     def __init__(self, hass, entry, service):
@@ -59,7 +60,12 @@ class ConfirmedControlHub:
                     if call.data.get("cancel", False):
                         device.queue.cancel_plan()
                     else:
-                        device.queue.set_plan(call.data.get("targets", {}), time.time(), ttl=180)
+                        now = time.time()
+                        ttl = min(180, call.data.get("valid_until", now + 180) - now)
+                        if ttl <= 0:
+                            device.queue.cancel_plan()
+                        else:
+                            device.queue.set_plan(call.data.get("targets", {}), now, ttl=ttl)
             except (ValueError, KeyError, TypeError) as error:
                 raise HomeAssistantError(str(error)) from error
             hub.changed()
@@ -72,6 +78,7 @@ class ConfirmedControlHub:
                 vol.Required("inverter_sn"): str,
                 vol.Optional("targets", default={}): dict,
                 vol.Optional("cancel", default=False): bool,
+                vol.Optional("valid_until"): vol.Coerce(float),
             }),
         )
 
@@ -149,15 +156,22 @@ class ConfirmedControlHub:
                 return
             queue.read_attempt_at = now
             device.read_not_before_monotonic = loop.time() + 300
+            snapshot_received = False
             try:
                 if not await self.service._login():
                     raise ValueError("Solis telemetry login is unavailable")
                 raw = await self.service.api.read_confirmed_controls(serial)
-                active_before = queue.active
+                confirmed_before = queue.last_confirmed
+                recovery_before = queue.recovery_count
                 queue.snapshot(raw, time.time())
-                if active_before and queue.active is None:
+                snapshot_received = True
+                if queue.last_confirmed != confirmed_before:
                     self.service.api.health.write_confirmed(serial)
+                if queue.recovery_count != recovery_before:
+                    _LOGGER.warning("Solis command retired after two spaced mismatching reads: key=%s; current plan will be reconciled",
+                                    queue.last_failure["key"])
                 await device.store.async_save(queue.persistent())
+                device.storage_failed = False
             except asyncio.CancelledError:
                 raise
             except CloudDeferred as error:
@@ -165,6 +179,10 @@ class ConfirmedControlHub:
                 queue.state = "cloud_backoff"
             except Exception as error:
                 queue.read_failed(error)
+                # If snapshot succeeded but saving reconciliation failed, no
+                # worker may act on an unpersisted retirement/confirmation.
+                if snapshot_received:
+                    device.storage_failed = True
                 _LOGGER.warning("Solis control snapshot failed: %s", error)
             finally:
                 device.read_not_before_monotonic = max(device.read_not_before_monotonic,
@@ -188,7 +206,8 @@ class ConfirmedControlHub:
             queue = device.queue
             if queue.active and (time.time() < queue.last_sent + queue.interval
                                  or asyncio.get_running_loop().time() < device.not_before_monotonic
-                                 or not queue.read_ok or queue.read_at < queue.last_sent + queue.interval):
+                                 or not queue.read_ok or time.time() - queue.read_at > 660
+                                 or queue.read_at < queue.last_sent + queue.interval):
                 raise HomeAssistantError("Wait at least 6 minutes and a fresh device read before clearing an unconfirmed command")
             device.queue.clear()
             await device.store.async_save(device.queue.persistent())
@@ -207,8 +226,19 @@ class ConfirmedControlHub:
                 await self.refresh(device.serial, force=True)
             device.wake.clear()
             async with device.lock:
+                if device.storage_failed and asyncio.get_running_loop().time() >= getattr(device, "storage_retry_monotonic", 0):
+                    device.storage_retry_monotonic = asyncio.get_running_loop().time() + 300
+                    try:
+                        await device.store.async_save(queue.persistent())
+                    except Exception as error:
+                        queue.state = "storage_error"
+                        queue.error = str(error)
+                    else:
+                        device.storage_failed = False
+                        _LOGGER.info("Solis queue persistence recovered; device readback still required")
                 if device.storage_failed:
                     request = None
+                    queue.state = "storage_error"
                 elif asyncio.get_running_loop().time() < device.not_before_monotonic:
                     request = None
                     if not queue.active:

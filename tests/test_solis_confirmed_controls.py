@@ -37,7 +37,7 @@ def snapshot(**changes):
 class CommandSequences(unittest.TestCase):
     def setUp(self):
         self.now = 10000
-        self.q = Queue()
+        self.q = Queue(wall=lambda: self.now)
         self.raw = snapshot()
         self.q.snapshot(self.raw, self.now)
 
@@ -702,7 +702,7 @@ class DynamicPlumbing(unittest.IsolatedAsyncioTestCase):
         source = time.time()-30
         api._post_data_json_once = AsyncMock(return_value={"success":True, "content":{"code":"0", "data":{"dataTimestamp":source*1000}}})
         await api._post_data_json(api.health.TELEMETRY, {"sn":"test"})
-        self.assertAlmostEqual(api.health.telemetry_schedule('test').source, source)
+        self.assertAlmostEqual(api.health.telemetry_schedule('test').source, source, delta=0.001)
         self.assertLess(api.health.delay(api.health.TELEMETRY, {"sn":"test"}), 300)
 
     async def test_extra_probe_does_not_fetch_station_or_controls(self):

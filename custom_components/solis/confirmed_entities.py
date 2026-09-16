@@ -15,7 +15,7 @@ from homeassistant.helpers.entity import Entity, EntityCategory
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .confirmed_controls import CONTROLS, MODE_OPTIONS, TIME_PATTERN, UNUSED_SLOT_CIDS, value_for
+from .confirmed_controls import CONTROLS, MODE_OPTIONS, TIME_PATTERN, UNUSED_SLOT_CIDS, SLOT_CIDS, value_for
 
 
 def iso(timestamp):
@@ -170,9 +170,18 @@ class CommandStatus(ConfirmedEntity, SensorEntity):
             "active_target": queue.active["expected"] if queue.active else None,
             "pending_targets": queue.desired(time.time()),
             "last_confirmed": queue.last_confirmed,
+            "last_failure": queue.last_failure,
+            "recovery_count": queue.recovery_count,
+            "active_age_seconds": round(max(0, time.time()-queue.last_sent)) if queue.active else 0,
+            "first_mismatch_at": iso(queue.mismatch_at),
+            "retry_after": {cid: iso(at) for cid, at in queue.retry_after.items() if at > time.time()},
+            "plan_expires_at": iso(queue.plan_expires) if queue.plan else None,
+            "manual_target_lifetime_seconds": 1800,
             "error": queue.error,
             "minimum_write_interval": queue.interval,
             "unused_slots_off": all(queue.raw.get(cid) == "0" for cid in UNUSED_SLOT_CIDS),
+            "enabled_slot_cids": [cid for cid in SLOT_CIDS if queue.raw.get(cid) == "1"],
+            "missing_slot_cids": [cid for cid in SLOT_CIDS if queue.raw.get(cid) not in ("0", "1")],
         }
 
 
@@ -206,6 +215,12 @@ class CloudApiHealth(ConfirmedEntity, SensorEntity):
         worker = self.hub.devices[self.serial].worker
         if worker is not None and worker.done():
             return "worker_stopped"
+        if self.hub.devices[self.serial].storage_failed:
+            return "storage_error"
+        if self.queue.active and time.time() - self.queue.last_sent > 900:
+            return "command_stalled"
+        if self.queue.state in {"retry_wait", "conflicting_targets"}:
+            return "control_degraded"
         return self.hub.service.api.health.diagnostics(self.serial)["state"]
 
     @property

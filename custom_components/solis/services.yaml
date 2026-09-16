@@ -25,3 +25,11 @@ set_plan:
       default: false
       selector:
         boolean:
+    valid_until:
+      name: Source plan expiry
+      description: Unix timestamp from the planner. Repeating a service call cannot extend it.
+      selector:
+        number:
+          min: 0
+          max: 9999999999
+          mode: box

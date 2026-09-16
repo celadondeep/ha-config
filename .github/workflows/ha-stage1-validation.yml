@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - "custom_components/solis/**"
-      - "tests/test_solis_confirmed_controls.py"
+      - "tests/test_*.py"
       - "scripts/**"
       - ".agents/skills/home-assistant-admin/**"
       - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
@@ -18,7 +18,7 @@ on:
   pull_request:
     paths:
       - "custom_components/solis/**"
-      - "tests/test_solis_confirmed_controls.py"
+      - "tests/test_*.py"
       - "scripts/**"
       - ".agents/skills/home-assistant-admin/**"
       - "plugins/home-assistant-admin/skills/home-assistant-admin/**"
@@ -52,7 +52,7 @@ jobs:
           bash -n scripts/deploy_morning_100w.sh
 
       - name: Verify confirmed command sequencing and cloud recovery
-        run: python3 -m unittest discover -s tests -p test_solis_confirmed_controls.py
+        run: python3 -m unittest discover -s tests
 
       - name: Verify repo skill mirror
         run: |
@@ -73,3 +73,4 @@ jobs:
 
       - name: Run control logic simulation
         run: python3 claude/tests/valdymo_simuliacija.py
+
