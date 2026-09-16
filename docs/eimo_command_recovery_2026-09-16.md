@@ -85,3 +85,17 @@ a later real batch read confirmed CID 5927 OFF, no other slot enabled, no missin
 slot register, and `unused_slots_off=true`. The queue recorded that confirmation
 and continued reconciling the current plan. The target at this daytime check is
 inverter ON, both visible slots OFF, Self-Use while SOC is at the protected floor.
+
+At 10:08:21 a real batch read confirmed **Self-Use**. At 10:09 the command queue
+was **idle**, no active command or enabled slot remained, and API health was
+**healthy** with zero consecutive failures. Recovery used two control writes,
+completed at 09:56:08 and 10:02:20 (over 360 seconds apart). No power cycling was
+used for the daytime verification; inverter ON is the current production target.
+
+Final live checksum verification matched all 14 deployed files. A small follow-up
+to `supervisor.py` corrects the pending hidden-slot status; its intermediate backup
+and final checksum are in `supervisor.before_hidden_cleanup.py` and
+`supervisor-followup.json` inside the same backup directory. Both repositories'
+GitHub validation workflows passed. A full subsequent overnight/cloud-outage cycle
+has not been observed in this verification; its failure paths are covered offline
+and by the running bounded recovery/monitoring logic.
