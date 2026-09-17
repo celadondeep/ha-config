@@ -1,933 +1,3109 @@
-title: Eimo SE
-views:
-  # Išdėstymo logika (2026-07-12 kompaktinė pertvarka): DVI kolonos be
-  # tarpinių sekcijų — trečia sekcija sukurdavo naują eilutę žemiau
-  # aukštesnės kolonos ir palikdavo tuščią tarpą. Dabar:
-  # 1) KAIRĖ — galios srautai, SOC vs tikslas, balansas/sprendimas,
-  #    naktinis planas, šiandienos rezultatai,
-  # 2) DEŠINĖ — audros tile, nustatymai/kainos, Slot1 registrai, būsena,
-  #    Solcast prognozė ir korekcijos,
-  # 3) GRAFIKAI — per visą plotį.
-  # Atskirų heading kortelių nėra (kortelių title pakanka) — taupo vietą.
-  # Stilius sąmoningai identiškas energijos_valdymas.yaml (spalvos, šriftai,
-  # button-card šablonai), kad abu dashboard'ai atrodytų kaip viena sistema.
-  - title: Eimo SE
-    path: eimo
-    type: sections
-    max_columns: 2
-    dense_section_placement: true
-    sections:
-      # ── 1. DABAR ─────────────────────────────────────────────────────
-      - type: grid
-        cards:
-          # Cloud duomenų amžius iš solis_timestamp_measurements_received
-          # (unix s). Cloud atnaujina kas ~5 min: iki 6 min žalia, >6 min
-          # pilka (vėluoja), >15 min raudona (cloud/integracijos strigtis,
-          # audituose pasitaikydavo unavailable ruožų). update_timer būtinas,
-          # kad amžius "bėgtų" ir spalva keistųsi net kai entity nebesikeičia.
-          - type: custom:button-card
-            entity: sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received
-            update_timer: 5000
-            icon: mdi:cloud-check-variant
-            name: ☀️ Eimo SE energija
-            show_name: true
-            show_icon: true
-            show_label: true
-            show_state: false
-            label: |
-              [[[
-                var a = Math.max(0, Math.round(Date.now()/1000 - parseFloat(entity.state)));
-                if (a < 60) return a + 's';
-                return Math.round(a/60) + ' min';
-              ]]]
-            tap_action:
-              action: none
-            styles:
-              card:
-                - background: none
-                - box-shadow: none
-                - border: none
-                - padding: 0
-              grid:
-                - grid-template-areas: '"n i l"'
-                - grid-template-columns: 1fr min-content min-content
-                - align-items: center
-              name:
-                - justify-self: start
-                - font-size: 1.4em
-                - font-weight: normal
-                - color: var(--primary-text-color)
-              icon:
-                - width: 22px
-                - color: |
-                    [[[
-                      var a = Math.max(0, Math.round(Date.now()/1000 - parseFloat(entity.state)));
-                      return a > 900 ? '#f44336' : (a > 360 ? '#9e9e9e' : '#00E676');
-                    ]]]
-              label:
-                - font-size: 14px
-                - padding-left: 6px
-                - color: var(--primary-text-color)
-
-          # Dabartinė galia — button-card eilė su krypčiai jautriomis ikonomis
-          # (identiška Modbus dashboard'ui). Ženklai (Eimo cloud, patikrinta
-          # pagal 2026-07-13 istoriją: naktį namai iš baterijos = neigiamas,
-          # rytą PV krauna + SOC kyla = teigiamas): grid_total_power + =
-          # eksportas, − = importas; battery_power + = KRAUNASI, − = IŠKRAUNA
-          # (ABU atvirkščiai nei Modbus!).
-          - type: horizontal-stack
-            cards:
-              # Saulė
-              - type: custom:button-card
-                entity: sensor.eimo_pv_power
-                size: 24px
-                name: Saulė
-                show_state: true
-                icon: mdi:weather-sunny
-                state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
-                styles:
-                  grid:
-                    - grid-template-areas: '"n" "i" "s"'
-                  name:
-                    - font-size: 0.9em
-                    - font-weight: normal
-                    - color: var(--secondary-text-color)
-                  state:
-                    - font-size: 1em
-                    - color: var(--primary-text-color)
-                  icon:
-                    - color: |
-                        [[[ return parseFloat(entity.state) > 10 ? '#FFB300' : 'var(--secondary-text-color)'; ]]]
-
-              # Namai
-              - type: custom:button-card
-                entity: sensor.solis_inverter_1033300254190112_solis_total_consumption_power
-                size: 24px
-                name: Namai
-                show_state: true
-                icon: mdi:home-import-outline
-                state_display: '[[[ return Math.round(parseFloat(entity.state)) + " W"; ]]]'
-                styles:
-                  grid:
-                    - grid-template-areas: '"n" "i" "s"'
-                  name:
-                    - font-size: 0.9em
-                    - font-weight: normal
-                    - color: var(--secondary-text-color)
-                  state:
-                    - font-size: 1em
-                    - color: var(--primary-text-color)
-                  icon:
-                    - color: |
-                        [[[ return parseFloat(entity.state) > 0 ? '#42A5F5' : 'var(--secondary-text-color)'; ]]]
-
-              # Tinklas — Eimo cloud: + = eksportas (žalia), − = importas (raudona)
-              - type: custom:button-card
-                entity: sensor.solis_inverter_1033300254190112_solis_power_grid_total_power
-                size: 24px
-                show_state: true
-                name: |
-                  [[[
-                    var p = parseFloat(entity.state);
-                    if (p > 20) return 'Į tinklą';
-                    if (p < -20) return 'Iš tinklo';
-                    return 'Tinklas';
-                  ]]]
-                icon: |
-                  [[[
-                    var p = parseFloat(entity.state);
-                    if (p > 20) return 'mdi:transmission-tower-import';
-                    if (p < -20) return 'mdi:transmission-tower-export';
-                    return 'mdi:transmission-tower';
-                  ]]]
-                state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
-                styles:
-                  grid:
-                    - grid-template-areas: '"n" "i" "s"'
-                  name:
-                    - font-size: 0.9em
-                    - font-weight: normal
-                    - color: var(--secondary-text-color)
-                  state:
-                    - font-size: 1em
-                    - color: var(--primary-text-color)
-                  icon:
-                    - color: |
-                        [[[
-                          var p = parseFloat(entity.state);
-                          if (p > 20) return '#00C853';
-                          if (p < -20) return '#F44336';
-                          return 'var(--secondary-text-color)';
-                        ]]]
-
-              # Baterija — su žaibu kai kraunasi; lygis pagal SOC (10 % žingsniu)
-              - type: custom:button-card
-                entity: sensor.solis_inverter_1033300254190112_solis_battery_power
-                update_timer: 5s
-                extra_styles: |
-                  @keyframes se-battery-pulse { 50% { opacity: .4; } }
-                  @media (prefers-reduced-motion: reduce) { #icon { animation: none !important; } }
-                size: 24px
-                show_state: true
-                name: |
-                  [[[
-                    var p = parseFloat(entity.state);
-                    if (p > 20) return 'Kraunasi';
-                    if (p < -20) return 'Iškrauna';
-                    return 'Baterija';
-                  ]]]
-                icon: |
-                  [[[
-                    var p = parseFloat(entity.state);
-                    var s = states['sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity'];
-                    var soc = s ? parseFloat(s.state) : NaN;
-                    if (!Number.isFinite(soc)) return 'mdi:battery-unknown';
-                    var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
-                    if (p > 20) return lvl <= 0 ? 'mdi:battery-charging-outline' : 'mdi:battery-charging-' + lvl;
-                    if (lvl >= 100) return 'mdi:battery';
-                    if (lvl <= 0) return 'mdi:battery-outline';
-                    return 'mdi:battery-' + lvl;
-                  ]]]
-                state_display: '[[[ return Math.round(Math.abs(parseFloat(entity.state))) + " W"; ]]]'
-                styles:
-                  grid:
-                    - grid-template-areas: '"n" "i" "s"'
-                  name:
-                    - font-size: 0.9em
-                    - font-weight: normal
-                    - color: var(--secondary-text-color)
-                  state:
-                    - font-size: 1em
-                    - color: var(--primary-text-color)
-                  icon:
-                    - animation: |
-                        [[[
-                          const at = Number(states['sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received']?.state)*1000;
-                          const age = Date.now() - at;
-                          const moving = Math.abs(Number(entity?.state)) > 20;
-                          return Number.isFinite(at) && age >= -60000 && age < 900000 && moving
-                            ? 'se-battery-pulse 1.8s ease-in-out infinite' : 'none';
-                        ]]]
-                    - color: |
-                        [[[
-                          var p = parseFloat(entity.state);
-                          if (p > 20) return '#00C853';
-                          if (p < -20) return '#FF9800';
-                          return 'var(--secondary-text-color)';
-                        ]]]
-
-              # SOC — pripildymo lygis, spalva pagal %
-              - type: custom:button-card
-                entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
-                size: 24px
-                name: SOC
-                show_state: true
-                icon: |
-                  [[[
-                    var soc = parseFloat(entity.state);
-                    var lvl = Math.min(100, Math.max(0, Math.round(soc / 10) * 10));
-                    if (lvl >= 100) return 'mdi:battery';
-                    if (lvl <= 0) return 'mdi:battery-outline';
-                    return 'mdi:battery-' + lvl;
-                  ]]]
-                state_display: '[[[ return Math.round(parseFloat(entity.state)) + "%"; ]]]'
-                styles:
-                  grid:
-                    - grid-template-areas: '"n" "i" "s"'
-                  name:
-                    - font-size: 0.9em
-                    - font-weight: normal
-                    - color: var(--secondary-text-color)
-                  state:
-                    - font-size: 1em
-                    - color: var(--primary-text-color)
-                  icon:
-                    - color: |
-                        [[[
-                          var soc = parseFloat(entity.state);
-                          if (soc < 20) return '#F44336';
-                          if (soc < 50) return '#FF9800';
-                          return '#00C853';
-                        ]]]
-
-          # Esamas SOC prieš algoritmo tikslą — vienoje eilėje matosi, ar
-          # baterija juda link tikslo (07-08 dienos iškrova tapo sąlyginė —
-          # be pertekliaus baterija turi kauptis link target).
-          - type: horizontal-stack
-            cards:
-              - type: gauge
-                entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
-                name: Baterijos SOC
-                unit: "%"
-                min: 0
-                max: 100
-                severity:
-                  green: 50
-                  yellow: 20
-                  red: 5
-              - type: gauge
-                entity: sensor.energy_manager_eimo_target_soc
-                name: Tikslinė SOC riba
-                unit: "%"
-                min: 0
-                max: 100
-                needle: true
-
-          # Vienas pilnas Planner commit, jo sveikata ir fizinis vykdytojas.
-          - type: entities
-            show_header_toggle: false
-            state_color: true
-            title: Centrinis valdymo branduolys
-            entities:
-              - entity: sensor.eimo_plan
-                name: Atominis planas
-                secondary_info: last-changed
-              - type: attribute
-                entity: sensor.eimo_planner_health
-                attribute: reason
-                name: Dabartinio sprendimo priežastis
-                icon: mdi:text-box-check-outline
-              - type: attribute
-                entity: sensor.eimo_plan
-                attribute: target_soc
-                name: Tikslinis SOC
-                suffix: " %"
-                icon: mdi:bullseye-arrow
-              - type: attribute
-                entity: sensor.eimo_plan
-                attribute: slot_active
-                name: Iškrovimo slotas
-                icon: mdi:battery-arrow-down
-              - type: attribute
-                entity: sensor.eimo_plan
-                attribute: slot_cutoff_soc
-                name: Sloto cut-off SOC
-                suffix: " %"
-                icon: mdi:battery-lock
-              - type: attribute
-                entity: sensor.eimo_plan
-                attribute: inverter_on
-                name: Plano pageidaujama būsena
-                icon: mdi:power-settings
-              - entity: sensor.eimo_planner_health
-                name: Planner sveikata
-                secondary_info: last-updated
-              - entity: sensor.eimo_executor_health
-                name: Executor grįžtamasis ryšys
-                secondary_info: last-updated
-              - entity: automation.eimo_planas_bazinio_rezimo_vykdymas
-                name: Fizinio plano vykdytojas
-                secondary_info: last-triggered
-
-          - type: markdown
-            title: Valdymo grandinė
-            content: >
-              **Eimo telemetrija + koreguota prognozė + vartojimas** →
-              **bendras Planner** → **atominis planas** → **Cloud Executor**
-              → **SolisCloud registrai**.
-
-              Valdymo būsena rodoma pagal inverterio patvirtintus duomenis.
-              Po kiekvienos komandos laukiama bent **6 min.** ir naujo skaitymo.
-              Kol komanda nepatvirtinta, kitos komandos nesiunčiamos.
-
-              Prognozės šaltinis:
-              **{{ state_attr('sensor.eimo_executor_health', 'forecast_source') }}**
-
-          - type: conditional
-            conditions:
-              - condition: state
-                entity: sensor.eimo_executor_health
-                state_not: "ok"
-            card:
-              type: markdown
-              title: Vykdymo neatitikimas
-              content: >
-                Būsena: **{{ states('sensor.eimo_executor_health') }}**  
-                Neatitikimai:
-                **{{ state_attr('sensor.eimo_executor_health', 'mismatches') | default([], true) }}**
-
-          # Ką automatika suskaičiavo ir kur link veda bateriją.
-          # Sprendimas — pirmoje eilėje (svarbiausia); Solcast korekcijos
-          # rodikliai perkelti į Prognozių skiltį (grupavimas pagal temą).
-          - type: entities
-            show_header_toggle: false
-            title: Balansas ir automatika
-            entities:
-              - entity: sensor.energy_manager_eimo_decision
-                name: Sprendimas
-                icon: mdi:robot
-                secondary_info: last-changed
-              - entity: sensor.energy_manager_eimo_target_soc
-                name: Tikslinė SOC riba
-                icon: mdi:bullseye-arrow
-              - entity: sensor.energy_manager_eimo_balance
-                name: Energijos balansas
-                icon: mdi:scale-balance
-              - entity: sensor.energy_manager_eimo_surplus
-                name: Perteklius (netilps šiandien)
-                icon: mdi:solar-power
-              - entity: sensor.energy_manager_eimo_surplus_now
-                name: Perteklius dabar
-                icon: mdi:flash-outline
-              - entity: sensor.consumption_remaining_today_eimo
-                name: Likęs suvartojimas šiandien
-                icon: mdi:timer-sand
-              - entity: sensor.consumption_forecast_tomorrow_eimo
-                name: Rytojaus suvartojimas
-                icon: mdi:calendar-arrow-right
-
-          # Nakties ekonomika — skaičiuoja AppDaemon (energy_manager_eimo.py),
-          # analogiška Modbus kortelei.
-          - type: markdown
-            title: Naktinis planas 💤
-            content: >
-              **{{ states('sensor.inverter_night_economics_eimo') }}**
-
-              - Įjungtas naktį: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_ijungtas_eur_h') | float(0) * 100) | round(1) }} ct/h** ·
-                išjungtas: **{{ (state_attr('sensor.inverter_night_economics_eimo', 'kaina_isjungtas_eur_h') | float(0) * 100) | round(1) }} ct/h**
-              - Baterijos kWh vertė: {{ state_attr('sensor.inverter_night_economics_eimo', 'baterijos_kwh_verte') }}
-              - Numatomas išjungimas: **{{ states('sensor.inverter_shutdown_eta_eimo') }}**
-              - Ryto įjungimas: **{{ states('sensor.inverter_morning_on_time_eimo') | as_timestamp(none) | timestamp_custom('%H:%M', true, '—') }}**
-
-          # Šiandienos rezultatai — kairės kolonos apačioje (kolonų aukščio
-          # balansui; atskira „Prognozių" sekcija palikdavo tuščią tarpą).
-          - type: glance
-            title: Šiandien
-            entities:
-              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
-                name: Pagaminta
-                icon: mdi:solar-power-variant
-              - entity: sensor.solar_today_expected_eimo
-                name: Numatoma
-                icon: mdi:chart-bell-curve-cumulative
-              - entity: sensor.self_sufficiency_today_eimo
-                name: Savarankiškumas
-                icon: mdi:home-percent
-              - entity: sensor.energy_savings_today_eimo
-                name: Sutaupyta
-                icon: mdi:piggy-bank
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used
-                name: Suvartota
-                icon: mdi:home-lightning-bolt
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy
-                name: Parduota
-                icon: mdi:transmission-tower-import
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased
-                name: Pirkta
-                icon: mdi:transmission-tower-export
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_charged
-                name: Į bateriją
-                icon: mdi:battery-plus
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_energy_discharged
-                name: Iš baterijos
-                icon: mdi:battery-minus
-            show_state: true
-
-      # ── 2. VALDYMAS IR PROGNOZĖS (dešinė kolona) ─────────────────────
-      - type: grid
-        cards:
-          # Audros režimas — tile viršuje, kaip Modbus rankinio valdymo tiles:
-          # svarbiausias jungiklis matomas ir perjungiamas vienu paspaudimu.
-          - type: tile
-            entity: input_boolean.storm_mode_eimo
-            name: Audros / ESO režimas
-            icon: mdi:weather-lightning
-            color: red
-            tap_action:
-              action: toggle
-
-          - type: entities
-            show_header_toggle: false
-            title: Nustatymai ir kainos
-            entities:
-              - entity: input_select.energy_season_eimo
-                name: Sezonas
-                icon: mdi:calendar-sync
-              - entity: input_number.daytime_export_floor_eimo
-                name: Dienos eksporto riba (floor)
-                icon: mdi:transmission-tower
-              - entity: input_number.electricity_price_buy_eimo
-                name: Pirkimo kaina
-                icon: mdi:cash-minus
-              - entity: input_number.electricity_price_sell_eimo
-                name: Pardavimo kaina
-                icon: mdi:cash-plus
-
-          # Ką inverteris REALIAI turi nustatyta slot1 (automacijos jį valdo).
-          # Rodomas vienas įkrovimo ir vienas iškrovimo slotas.
-          - type: entities
-            show_header_toggle: false
-            title: Solis valdymas (patvirtinimas po ≥6 min.)
-            entities:
-              - entity: sensor.solis_inverter_1033300254190112_cloud_command_status
-                name: Komandų vykdymo būsena
-              - entity: sensor.solis_inverter_1033300254190112_cloud_api_health
-                name: Ryšio ir API priežiūra
-              - type: attribute
-                entity: sensor.solis_inverter_1033300254190112_cloud_api_health
-                attribute: writes_last_5min
-                name: Tikrų įrašų per 5 min.
-              - type: attribute
-                entity: sensor.solis_inverter_1033300254190112_cloud_api_health
-                attribute: blocked_requests_total
-                name: Sustabdyti pertekliniai bandymai
-              - type: attribute
-                entity: sensor.solis_inverter_1033300254190112_cloud_api_health
-                attribute: next_retry
-                name: Kitas ryšio bandymas
-              - entity: switch.solis_inverter_1033300254190112_inverter_on_off
-                name: Inverteris įjungtas
-              - entity: select.solis_inverter_1033300254190112_storage_mode
-                name: Inverterio režimas
-                icon: mdi:cog
-              - entity: switch.solis_inverter_1033300254190112_slot1_discharge
-                name: Iškrovimo slotas
-                icon: mdi:battery-arrow-down
-              - entity: text.solis_inverter_1033300254190112_slot1_discharge_time
-                name: Iškrovimo langas
-                icon: mdi:clock-outline
-              - entity: number.solis_inverter_1033300254190112_slot1_discharge_soc
-                name: Iškrovimo cut-off SOC
-                icon: mdi:battery-low
-              - entity: number.solis_inverter_1033300254190112_slot1_discharge_current
-                name: Iškrovimo srovė
-                icon: mdi:current-dc
-              - entity: switch.solis_inverter_1033300254190112_slot1_charge
-                name: Krovimo slotas (audros rež.)
-                icon: mdi:battery-arrow-up
-              - entity: text.solis_inverter_1033300254190112_slot1_charge_time
-                name: Krovimo langas
-              - entity: number.solis_inverter_1033300254190112_slot1_charge_soc
-                name: Krovimo tikslinis SOC
-              - entity: number.solis_inverter_1033300254190112_slot1_charge_current
-                name: Krovimo srovė
-              - entity: switch.solis_inverter_1033300254190112_allow_grid_charging
-                name: Krovimas iš tinklo leidžiamas
-                icon: mdi:transmission-tower-export
-              - entity: switch.solis_inverter_1033300254190112_allow_export
-                name: Eksportas leidžiamas
-                icon: mdi:transmission-tower-import
-
-          - type: entities
-            show_header_toggle: false
-            title: Inverterio būsena
-            entities:
-              - entity: sensor.solis_inverter_1033300254190112_solis_temperature
-                name: Temperatūra
-                icon: mdi:thermometer
-              - entity: sensor.solis_inverter_1033300254190112_solis_battery_state_of_health
-                name: Baterijos sveikata (SOH)
-                icon: mdi:battery-heart-variant
-              - entity: sensor.battery_roundtrip_efficiency_eimo
-                name: Round-trip efektyvumas
-                icon: mdi:battery-sync
-              - entity: sensor.battery_equivalent_cycles_eimo
-                name: Ekvivalentiniai ciklai
-                icon: mdi:counter
-              - entity: sensor.solis_inverter_1033300254190112_solis_state
-                name: Inverterio būsena
-                icon: mdi:information-outline
-              - type: attribute
-                entity: sensor.eimo_plan
-                attribute: inverter_on
-                name: Plano pageidaujama būsena
-                icon: mdi:power-settings
-
-          # Solcast + korekcijos rodikliai vienoje vietoje (dešinės kolonos
-          # apačioje — kolonų aukščio balansui).
-          - type: entities
-            show_header_toggle: false
-            title: Saulės prognozė ir korekcija
-            entities:
-              - entity: sensor.solcast_pv_forecast_forecast_remaining_today
-                name: Liko šiandien (žalias Solcast)
-                icon: mdi:timer-sand
-              - type: attribute
-                entity: sensor.solar_today_expected_eimo
-                attribute: liko_koreguota_kwh
-                name: Liko šiandien (Eimo koreguota)
-                suffix: kWh
-                icon: mdi:timer-sand-complete
-              - entity: sensor.solcast_pv_forecast_forecast_tomorrow
-                name: Rytoj
-                icon: mdi:weather-partly-cloudy
-              - entity: input_number.solcast_forecast_yesterday_eimo
-                name: Vakar prognozuota
-                icon: mdi:history
-              - entity: sensor.solcast_correction_factor_eimo
-                name: Solcast korekcija
-                icon: mdi:tune-variant
-                secondary_info: last-updated
-              - entity: sensor.solcast_intraday_ratio_eimo
-                name: Intradienos santykis (faktas/prognozė)
-                icon: mdi:chart-line
-                secondary_info: last-updated
-
-      # ── 3. ESO PASAUGOJIMO BANKAS (obj. 266493, Gražiškiai) ─────────
-      # Paskyra prijungta 2026-08-06; sensoriai — packages/eso_eimo.yaml,
-      # oficialus banko likutis — custom_components/eso (eso_bankas_266493).
-      - type: grid
-        cards:
-          - type: heading
-            heading: ESO pasaugojimo bankas (įvadas 266493)
-            heading_style: title
-            icon: mdi:bank
-
-          - type: entities
-            show_header_toggle: false
-            entities:
-              - entity: sensor.eso_bankas_likutis_eimo
-                name: Banko likutis
-                secondary_info: last-updated
-              - entity: sensor.eso_bankas_266493
-                name: Oficialus ESO likutis (uždaryto mėn.)
-              - entity: sensor.eso_bankas_verte_eimo
-                name: Banko vertė
-              - entity: sensor.eso_ivado_eksportas_eimo
-                name: Eksportuota banko metais (nuo bal. 1)
-              - entity: sensor.eso_ivado_importas_eimo
-                name: Atsiimta iš banko metais
-              - entity: input_number.eso_bankas_pradzia_eimo
-                name: Rankinė korekcija (normaliai 0)
-
-          # Atjungimai ir rezervo grandinė (automatika: packages/eso_eimo.yaml,
-          # rezervą vykdo storm_mode_eimo).
-          - type: entities
-            show_header_toggle: false
-            title: ESO atjungimai ir rezervas
-            entities:
-              - entity: sensor.eso_atjungimai_eimo
-                name: ESO planuojami atjungimai
-              - entity: input_boolean.eso_rezervo_planas_eimo
-                name: Rezervo planas (automatinis)
-              - type: conditional
-                conditions:
-                  - condition: state
-                    entity: input_boolean.eso_rezervo_planas_eimo
-                    state: "on"
-                row:
-                  entity: input_datetime.eso_atjungimas_nuo_eimo
-                  name: Atjungimas nuo
-              - type: conditional
-                conditions:
-                  - condition: state
-                    entity: input_boolean.eso_rezervo_planas_eimo
-                    state: "on"
-                row:
-                  entity: input_datetime.eso_atjungimas_iki_eimo
-                  name: Atjungimas iki
-
-          # Banko metų faktinė trajektorija — ESO uždarytų mėnesių likučiai
-          # (serija atribute). Prognozės linijos (kaip Šeškinių) dar nėra —
-          # mėnesių įverčių lentelės bus sudarytos sukaupus banko metų faktą.
-          - type: custom:apexcharts-card
-            header:
-              show: true
-              title: Banko metai — likutis (faktas)
-            graph_span: 1y
-            span:
-              start: year
-              offset: +3month
-            update_interval: 1h
-            now:
-              show: true
-              label: šiandien
-            apex_config:
-              chart:
-                height: 220
-                animations:
-                  enabled: false
-            yaxis:
-              - id: kwh
-                min: 0
-                decimals: 0
-                apex_config:
-                  title:
-                    text: 'kWh'
-            series:
-              - entity: sensor.eso_bankas_266493
-                name: Faktas (ESO)
-                yaxis_id: kwh
-                color: '#4caf50'
-                stroke_width: 3
-                extend_to: false
-                show:
-                  extremas: false
-                data_generator: |
-                  const s = entity.attributes.serija || {};
-                  const now = new Date();
-                  const bankStart = (now.getMonth() + 1 >= 4)
-                    ? `${now.getFullYear()}-04`
-                    : `${now.getFullYear() - 1}-04`;
-                  const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-                  return Object.keys(s).sort()
-                    .filter(k => k >= bankStart && k < cur)
-                    .map(k => {
-                      const [y, m] = k.split('-').map(Number);
-                      return [new Date(y, m, 1).getTime(), s[k]];
-                    });
-
-      # Grafikai per visą plotį — cloud duomenys ~5 min žingsniu.
-      - type: grid
-        column_span: 2
-        cards:
-          # SOC (kairė ašis, %) + galios (dešinė ašis, W) — kaip Modbus
-          # dashboard'e. Matosi, ar baterija kaupiasi link target, kada
-          # iškrauna, kaip saulė dengia namus.
-          - type: custom:apexcharts-card
-            header:
-              show: true
-              title: Suvartojimas ir gamyba (24 val. · SOC % / W)
-            graph_span: 24h
-            update_interval: 60s
-            apex_config:
-              chart:
-                height: 300
-                parentHeightOffset: 0
-                animations:
-                  enabled: false
-              grid:
-                padding:
-                  left: 0
-                  right: 0
-                  top: 0
-                  bottom: 0
-              xaxis:
-                labels:
-                  datetimeFormatter:
-                    hour: 'HH:mm'
-            yaxis:
-              - id: soc
-                min: 0
-                max: 100
-                decimals: 0
-              - id: power
-                opposite: true
-                min: 0
-                align_to: 500
-                decimals: 0
-                apex_config:
-                  stepSize: 500
-            series:
-              - entity: sensor.eimo_pv_power
-                name: Saulė
-                yaxis_id: power
-                color: '#2196f3'
-                type: area
-                opacity: 0.25
-                stroke_width: 1
-                group_by:
-                  func: avg
-                  duration: 5min
-              - entity: sensor.solis_inverter_1033300254190112_solis_total_consumption_power
-                name: Namai
-                yaxis_id: power
-                color: '#f44336'
-                stroke_width: 1
-                group_by:
-                  func: avg
-                  duration: 5min
-              - entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
-                name: SOC
-                yaxis_id: soc
-                color: '#880e4f'
-                stroke_width: 2
-                group_by:
-                  func: avg
-                  duration: 5min
-
-          # 14 d. dienos balansas iš cloud dienos skaitliukų (resetinasi
-          # vidurnaktį, todėl max per parą = dienos suma).
-          - type: custom:apexcharts-card
-            header:
-              show: true
-              title: Dienos balansas (14 d. · kWh)
-            graph_span: 14d
-            update_interval: 5min
-            span:
-              end: day
-            apex_config:
-              chart:
-                height: 280
-                animations:
-                  enabled: false
-            yaxis:
-              - min: 0
-                decimals: 0
-            series:
-              - entity: sensor.solis_inverter_1033300254190112_solis_energy_today
-                name: Saulė
-                type: column
-                color: '#fbc02d'
-                group_by:
-                  func: max
-                  duration: 1d
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used
-                name: Suvartota
-                type: column
-                color: '#f44336'
-                group_by:
-                  func: max
-                  duration: 1d
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy
-                name: Parduota
-                type: column
-                color: '#4caf50'
-                group_by:
-                  func: max
-                  duration: 1d
-              - entity: sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased
-                name: Pirkta
-                type: column
-                color: '#9e9e9e'
-                group_by:
-                  func: max
-                  duration: 1d
-
-          # ESO oficialūs įvado srautai — valandinės eso:energy_*_266493
-          # statistikos (savitarnos duomenys vėluoja ~1–2 paras). Native
-          # statistics-graph (ECharts) leidžia zoom/slinkti per datas.
-          - type: statistics-graph
-            title: ESO tinklo srautas (valandinis)
-            chart_type: bar
-            period: hour
-            days_to_show: 7
-            stat_types:
-              - change
-            entities:
-              - entity: eso:energy_consumed_266493
-                name: Iš tinklo (pirkta)
-              - entity: eso:energy_returned_266493
-                name: Į tinklą (parduota)
-
-          # Mėnesinis balansas nuo elektrinės starto (istorija importuota
-          # nuo 2026-01-01; elektrinė veikia nuo vasario).
-          - type: statistics-graph
-            title: ESO mėnesinis balansas (importas / eksportas)
-            chart_type: bar
-            period: month
-            days_to_show: 365
-            stat_types:
-              - change
-            entities:
-              - entity: eso:energy_consumed_266493
-                name: Iš tinklo (pirkta)
-              - entity: eso:energy_returned_266493
-                name: Į tinklą (parduota)
-
-  - title: Vartojimas
-    path: vartojimas
-    icon: mdi:chart-bar
-    cards:
-      - type: markdown
-        content: >
-          ### Eimo vartojimo profilis
-
-          Paros vidurkis **{{ state_attr('sensor.consumption_profile_eimo','daily_avg') }} kWh**
-          · istorijos **{{ state_attr('sensor.consumption_profile_eimo','data_days') }} d.**
-          · modeliui naudota **{{ state_attr('sensor.consumption_profile_eimo','usable_days') }} d.**
-          · anomalijų **{{ state_attr('sensor.consumption_profile_eimo','anomaly_count') | default(0, true) }}**
-          · valandinio mokymosi **{{ states('sensor.consumption_profile_eimo') }} d.**
-      - type: custom:apexcharts-card
-        header:
-          show: true
-          title: Vartojimas pagal valandą (kWh)
-        graph_span: 24h
-        span:
-          start: day
-        apex_config:
-          chart:
-            height: 260
-            animations:
-              enabled: false
-          xaxis:
-            labels:
-              format: 'HH:00'
-          tooltip:
-            x:
-              format: 'HH:00'
-        yaxis:
-          - min: 0
-            decimals: 1
-        series:
-          - entity: sensor.consumption_profile_eimo
-            name: kWh
-            type: column
-            color: '#42a5f5'
-            data_generator: |
-              const arr = entity.attributes.hourly_kwh || [];
-              const pts = arr.map((v, i) => {
-                const d = new Date(); d.setHours(i, 0, 0, 0);
-                return [d.getTime(), v];
-              });
-              if (arr.length) {
-                const d = new Date(); d.setHours(24, 0, 0, 0);
-                pts.push([d.getTime(), arr[0]]);
+# GENERATED by energy_system.dashboard_template.py
+{
+  "title": "Eimo SE",
+  "button_card_templates": {
+    "se_panel": {
+      "section_mode": true,
+      "show_name": false,
+      "show_icon": false,
+      "show_state": false,
+      "tap_action": {
+        "action": "none"
+      },
+      "hold_action": {
+        "action": "none"
+      },
+      "update_timer": "15s",
+      "styles": {
+        "card": [
+          {
+            "padding": "20px"
+          },
+          {
+            "border-radius": "18px"
+          },
+          {
+            "box-shadow": "none"
+          },
+          {
+            "height": "100%"
+          }
+        ],
+        "grid": [
+          {
+            "grid-template-areas": "\"body\""
+          },
+          {
+            "grid-template-columns": "1fr"
+          }
+        ],
+        "custom_fields": {
+          "body": [
+            {
+              "width": "100%"
+            },
+            {
+              "min-width": "0"
+            }
+          ]
+        }
+      },
+      "custom_fields": {
+        "body": "[[[\nconst p = variables.plant || {};\nconst a = id => states[id]?.attributes || {};\nconst s = id => states[id]?.state;\nconst num = v => v !== null && v !== undefined && String(v).trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null;\nconst esc = v => String(v ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst fmt = (v,d=1) => num(v) === null ? '—' : new Intl.NumberFormat(p.locale || 'lt-LT',{maximumFractionDigits:d,minimumFractionDigits:d}).format(Number(v));\nconst on = v => v === true || v === 'on' || v === 'true';\nconst h = a(p.horizon), plan = a(p.plan), health = a(p.telemetry);\nconst ts = v => v && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null;\nconst now = Date.now();\nconst expiry = ts(h.expires_at), calculated = ts(h.calculated_at);\nconst forecastOK = on(h.valid) && expiry !== null && expiry > now && calculated !== null && calculated <= now + 60000;\nconst planTime = ts(plan.evaluated_at), planExpiry = ts(plan.valid_until);\nconst planFresh = planTime !== null && planTime <= now + 60000 && planExpiry !== null && planExpiry > now;\nconst hbRaw=s(p.heartbeat);\nconst hb = num(hbRaw)!==null ? Number(hbRaw)*1000 : ts(hbRaw);\nconst teleFresh = s(p.telemetry) === 'ok' && (!p.heartbeat || (hb !== null && now - hb >= -60000 && now - hb < (p.heartbeat_max_age || 180)*1000));\nconst actionable = on(plan.actionable) && planFresh && teleFresh;\nconst clock = v => ts(v) === null ? '—' : new Date(v).toLocaleTimeString(p.locale || 'lt-LT',{timeZone:p.timezone,hour:'2-digit',minute:'2-digit'});\nconst date = v => ts(v) === null ? '' : new Date(v).toLocaleDateString(p.locale || 'lt-LT',{timeZone:p.timezone,month:'2-digit',day:'2-digit'});\nconst row = (label,value) => `<div class=\"row\"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`;\nconst title = (kicker,heading) => `<div class=\"eyebrow\">${esc(kicker)}</div><h3>${esc(heading)}</h3>`;\nconst pill = (text,kind='') => `<span class=\"pill\"><span class=\"dot ${kind}\"></span>${esc(text)}</span>`;\nconst figure = (label,value,unit) => `<div class=\"number\"><div class=\"muted\">${esc(label)}</div><div class=\"value\">${esc(value)} <span class=\"unit\">${esc(unit)}</span></div></div>`;\nlet body='';\nif(variables.kind === 'status') {\n  let heading='Energija namams', detail='Saulė pirmiausia dengia vartojimą, tada įkrauna bateriją; likutis atiduodamas į tinklą.', badge='Automatika veikia', dot='';\n  const priority=String(plan.priority || '');\n  if(priority === 'horizon_pv_export') {heading='Saulė namams, tinklui ir baterijai';detail='Eksportuojamas saulės perteklius, kad baterijoje liktų vietos vėlesnei gamybai.';}\n  else if(priority === 'horizon_night' && !on(plan.inverter_on)) {heading='Inverteris ilsisi iki ryto';detail=forecastOK ? `Įjungimas ${clock(h.wake_at)}. Baterijos energija saugoma; nakties vartojimą dengia tinklas.` : 'Laukiama naujo patikimo ryto plano.';}\n  else if(on(plan.slot_active)) {heading='Atlaisvinama vieta saulei';detail=`Iškrovimas vyksta iki ${fmt(plan.slot_cutoff_soc,0)} % baterijos ribos.`;}\n  else if(priority.includes('storm') || on(s(p.storm))) {heading='Kaupiamas energijos rezervas';detail='Aktyvus audros arba planuojamo elektros atjungimo rezervas.';badge='Rezervo režimas';dot='warn';}\n  else if(priority.includes('manual') || on(s(p.manual)) || on(s(p.manual_soc))) {heading='Aktyvus rankinis valdymas';detail='Automatinį modelio pasiūlymą pakeičia rankiniai nustatymai.';badge='Rankinis režimas';dot='warn';}\n  else if(priority === 'horizon_night') {heading='Baterija ruošiama rytui';detail='Inverteris įjungtas pagal artimiausios gamybos ir baterijos vietos planą.';}\n  if(!actionable) {heading='Laukiama patikimo valdymo plano';detail=!teleFresh ? 'Matavimai vėluoja. Paskutinio plano nelaikome patvirtintu dabartiniu veiksmu.' : 'Valdymas pristabdytas arba planą reikia atnaujinti.';badge='Reikia dėmesio';dot='warn';}\n  else if(s(p.executor)!=='ok') {badge='Tikrinamas įvykdymas';dot='warn';detail+=' Inverteris dar nepatvirtino visų plano nustatymų.';}\n  body=`<div class=\"top\"><div class=\"eyebrow\" style=\"margin:0\">${esc(p.site_label)} · DABAR</div>${pill(badge,dot)}</div><h2 style=\"margin-top:13px\">${esc(heading)}</h2><p class=\"desc\">${esc(detail)}</p>`;\n  const qualityState=s(p.quality?.state);\n  if(['critical','warning'].includes(qualityState)) body+=`<div class=\"foot muted\">Tinklo kokybės perspėjimas · <a style=\"color:var(--primary-color)\" href=\"/${esc(p.url)}/analize\">Peržiūrėti analizę</a></div>`;\n}\nif(variables.kind === 'flow') {\n  const read=id=>teleFresh ? num(s(id)) : null;\n  const pv=read(p.pv), load=read(p.load), grid=read(p.grid), battery=read(p.battery), soc=read(p.soc);\n  const g=grid===null ? null : grid*p.grid_sign, b=battery===null ? null : battery*p.battery_sign;\n  const power=v=>v===null ? '—' : fmt(Math.abs(v)/1000,2);\n  const node=(label,value,sub,icon,color,cls='')=>`<div class=\"node\"><div class=\"node-head\"><ha-icon class=\"${cls}\" icon=\"${icon}\" style=\"color:${color}\"></ha-icon>${esc(label)}</div><div class=\"value\">${power(value)} <span class=\"unit\">kW</span></div><div class=\"muted\">${esc(sub)}</div></div>`;\n  const level=soc===null?null:Math.max(0,Math.min(100,Math.round(soc/10)*10));\n  const batteryIcon=level===null?'mdi:battery-unknown':b!==null&&b < -20\n    ? (level===0?'mdi:battery-charging-outline':'mdi:battery-charging-'+level)\n    : level===100?'mdi:battery':level===0?'mdi:battery-outline':'mdi:battery-'+level;\n  const batteryMotion=b!==null&&Math.abs(b)>20?'bat-motion'+(b>20?' bat-discharge':''):'';\n  const field=health.fields?.pv_power || health.fields?.soc || {};\n  const report=hb ?? ts(field.reported_at), age=report===null ? null : Math.max(0,Math.floor((now-report)/1000));\n  const ageText=age===null ? 'Laikas nežinomas' : age<60 ? `prieš ${age} s` : `prieš ${Math.floor(age/60)} min`;\n  body=title('Momentinė galia','Kur keliauja energija')+`<div class=\"flow\">`+\n    node('Saulė',pv,pv===null?'Nėra šviežių duomenų':pv>20?'Gamina':'Negamina','mdi:weather-sunny','#d99a18')+\n    node('Vartojimas',load,load===null?'Nėra šviežių duomenų':'Dabartinis vartojimas','mdi:home-lightning-bolt-outline','#4789e8')+\n    node('Baterija',b,b===null?'Nėra šviežių duomenų':b < -20?'← Kraunasi':b>20?'→ Iškrauna':'Ramybė',batteryIcon,'#159b85',batteryMotion)+\n    node('Tinklas',g,g===null?'Nėra šviežių duomenų':g>20?'← Imama iš tinklo':g< -20?'→ Atiduodama į tinklą':'Beveik subalansuota','mdi:transmission-tower','#8973cf')+`</div>`+\n    `<div class=\"battery\"><div class=\"top\"><span class=\"muted\">Baterijos įkrova</span><span class=\"battery-value\">${fmt(soc,0)} %</span></div><div class=\"track\"><div class=\"fill\" style=\"width:${soc===null?0:Math.max(0,Math.min(100,soc))}%\"></div></div></div>`+\n    `<div class=\"foot muted\">${teleFresh ? 'Matavimai' : 'Duomenys vėluoja'} · ${esc(ageText)}${p.power ? ' · Inverteris '+(s(p.power)==='off'?'išjungtas':s(p.power)==='on'?'įjungtas':'nežinoma') : ' · SolisCloud'}</div>`;\n}\nif(variables.kind === 'plan') {\n  const night=forecastOK && on(h.night_active);\n  body=title('Artimiausi veiksmai',night?'Pasiruošimas rytui':'Dienos planas');\n  if(!forecastOK) body+='<p class=\"desc\">Patikimos prognozės šiuo metu nėra. Ryto iškrovimo laikas nerodomas, kol modelis neperskaičiuotas.</p>';\n  else if(night) {\n    const implemented=actionable && plan.priority==='horizon_night';\n    const amount=num(h.required_preexport_kwh);\n    body+=`<p class=\"desc\">${implemented ? 'Galiojantis planas' : 'Modelio siūlymas; aktyvus valdymas jį pakeičia'} · ${esc(date(h.pv_start_at))}</p>`;\n    const step=(time,name,sub)=>`<div class=\"step\"><div class=\"time\">${esc(time)}</div><div><div class=\"step-title\">${esc(name)}</div><div class=\"muted\">${esc(sub)}</div></div></div>`;\n    body+='<div class=\"steps\">';\n    const scheduled=[];\n    if(p.power) scheduled.push([h.wake_at,'Įjungti inverterį','Pagal iškrovimo arba gamybos pradžią']);\n    if(amount!==null && amount>0.02) scheduled.push([h.discharge_start_at,'Pradėti iškrovimą',`${fmt(amount)} kWh baterijos energijos`]);\n    else body+=num(h.unmet_headroom_kwh)>0.05 ? step('—','Iškrovimas nesuplanuotas','Turimi apribojimai neleidžia atlaisvinti visos vietos') : step('—','Papildomai iškrauti nereikia','Turimos vietos prognozuojamai saulei pakanka');\n    scheduled.sort((x,y)=>(ts(x[0])??Infinity)-(ts(y[0])??Infinity)).forEach(x=>{body+=step(clock(x[0]),x[1],x[2]);});\n    body+=step(clock(h.pv_start_at),'Prasideda prognozuojama gamyba',`Baterijos viršutinė ryto riba ${fmt(h.target_soc,0)} %`);\n    body+='</div><div class=\"rows\">'+row('Reikiama laisva vieta',fmt(h.required_headroom_kwh)+' kWh')+row('Sutaupoma inverterio sąnaudų',fmt(h.standby_saved_kwh,2)+' kWh')+'</div>';\n    if(num(h.unmet_headroom_kwh)>0.05) body+=`<div class=\"callout\">Iki gamybos pradžios gali nepavykti atlaisvinti dar ${fmt(h.unmet_headroom_kwh)} kWh.</div>`;\n    body+='<div class=\"foot muted\">Ryto riba nereiškia, kad mažesnę įkrovą reikia papildyti iš tinklo.</div>';\n  } else {\n    const pvFirst=plan.priority==='horizon_pv_export';\n    const override=String(plan.priority||'').includes('manual') || String(plan.priority||'').includes('storm');\n    const description=!actionable ? 'Paskutinio plano vykdymas šiuo metu nepatvirtintas.' : override ? 'Galioja rankinis arba rezervo planas. Modelio prognozė rodoma atskirai.' : pvFirst ? 'Vartojimas → eksportas iki leistinos ribos → baterija.' : 'Vartojimas → baterijos įkrovimas → pertekliaus eksportas.';\n    body+=`<p class=\"desc\">${description}</p>`;\n    body+='<div class=\"rows\">'+row('Eksporto riba',fmt(h.model_export_limit_kw)+' kW')+row('Priverstinis iškrovimas',on(plan.slot_active)?'Aktyvus':'Išjungtas')+row('Plano SOC riba',fmt(plan.target_soc,0)+' %')+'</div>';\n    body+='<div class=\"callout\">Kitas nakties planas bus parodytas, kai modelis pereis į pasiruošimą rytui. Praėjusios nakties laikai nerodomi.</div>';\n    body+=`<div class=\"foot muted\">Planas atnaujintas ${esc(clock(plan.committed_at))}. Koreguojamas pagal gamybą ir vartojimą.</div>`;\n  }\n}\nif(variables.kind === 'forecast') {\n  body=title('Žvilgsnis į priekį','Gamyba ir vartojimas');\n  if(!forecastOK) body+='<p class=\"desc\">Laukiama šviežios prognozės. Pasenę skaičiai nerodomi.</p>';\n  else {\n    const night=on(h.night_active);\n    body+=`<p class=\"desc\">${night ? 'Artimiausiai saulės dienai' : 'Nuo skaičiavimo momento iki rytojaus pabaigos'} · ${night?esc(date(h.pv_start_at)):fmt(h.horizon_hours,0)+' val.'}</p>`;\n    body+='<div class=\"numbers\">'+figure('Saulės energija',fmt(night?h.day_pv_kwh:h.pv_kwh),'kWh')+figure('Numatomas vartojimas',fmt(night?h.day_load_kwh:h.load_kwh),'kWh')+'</div>';\n    const pct=v=>num(v)===null?'—':(v>=1?'+':'')+fmt((v-1)*100,0)+' %';\n    body+='<div class=\"rows\">'+row('Gamybos korekcija',pct(h.pv_adjustment))+row('Vartojimo korekcija',pct(h.consumption_adjustment))+'</div>';\n    body+='<div class=\"foot muted\">Korekcijos rodo, kiek modelis pakėlė ar sumažino prognozę pagal faktinius duomenis.</div>';\n  }\n}\nif(variables.kind === 'quality') {\n  const q=p.quality, qa=a(q.state), state=s(q.state);\n  const names={ok:'Tinklas stabilus',watch:'Verta stebėti',warning:'Reikia dėmesio',critical:'Reikia patikrinti',stale:'Matavimai pasenę',unknown:'Laukiama matavimų'};\n  const valid=['ok','watch','warning','critical'].includes(state);\n  body=`<div class=\"top\"><div class=\"eyebrow\" style=\"margin:0\">Tinklo kokybė</div>${pill(valid ? (state==='ok'?'Stebėsena veikia':'Yra nukrypimų'):'Trūksta duomenų',state==='ok'?'':'warn')}</div><h3 style=\"margin-top:13px\">${esc(names[state]||'Laukiama matavimų')}</h3>`;\n  body+='<div class=\"numbers\">'+figure('Fazių įtampų skirtumas',fmt(valid?s(q.spread):null,2),'%')+figure('Galios faktorius',fmt(valid?s(q.pf):null,3),'PF')+'</div>';\n  body+='<div class=\"rows\">'+row('Įtampos ribos',valid?fmt(s(q.voltage_min),1)+'–'+fmt(s(q.voltage_max),1)+' V':'—')+row('Reaktyvioji galia',fmt(valid?s(q.reactive):null,0)+' var')+'</div>';\n  if(valid && Array.isArray(qa.issues_lt) && qa.issues_lt.length) body+=`<div class=\"callout\">${esc(qa.issues_lt.filter(x=>typeof x==='string').slice(0,2).join(' · '))}</div>`;\n  body+='<div class=\"foot muted\">Vertinami fazinių įtampų dydžiai. Tinklo ir inverterio išėjimo disbalansas yra skirtingi rodikliai.</div>';\n}\nif(variables.kind === 'profile') {\n  const profile=a(p.consumption_profile), arr=profile.hourly_kwh;\n  const valid=Array.isArray(arr)&&arr.length===24&&arr.every(v=>num(v)!==null);\n  const peak=valid?arr.indexOf(Math.max(...arr)):null;\n  body=title('Vartojimo įpročiai','Kada namams reikia energijos');\n  body+='<div class=\"numbers\">'+figure('Paros vidurkis',fmt(profile.daily_avg),'kWh')+figure('Didžiausia tipinė apkrova',peak===null?'—':String(peak).padStart(2,'0')+':00','')+'</div>';\n  body+='<div class=\"rows\">'+row('Rytojaus prognozė',fmt(s(p.cons_tomorrow))+' kWh')+row('Slenkantis langas',fmt(profile.window_days,0)+' parų')+row('Tinkamų parų / valandinių parų',fmt(profile.daily_sample_days,0)+' / '+fmt(profile.hourly_sample_days,0))+'</div>';\n  if(profile.daily_status!=='ok'||profile.hourly_status!=='ok'||profile.statistics_status!=='ok') body+='<div class=\"callout\">Istorija nepilna arba laukiama jos atnaujinimo. Prognozei išlaikomas paskutinis tinkamas profilis.</div>';\n  body+='<div class=\"foot muted\">Grafikai rodo užbaigtų parų vidurkius. Rytojaus prognozė papildomai įvertina savaitės dieną.</div>';\n}\nif(variables.kind === 'payback') {\n  const inv=num(s(p.finance?.entities?.investment)), grant=num(s(p.finance?.entities?.grant));\n  const valid=inv!==null&&grant!==null&&inv>grant;\n  body=title(p.finance?.title || 'Portfelio rezultatas','Investicija ir grąža');\n  body+='<div class=\"numbers\">'+figure('Sukaupta nauda',fmt(s(p.finance?.entities?.savings),0),'€')+figure('Gryna investicija',valid?fmt(inv-grant,0):'—','€')+'</div>';\n  if(!valid) body+='<div class=\"callout\">Investicijos suma turi būti didesnė už atskaitomą paramą. Patikslinkite įvestis žemiau — atsipirkimo procentas ir terminas kol kas nerodomi.</div>';\n  else body+='<div class=\"rows\">'+row('Atsipirko',fmt(s(p.finance?.entities?.percent),1)+' %')+row('Liko padengti',fmt(s(p.finance?.entities?.remaining),0)+' €')+'</div>';\n  body+='<div class=\"foot muted\">Šio portfelio dashboarduose rodoma bendra investicija. Grafiko kreivės yra modeliuojamos, o ne sukauptos istorijos faktas.</div>';\n}\nreturn `<style>\n.se{font-family:var(--paper-font-body1_-_font-family,Roboto,Arial,sans-serif);text-align:left;color:var(--primary-text-color);font-size:14px;line-height:1.55;white-space:normal}\n.se *{box-sizing:border-box}.se h2,.se h3,.se p{margin:0}.se h2{font-size:23px;line-height:1.3;font-weight:650;letter-spacing:-.4px}.se h3{font-size:19px;font-weight:600;line-height:1.4}\n.se .eyebrow{font-size:10px;letter-spacing:1.7px;text-transform:uppercase;font-weight:650;color:var(--secondary-text-color);margin-bottom:9px}\n.se .muted{font-size:12px;color:var(--secondary-text-color)}.se .desc{font-size:14px;color:var(--secondary-text-color);margin-top:9px;max-width:850px}\n.se .top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.se .pill{display:inline-flex;gap:6px;align-items:center;white-space:nowrap;border-radius:20px;padding:4px 10px;font-size:11px;font-weight:600;color:var(--primary-text-color);background:var(--secondary-background-color)}\n.se .dot{width:7px;height:7px;border-radius:50%;background:#159b85;flex-shrink:0}.se .warn{background:#d99a18}.se .bad{background:#d96b57}\n.se .flow{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}.se .node{padding:13px 14px;border:1px solid var(--divider-color);border-radius:14px;min-width:0}\n.se .node-head{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--secondary-text-color)}.se ha-icon{--mdc-icon-size:19px;width:19px;height:19px}.se .value{font-size:27px;line-height:1.2;font-weight:600;letter-spacing:-.7px;font-variant-numeric:tabular-nums;margin:6px 0 2px}.se .unit{font-size:13px;font-weight:400;letter-spacing:0}\n.se .bat-motion{animation:se-battery-pulse 1.8s ease-in-out infinite}.se .bat-discharge{color:#d99a18!important}@keyframes se-battery-pulse{50%{opacity:.4}}@media(prefers-reduced-motion:reduce){.se .bat-motion{animation:none}}\n.se .battery{margin-top:20px}.se .battery-value{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}.se .track{height:7px;margin-top:10px;border-radius:10px;background:var(--secondary-background-color);overflow:hidden}.se .fill{height:100%;border-radius:10px;background:#159b85}\n.se .steps{margin-top:18px;border-left:2px solid var(--divider-color);margin-left:5px;padding-left:17px}.se .step{position:relative;display:grid;grid-template-columns:66px 1fr;gap:9px;padding:0 0 16px}.se .step:last-child{padding-bottom:0}.se .step:before{position:absolute;left:-23px;top:7px;content:'';width:8px;height:8px;border-radius:50%;background:#159b85;border:2px solid var(--ha-card-background,var(--card-background-color));box-sizing:content-box}.se .time{font-size:17px;font-weight:650;line-height:1.35;font-variant-numeric:tabular-nums}.se .step-title{font-size:13px;font-weight:600}\n.se .rows{margin-top:15px}.se .row{display:flex;justify-content:space-between;gap:16px;border-top:1px solid var(--divider-color);padding:10px 0;font-size:13px}.se .row:last-child{padding-bottom:0}.se .row span:first-child{color:var(--secondary-text-color)}.se .row strong{text-align:right;font-weight:550;font-variant-numeric:tabular-nums}\n.se .numbers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:19px}.se .number .value{font-size:26px}.se .callout{padding:11px 13px;border-left:3px solid #d99a18;background:var(--secondary-background-color);border-radius:0 8px 8px 0;font-size:12px;margin-top:16px}.se .foot{margin-top:16px;padding-top:12px;border-top:1px solid var(--divider-color)}\n@media(max-width:450px){.se h2{font-size:20px}.se .flow{gap:8px}.se .node{padding:11px}.se .value{font-size:24px}}\n</style><div class=\"se\">${body}</div>`;\n]]]"
+      }
+    },
+    "se_metric": {
+      "section_mode": true,
+      "show_name": true,
+      "show_icon": true,
+      "show_state": true,
+      "tap_action": {
+        "action": "more-info"
+      },
+      "state_display": "[[[\n              const raw=variables.attribute ? entity?.attributes?.[variables.attribute] : entity?.state;\n              const n=raw!==null && raw!==undefined && String(raw).trim()!=='' ? Number(raw) : NaN;\n              if(!Number.isFinite(n)) return '—';\n              return new Intl.NumberFormat(variables.locale || 'lt-LT',{maximumFractionDigits:variables.decimals ?? 1}).format(n)+' '+(variables.unit ?? entity?.attributes?.unit_of_measurement ?? '');\n            ]]]",
+      "styles": {
+        "card": [
+          {
+            "padding": "16px"
+          },
+          {
+            "border-radius": "16px"
+          },
+          {
+            "box-shadow": "none"
+          }
+        ],
+        "grid": [
+          {
+            "grid-template-areas": "\"i n\" \"s s\""
+          },
+          {
+            "grid-template-columns": "24px 1fr"
+          },
+          {
+            "row-gap": "12px"
+          }
+        ],
+        "img_cell": [
+          {
+            "justify-self": "start"
+          },
+          {
+            "width": "20px"
+          }
+        ],
+        "icon": [
+          {
+            "width": "20px"
+          },
+          {
+            "color": "[[[ return variables.color || 'var(--primary-color)'; ]]]"
+          }
+        ],
+        "name": [
+          {
+            "justify-self": "start"
+          },
+          {
+            "text-align": "left"
+          },
+          {
+            "font-size": "12px"
+          },
+          {
+            "color": "var(--secondary-text-color)"
+          },
+          {
+            "white-space": "normal"
+          }
+        ],
+        "state": [
+          {
+            "justify-self": "start"
+          },
+          {
+            "font-size": "25px"
+          },
+          {
+            "font-weight": "550"
+          },
+          {
+            "font-variant-numeric": "tabular-nums"
+          }
+        ]
+      }
+    }
+  },
+  "views": [
+    {
+      "title": "Energija",
+      "path": "eimo",
+      "icon": "mdi:lightning-bolt",
+      "type": "sections",
+      "max_columns": 2,
+      "dense_section_placement": false,
+      "header": {
+        "layout": "start",
+        "badges_position": "bottom",
+        "card": {
+          "type": "markdown",
+          "text_only": true,
+          "content": "# Eimo SE · Energija\nDabartinė būsena ir artimiausias planas."
+        }
+      },
+      "badges": [
+        {
+          "type": "entity",
+          "entity": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+          "name": "Baterija",
+          "show_name": true,
+          "color": "teal"
+        },
+        {
+          "type": "entity",
+          "entity": "sensor.eimo_pv_power",
+          "name": "Namai SE",
+          "show_name": true,
+          "show_state": false,
+          "icon": "mdi:swap-horizontal",
+          "tap_action": {
+            "action": "navigate",
+            "navigation_path": "/energijos-valdymas/energija"
+          }
+        }
+      ],
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:button-card",
+              "template": "se_panel",
+              "update_timer": "15s",
+              "variables": {
+                "plant": {
+                  "site_label": "Eimo",
+                  "pv": "sensor.eimo_pv_power",
+                  "load": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "grid": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
+                  "battery": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+                  "soc": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "plan": "sensor.eimo_plan",
+                  "telemetry": "sensor.eimo_telemetry_health",
+                  "executor": "sensor.eimo_executor_health",
+                  "storm": "input_boolean.storm_mode_eimo",
+                  "manual": null,
+                  "manual_soc": null,
+                  "consumption_profile": "sensor.consumption_profile_eimo",
+                  "cons_tomorrow": "sensor.consumption_forecast_tomorrow_eimo",
+                  "horizon": "sensor.eimo_energy_horizon",
+                  "power": "switch.solis_inverter_1033300254190112_inverter_on_off",
+                  "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+                  "heartbeat_max_age": 900,
+                  "grid_sign": -1,
+                  "battery_sign": -1,
+                  "url": "eimo-energija",
+                  "locale": "lt-LT",
+                  "timezone": "Europe/Vilnius",
+                  "finance": {
+                    "title": "Bendras elektrinių portfelis",
+                    "start": "2026-02-01",
+                    "end": "2030-02-01",
+                    "monthly_weights": [
+                      0.02,
+                      0.04,
+                      0.08,
+                      0.12,
+                      0.14,
+                      0.14,
+                      0.14,
+                      0.12,
+                      0.09,
+                      0.06,
+                      0.03,
+                      0.02
+                    ],
+                    "members": [
+                      {
+                        "site": "eimo",
+                        "start": "2026-02-01",
+                        "production_share": 0.46,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_inverter_1033300254190112_solis_energy_total",
+                        "label": "Eimo"
+                      },
+                      {
+                        "site": "home",
+                        "start": "2026-05-09",
+                        "production_share": 0.54,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_s6_eh3p_pv_total_energy_generation",
+                        "label": "Namai"
+                      }
+                    ],
+                    "entities": {
+                      "savings": "sensor.pv_sutaupyta_viso",
+                      "net": "sensor.pv_gryna_investicija",
+                      "percent": "sensor.pv_atsipirkes_procentais",
+                      "remaining": "sensor.pv_liko_iki_atsipirkimo",
+                      "date": "sensor.pv_atsipirkimo_prognoze",
+                      "production": "sensor.pv_pagaminta_viso",
+                      "investment": "input_number.pv_investicija",
+                      "grant": "input_number.pv_parama",
+                      "price": "input_number.pv_kwh_verte",
+                      "fee": "input_number.pv_men_mokestis",
+                      "annual": "input_number.pv_metine_gamyba"
+                    },
+                    "defaults": {
+                      "annual": 11000,
+                      "price": 0.25,
+                      "ratio": 0.85,
+                      "fee": 10
+                    }
+                  },
+                  "quality": {
+                    "state": "sensor.eimo_power_quality_state",
+                    "voltage_min": "sensor.eimo_power_quality_voltage_min",
+                    "voltage_max": "sensor.eimo_power_quality_voltage_max",
+                    "spread": "sensor.eimo_power_quality_voltage_spread",
+                    "active": "sensor.eimo_power_quality_active_power",
+                    "reactive": "sensor.eimo_power_quality_reactive_power",
+                    "pf": "sensor.eimo_power_quality_power_factor",
+                    "frequency": "sensor.eimo_power_quality_frequency",
+                    "rise": "sensor.eimo_power_quality_voltage_rise",
+                    "active_imbalance": "sensor.eimo_power_quality_active_imbalance",
+                    "current_imbalance": "sensor.eimo_power_quality_current_imbalance"
+                  }
+                },
+                "kind": "status"
+              },
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
               }
-              return pts;
-      - type: custom:apexcharts-card
-        header:
-          show: true
-          title: Vartojimas pagal savaitės dieną (kWh)
-        graph_span: 167h
-        span:
-          start: isoWeek
-          offset: '-7d'
-        apex_config:
-          chart:
-            height: 240
-            animations:
-              enabled: false
-            locales:
-              - name: en
-                options:
-                  days: [Sekmadienis, Pirmadienis, Antradienis, Trečiadienis, Ketvirtadienis, Penktadienis, Šeštadienis]
-                  shortDays: [Sk, Pr, An, Tr, Kt, Pn, Št]
-                  months: [Sausis, Vasaris, Kovas, Balandis, Gegužė, Birželis, Liepa, Rugpjūtis, Rugsėjis, Spalis, Lapkritis, Gruodis]
-                  shortMonths: [Sau, Vas, Kov, Bal, Geg, Bir, Lie, Rgp, Rgs, Spa, Lap, Gru]
-          xaxis:
-            type: datetime
-            tickAmount: 6
-            labels:
-              format: ddd
-              datetimeUTC: false
-          tooltip:
-            x:
-              format: dddd
-          stroke:
-            curve: straight
-          markers:
-            size: 0
-            hover:
-              size: 0
-        yaxis:
-          - min: 0
-            decimals: 1
-        series:
-          - entity: sensor.consumption_profile_eimo
-            name: kWh
-            type: column
-            color: '#66bb6a'
-            data_generator: |
-              const now = new Date();
-              const dow = (now.getDay() + 6) % 7;
-              const monday = new Date(now); monday.setDate(now.getDate() - dow - 7); monday.setHours(0, 0, 0, 0);
-              return (entity.attributes.weekday_kwh || []).map((v, i) => {
-                const d = new Date(monday); d.setDate(monday.getDate() + i); d.setHours(0, 0, 0, 0);
-                return [d.getTime(), v];
-              });
-          - entity: sensor.consumption_profile_eimo
-            name: Vidurkis
-            type: line
-            color: '#78909c'
-            stroke_width: 1
-            data_generator: |
-              const arr = entity.attributes.weekday_kwh || [];
-              const avg = arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-              const now = new Date();
-              const dow = (now.getDay() + 6) % 7;
-              const monday = new Date(now); monday.setDate(now.getDate() - dow - 7); monday.setHours(0, 0, 0, 0);
-              return arr.map((v, i) => {
-                const d = new Date(monday); d.setDate(monday.getDate() + i); d.setHours(0, 0, 0, 0);
-                return [d.getTime(), avg];
-              });
+            }
+          ],
+          "column_span": 2
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:button-card",
+              "template": "se_panel",
+              "update_timer": "5s",
+              "variables": {
+                "plant": {
+                  "site_label": "Eimo",
+                  "pv": "sensor.eimo_pv_power",
+                  "load": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "grid": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
+                  "battery": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+                  "soc": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "plan": "sensor.eimo_plan",
+                  "telemetry": "sensor.eimo_telemetry_health",
+                  "executor": "sensor.eimo_executor_health",
+                  "storm": "input_boolean.storm_mode_eimo",
+                  "manual": null,
+                  "manual_soc": null,
+                  "consumption_profile": "sensor.consumption_profile_eimo",
+                  "cons_tomorrow": "sensor.consumption_forecast_tomorrow_eimo",
+                  "horizon": "sensor.eimo_energy_horizon",
+                  "power": "switch.solis_inverter_1033300254190112_inverter_on_off",
+                  "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+                  "heartbeat_max_age": 900,
+                  "grid_sign": -1,
+                  "battery_sign": -1,
+                  "url": "eimo-energija",
+                  "locale": "lt-LT",
+                  "timezone": "Europe/Vilnius",
+                  "finance": {
+                    "title": "Bendras elektrinių portfelis",
+                    "start": "2026-02-01",
+                    "end": "2030-02-01",
+                    "monthly_weights": [
+                      0.02,
+                      0.04,
+                      0.08,
+                      0.12,
+                      0.14,
+                      0.14,
+                      0.14,
+                      0.12,
+                      0.09,
+                      0.06,
+                      0.03,
+                      0.02
+                    ],
+                    "members": [
+                      {
+                        "site": "eimo",
+                        "start": "2026-02-01",
+                        "production_share": 0.46,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_inverter_1033300254190112_solis_energy_total",
+                        "label": "Eimo"
+                      },
+                      {
+                        "site": "home",
+                        "start": "2026-05-09",
+                        "production_share": 0.54,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_s6_eh3p_pv_total_energy_generation",
+                        "label": "Namai"
+                      }
+                    ],
+                    "entities": {
+                      "savings": "sensor.pv_sutaupyta_viso",
+                      "net": "sensor.pv_gryna_investicija",
+                      "percent": "sensor.pv_atsipirkes_procentais",
+                      "remaining": "sensor.pv_liko_iki_atsipirkimo",
+                      "date": "sensor.pv_atsipirkimo_prognoze",
+                      "production": "sensor.pv_pagaminta_viso",
+                      "investment": "input_number.pv_investicija",
+                      "grant": "input_number.pv_parama",
+                      "price": "input_number.pv_kwh_verte",
+                      "fee": "input_number.pv_men_mokestis",
+                      "annual": "input_number.pv_metine_gamyba"
+                    },
+                    "defaults": {
+                      "annual": 11000,
+                      "price": 0.25,
+                      "ratio": 0.85,
+                      "fee": 10
+                    }
+                  },
+                  "quality": {
+                    "state": "sensor.eimo_power_quality_state",
+                    "voltage_min": "sensor.eimo_power_quality_voltage_min",
+                    "voltage_max": "sensor.eimo_power_quality_voltage_max",
+                    "spread": "sensor.eimo_power_quality_voltage_spread",
+                    "active": "sensor.eimo_power_quality_active_power",
+                    "reactive": "sensor.eimo_power_quality_reactive_power",
+                    "pf": "sensor.eimo_power_quality_power_factor",
+                    "frequency": "sensor.eimo_power_quality_frequency",
+                    "rise": "sensor.eimo_power_quality_voltage_rise",
+                    "active_imbalance": "sensor.eimo_power_quality_active_imbalance",
+                    "current_imbalance": "sensor.eimo_power_quality_current_imbalance"
+                  }
+                },
+                "kind": "flow"
+              },
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:button-card",
+              "template": "se_panel",
+              "update_timer": "15s",
+              "variables": {
+                "plant": {
+                  "site_label": "Eimo",
+                  "pv": "sensor.eimo_pv_power",
+                  "load": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "grid": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
+                  "battery": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+                  "soc": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "plan": "sensor.eimo_plan",
+                  "telemetry": "sensor.eimo_telemetry_health",
+                  "executor": "sensor.eimo_executor_health",
+                  "storm": "input_boolean.storm_mode_eimo",
+                  "manual": null,
+                  "manual_soc": null,
+                  "consumption_profile": "sensor.consumption_profile_eimo",
+                  "cons_tomorrow": "sensor.consumption_forecast_tomorrow_eimo",
+                  "horizon": "sensor.eimo_energy_horizon",
+                  "power": "switch.solis_inverter_1033300254190112_inverter_on_off",
+                  "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+                  "heartbeat_max_age": 900,
+                  "grid_sign": -1,
+                  "battery_sign": -1,
+                  "url": "eimo-energija",
+                  "locale": "lt-LT",
+                  "timezone": "Europe/Vilnius",
+                  "finance": {
+                    "title": "Bendras elektrinių portfelis",
+                    "start": "2026-02-01",
+                    "end": "2030-02-01",
+                    "monthly_weights": [
+                      0.02,
+                      0.04,
+                      0.08,
+                      0.12,
+                      0.14,
+                      0.14,
+                      0.14,
+                      0.12,
+                      0.09,
+                      0.06,
+                      0.03,
+                      0.02
+                    ],
+                    "members": [
+                      {
+                        "site": "eimo",
+                        "start": "2026-02-01",
+                        "production_share": 0.46,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_inverter_1033300254190112_solis_energy_total",
+                        "label": "Eimo"
+                      },
+                      {
+                        "site": "home",
+                        "start": "2026-05-09",
+                        "production_share": 0.54,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_s6_eh3p_pv_total_energy_generation",
+                        "label": "Namai"
+                      }
+                    ],
+                    "entities": {
+                      "savings": "sensor.pv_sutaupyta_viso",
+                      "net": "sensor.pv_gryna_investicija",
+                      "percent": "sensor.pv_atsipirkes_procentais",
+                      "remaining": "sensor.pv_liko_iki_atsipirkimo",
+                      "date": "sensor.pv_atsipirkimo_prognoze",
+                      "production": "sensor.pv_pagaminta_viso",
+                      "investment": "input_number.pv_investicija",
+                      "grant": "input_number.pv_parama",
+                      "price": "input_number.pv_kwh_verte",
+                      "fee": "input_number.pv_men_mokestis",
+                      "annual": "input_number.pv_metine_gamyba"
+                    },
+                    "defaults": {
+                      "annual": 11000,
+                      "price": 0.25,
+                      "ratio": 0.85,
+                      "fee": 10
+                    }
+                  },
+                  "quality": {
+                    "state": "sensor.eimo_power_quality_state",
+                    "voltage_min": "sensor.eimo_power_quality_voltage_min",
+                    "voltage_max": "sensor.eimo_power_quality_voltage_max",
+                    "spread": "sensor.eimo_power_quality_voltage_spread",
+                    "active": "sensor.eimo_power_quality_active_power",
+                    "reactive": "sensor.eimo_power_quality_reactive_power",
+                    "pf": "sensor.eimo_power_quality_power_factor",
+                    "frequency": "sensor.eimo_power_quality_frequency",
+                    "rise": "sensor.eimo_power_quality_voltage_rise",
+                    "active_imbalance": "sensor.eimo_power_quality_active_imbalance",
+                    "current_imbalance": "sensor.eimo_power_quality_current_imbalance"
+                  }
+                },
+                "kind": "plan"
+              },
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Šiandien",
+              "icon": "mdi:calendar-today",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "custom:button-card",
+              "template": "se_metric",
+              "entity": "sensor.solis_inverter_1033300254190112_solis_energy_today",
+              "name": "Pagaminta",
+              "icon": "mdi:weather-sunny",
+              "variables": {
+                "color": "#d99a18",
+                "attribute": null,
+                "unit": null,
+                "decimals": 1
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 2
+              }
+            },
+            {
+              "type": "custom:button-card",
+              "template": "se_metric",
+              "entity": "sensor.eimo_house_energy",
+              "name": "Suvartota",
+              "icon": "mdi:home-lightning-bolt",
+              "variables": {
+                "color": "#4789e8",
+                "attribute": null,
+                "unit": null,
+                "decimals": 1
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 2
+              }
+            },
+            {
+              "type": "custom:button-card",
+              "template": "se_metric",
+              "entity": "sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy",
+              "name": "Į tinklą",
+              "icon": "mdi:transmission-tower-import",
+              "variables": {
+                "color": "#8973cf",
+                "attribute": null,
+                "unit": null,
+                "decimals": 1
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 2
+              }
+            },
+            {
+              "type": "custom:button-card",
+              "template": "se_metric",
+              "entity": "sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased",
+              "name": "Iš tinklo",
+              "icon": "mdi:transmission-tower-export",
+              "variables": {
+                "color": "#7c8799",
+                "attribute": null,
+                "unit": null,
+                "decimals": 1
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 2
+              }
+            }
+          ],
+          "column_span": 2
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "Saulė, vartojimas ir baterija · 24 val."
+              },
+              "graph_span": "24h",
+              "update_interval": "2min",
+              "yaxis": [
+                {
+                  "id": "kw",
+                  "min": 0,
+                  "decimals": 1
+                },
+                {
+                  "id": "soc",
+                  "opposite": true,
+                  "min": 0,
+                  "max": 100,
+                  "decimals": 0
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.eimo_pv_power",
+                  "name": "Saulė · kW",
+                  "yaxis_id": "kw",
+                  "color": "#d99a18",
+                  "type": "area",
+                  "opacity": 0.15,
+                  "transform": "return x === null ? null : Number(x) / 1000;",
+                  "stroke_width": 2,
+                  "group_by": {
+                    "func": "avg",
+                    "duration": "5min"
+                  }
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "name": "Vartojimas · kW",
+                  "yaxis_id": "kw",
+                  "color": "#4789e8",
+                  "transform": "return x === null ? null : Number(x) / 1000;",
+                  "stroke_width": 2,
+                  "group_by": {
+                    "func": "avg",
+                    "duration": "5min"
+                  }
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "name": "Baterija · %",
+                  "yaxis_id": "soc",
+                  "color": "#159b85",
+                  "stroke_width": 2,
+                  "group_by": {
+                    "func": "last",
+                    "duration": "5min"
+                  }
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ],
+          "column_span": 2,
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_grafikai",
+              "state": "on"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:button-card",
+              "template": "se_panel",
+              "update_timer": "15s",
+              "variables": {
+                "plant": {
+                  "site_label": "Eimo",
+                  "pv": "sensor.eimo_pv_power",
+                  "load": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "grid": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
+                  "battery": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+                  "soc": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "plan": "sensor.eimo_plan",
+                  "telemetry": "sensor.eimo_telemetry_health",
+                  "executor": "sensor.eimo_executor_health",
+                  "storm": "input_boolean.storm_mode_eimo",
+                  "manual": null,
+                  "manual_soc": null,
+                  "consumption_profile": "sensor.consumption_profile_eimo",
+                  "cons_tomorrow": "sensor.consumption_forecast_tomorrow_eimo",
+                  "horizon": "sensor.eimo_energy_horizon",
+                  "power": "switch.solis_inverter_1033300254190112_inverter_on_off",
+                  "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+                  "heartbeat_max_age": 900,
+                  "grid_sign": -1,
+                  "battery_sign": -1,
+                  "url": "eimo-energija",
+                  "locale": "lt-LT",
+                  "timezone": "Europe/Vilnius",
+                  "finance": {
+                    "title": "Bendras elektrinių portfelis",
+                    "start": "2026-02-01",
+                    "end": "2030-02-01",
+                    "monthly_weights": [
+                      0.02,
+                      0.04,
+                      0.08,
+                      0.12,
+                      0.14,
+                      0.14,
+                      0.14,
+                      0.12,
+                      0.09,
+                      0.06,
+                      0.03,
+                      0.02
+                    ],
+                    "members": [
+                      {
+                        "site": "eimo",
+                        "start": "2026-02-01",
+                        "production_share": 0.46,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_inverter_1033300254190112_solis_energy_total",
+                        "label": "Eimo"
+                      },
+                      {
+                        "site": "home",
+                        "start": "2026-05-09",
+                        "production_share": 0.54,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_s6_eh3p_pv_total_energy_generation",
+                        "label": "Namai"
+                      }
+                    ],
+                    "entities": {
+                      "savings": "sensor.pv_sutaupyta_viso",
+                      "net": "sensor.pv_gryna_investicija",
+                      "percent": "sensor.pv_atsipirkes_procentais",
+                      "remaining": "sensor.pv_liko_iki_atsipirkimo",
+                      "date": "sensor.pv_atsipirkimo_prognoze",
+                      "production": "sensor.pv_pagaminta_viso",
+                      "investment": "input_number.pv_investicija",
+                      "grant": "input_number.pv_parama",
+                      "price": "input_number.pv_kwh_verte",
+                      "fee": "input_number.pv_men_mokestis",
+                      "annual": "input_number.pv_metine_gamyba"
+                    },
+                    "defaults": {
+                      "annual": 11000,
+                      "price": 0.25,
+                      "ratio": 0.85,
+                      "fee": 10
+                    }
+                  },
+                  "quality": {
+                    "state": "sensor.eimo_power_quality_state",
+                    "voltage_min": "sensor.eimo_power_quality_voltage_min",
+                    "voltage_max": "sensor.eimo_power_quality_voltage_max",
+                    "spread": "sensor.eimo_power_quality_voltage_spread",
+                    "active": "sensor.eimo_power_quality_active_power",
+                    "reactive": "sensor.eimo_power_quality_reactive_power",
+                    "pf": "sensor.eimo_power_quality_power_factor",
+                    "frequency": "sensor.eimo_power_quality_frequency",
+                    "rise": "sensor.eimo_power_quality_voltage_rise",
+                    "active_imbalance": "sensor.eimo_power_quality_active_imbalance",
+                    "current_imbalance": "sensor.eimo_power_quality_current_imbalance"
+                  }
+                },
+                "kind": "forecast"
+              },
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ],
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_prognoze",
+              "state": "on"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "ESO pasaugojimo bankas",
+              "icon": "mdi:bank-outline",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "custom:button-card",
+              "template": "se_metric",
+              "entity": "sensor.eso_bankas_likutis_eimo",
+              "name": "Dabartinis likutis",
+              "icon": "mdi:bank-outline",
+              "variables": {
+                "color": "#159b85",
+                "attribute": null,
+                "unit": null,
+                "decimals": 1
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 2
+              }
+            },
+            {
+              "type": "custom:button-card",
+              "template": "se_metric",
+              "entity": "sensor.eso_bankas_verte_eimo",
+              "name": "Likučio vertė",
+              "icon": "mdi:cash",
+              "variables": {
+                "color": "#159b85",
+                "attribute": null,
+                "unit": null,
+                "decimals": 0
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 2
+              }
+            },
+            {
+              "type": "markdown",
+              "content": "Likutis apima einamojo laikotarpio srautus. Oficialūs uždarytų mėnesių duomenys — „Vartojime“.",
+              "text_only": true,
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Rodyti daugiau",
+              "icon": "mdi:view-dashboard-outline",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "tile",
+              "entity": "input_boolean.eimo_dashboard_prognoze",
+              "name": "Prognozės",
+              "icon": "mdi:weather-partly-cloudy",
+              "hide_state": true,
+              "color": "teal",
+              "tap_action": {
+                "action": "toggle"
+              },
+              "icon_tap_action": {
+                "action": "toggle"
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 1
+              }
+            },
+            {
+              "type": "tile",
+              "entity": "input_boolean.eimo_dashboard_grafikai",
+              "name": "Grafikai",
+              "icon": "mdi:chart-line",
+              "hide_state": true,
+              "color": "teal",
+              "tap_action": {
+                "action": "toggle"
+              },
+              "icon_tap_action": {
+                "action": "toggle"
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 1
+              }
+            },
+            {
+              "type": "tile",
+              "entity": "input_boolean.eimo_dashboard_diagnostika",
+              "name": "Diagnostika",
+              "icon": "mdi:stethoscope",
+              "hide_state": true,
+              "color": "teal",
+              "tap_action": {
+                "action": "toggle"
+              },
+              "icon_tap_action": {
+                "action": "toggle"
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 1
+              }
+            },
+            {
+              "type": "tile",
+              "entity": "input_boolean.eimo_dashboard_valdymas",
+              "name": "Valdymas",
+              "icon": "mdi:tune",
+              "hide_state": true,
+              "color": "teal",
+              "tap_action": {
+                "action": "toggle"
+              },
+              "icon_tap_action": {
+                "action": "toggle"
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 1
+              }
+            },
+            {
+              "type": "tile",
+              "entity": "input_boolean.eimo_dashboard_boileris",
+              "name": "Boileris",
+              "icon": "mdi:water-boiler",
+              "hide_state": true,
+              "color": "teal",
+              "tap_action": {
+                "action": "toggle"
+              },
+              "icon_tap_action": {
+                "action": "toggle"
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 1
+              }
+            }
+          ],
+          "column_span": 2
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Rankinės parinktys",
+              "icon": "mdi:tune",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "entities",
+              "title": "Šios elektrinės valdymas",
+              "show_header_toggle": false,
+              "entities": [
+                {
+                  "entity": "input_boolean.storm_mode_eimo",
+                  "name": "Audros / ESO rezervas"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ],
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_valdymas",
+              "state": "on"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Analizė",
+      "path": "analize",
+      "icon": "mdi:chart-box-outline",
+      "type": "sections",
+      "max_columns": 2,
+      "dense_section_placement": false,
+      "header": {
+        "layout": "start",
+        "badges_position": "bottom",
+        "card": {
+          "type": "markdown",
+          "text_only": true,
+          "content": "# Eimo SE · Analizė\nRezultatai, prognozių tikslumas ir įrangos būklė."
+        }
+      },
+      "badges": [
+        {
+          "type": "entity",
+          "entity": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+          "name": "Baterija",
+          "show_name": true,
+          "color": "teal"
+        },
+        {
+          "type": "entity",
+          "entity": "sensor.eimo_pv_power",
+          "name": "Namai SE",
+          "show_name": true,
+          "show_state": false,
+          "icon": "mdi:swap-horizontal",
+          "tap_action": {
+            "action": "navigate",
+            "navigation_path": "/energijos-valdymas/analize"
+          }
+        }
+      ],
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Energijos rezultatas",
+              "icon": "mdi:chart-bar",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "glance",
+              "title": "Šiandienos rezultatas",
+              "entities": [
+                {
+                  "entity": "sensor.energy_savings_today_eimo",
+                  "name": "Sutaupyta",
+                  "icon": "mdi:piggy-bank"
+                },
+                {
+                  "entity": "sensor.eimo_house_energy",
+                  "name": "Suvartota"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased",
+                  "name": "Iš tinklo"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy",
+                  "name": "Į tinklą"
+                }
+              ],
+              "show_state": true,
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            },
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "Dienos balansas (14 d. · kWh)"
+              },
+              "graph_span": "14d",
+              "update_interval": "5min",
+              "span": {
+                "end": "day"
+              },
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
+              "yaxis": [
+                {
+                  "min": 0,
+                  "decimals": 0
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_energy_today",
+                  "name": "Saulė",
+                  "type": "column",
+                  "color": "#d99a18",
+                  "group_by": {
+                    "func": "max",
+                    "duration": "1d"
+                  }
+                },
+                {
+                  "entity": "sensor.eimo_house_energy",
+                  "name": "Suvartota",
+                  "type": "column",
+                  "color": "#4789e8",
+                  "group_by": {
+                    "func": "max",
+                    "duration": "1d"
+                  }
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy",
+                  "name": "Į tinklą",
+                  "type": "column",
+                  "color": "#8973cf",
+                  "group_by": {
+                    "func": "max",
+                    "duration": "1d"
+                  }
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased",
+                  "name": "Iš tinklo",
+                  "type": "column",
+                  "color": "#7c8799",
+                  "group_by": {
+                    "func": "max",
+                    "duration": "1d"
+                  }
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:button-card",
+              "template": "se_panel",
+              "update_timer": "15s",
+              "variables": {
+                "plant": {
+                  "site_label": "Eimo",
+                  "pv": "sensor.eimo_pv_power",
+                  "load": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "grid": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
+                  "battery": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+                  "soc": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "plan": "sensor.eimo_plan",
+                  "telemetry": "sensor.eimo_telemetry_health",
+                  "executor": "sensor.eimo_executor_health",
+                  "storm": "input_boolean.storm_mode_eimo",
+                  "manual": null,
+                  "manual_soc": null,
+                  "consumption_profile": "sensor.consumption_profile_eimo",
+                  "cons_tomorrow": "sensor.consumption_forecast_tomorrow_eimo",
+                  "horizon": "sensor.eimo_energy_horizon",
+                  "power": "switch.solis_inverter_1033300254190112_inverter_on_off",
+                  "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+                  "heartbeat_max_age": 900,
+                  "grid_sign": -1,
+                  "battery_sign": -1,
+                  "url": "eimo-energija",
+                  "locale": "lt-LT",
+                  "timezone": "Europe/Vilnius",
+                  "finance": {
+                    "title": "Bendras elektrinių portfelis",
+                    "start": "2026-02-01",
+                    "end": "2030-02-01",
+                    "monthly_weights": [
+                      0.02,
+                      0.04,
+                      0.08,
+                      0.12,
+                      0.14,
+                      0.14,
+                      0.14,
+                      0.12,
+                      0.09,
+                      0.06,
+                      0.03,
+                      0.02
+                    ],
+                    "members": [
+                      {
+                        "site": "eimo",
+                        "start": "2026-02-01",
+                        "production_share": 0.46,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_inverter_1033300254190112_solis_energy_total",
+                        "label": "Eimo"
+                      },
+                      {
+                        "site": "home",
+                        "start": "2026-05-09",
+                        "production_share": 0.54,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_s6_eh3p_pv_total_energy_generation",
+                        "label": "Namai"
+                      }
+                    ],
+                    "entities": {
+                      "savings": "sensor.pv_sutaupyta_viso",
+                      "net": "sensor.pv_gryna_investicija",
+                      "percent": "sensor.pv_atsipirkes_procentais",
+                      "remaining": "sensor.pv_liko_iki_atsipirkimo",
+                      "date": "sensor.pv_atsipirkimo_prognoze",
+                      "production": "sensor.pv_pagaminta_viso",
+                      "investment": "input_number.pv_investicija",
+                      "grant": "input_number.pv_parama",
+                      "price": "input_number.pv_kwh_verte",
+                      "fee": "input_number.pv_men_mokestis",
+                      "annual": "input_number.pv_metine_gamyba"
+                    },
+                    "defaults": {
+                      "annual": 11000,
+                      "price": 0.25,
+                      "ratio": 0.85,
+                      "fee": 10
+                    }
+                  },
+                  "quality": {
+                    "state": "sensor.eimo_power_quality_state",
+                    "voltage_min": "sensor.eimo_power_quality_voltage_min",
+                    "voltage_max": "sensor.eimo_power_quality_voltage_max",
+                    "spread": "sensor.eimo_power_quality_voltage_spread",
+                    "active": "sensor.eimo_power_quality_active_power",
+                    "reactive": "sensor.eimo_power_quality_reactive_power",
+                    "pf": "sensor.eimo_power_quality_power_factor",
+                    "frequency": "sensor.eimo_power_quality_frequency",
+                    "rise": "sensor.eimo_power_quality_voltage_rise",
+                    "active_imbalance": "sensor.eimo_power_quality_active_imbalance",
+                    "current_imbalance": "sensor.eimo_power_quality_current_imbalance"
+                  }
+                },
+                "kind": "quality"
+              },
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            },
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "PCC fazinė įtampa (7 d.)"
+              },
+              "graph_span": "7d",
+              "update_interval": "5min",
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "stroke": {
+                  "width": 1,
+                  "curve": "straight"
+                },
+                "markers": {
+                  "size": 0
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
+              "yaxis": [
+                {
+                  "min": "~200",
+                  "max": "~255",
+                  "decimals": 0
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.eimo_power_quality_voltage_min",
+                  "name": "Min",
+                  "color": "#42a5f5",
+                  "stroke_width": 1,
+                  "type": "line"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_voltage_max",
+                  "name": "Max",
+                  "color": "#ef5350",
+                  "stroke_width": 1,
+                  "type": "line"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Baterija",
+              "icon": "mdi:battery-heart-outline",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "glance",
+              "title": "Baterijos sveikata",
+              "entities": [
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_battery_state_of_health",
+                  "name": "SOH",
+                  "icon": "mdi:battery-heart-variant"
+                },
+                {
+                  "entity": "sensor.battery_equivalent_cycles_eimo",
+                  "name": "Ciklai"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_daily_energy_charged",
+                  "name": "Įkrauta šiandien",
+                  "icon": "mdi:battery-plus"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_daily_energy_discharged",
+                  "name": "Iškrauta šiandien",
+                  "icon": "mdi:battery-minus"
+                }
+              ],
+              "show_state": true,
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            },
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "Baterijos round-trip efektyvumas (30 d.)"
+              },
+              "graph_span": "30d",
+              "update_interval": "10min",
+              "span": {
+                "end": "day"
+              },
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
+              "yaxis": [
+                {
+                  "min": "~80",
+                  "max": 100,
+                  "decimals": 1
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.battery_roundtrip_efficiency_eimo",
+                  "name": "Round-trip %",
+                  "color": "#7e57c2",
+                  "stroke_width": 2,
+                  "group_by": {
+                    "func": "last",
+                    "duration": "1d"
+                  }
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Inverteris",
+              "icon": "mdi:solar-power-variant-outline",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "glance",
+              "title": "Inverteris",
+              "entities": [
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_temperature",
+                  "name": "Temperatūra"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_state",
+                  "name": "Būsena"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_ac_frequency",
+                  "name": "Tinklo dažnis"
+                }
+              ],
+              "show_state": true,
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            },
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "Inverterio temperatūra (48 val.)"
+              },
+              "graph_span": "48h",
+              "update_interval": "5min",
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
+              "yaxis": [
+                {
+                  "min": "~20",
+                  "decimals": 0
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_temperature",
+                  "name": "Temperatūra °C",
+                  "color": "#ff7043",
+                  "stroke_width": 2,
+                  "group_by": {
+                    "func": "avg",
+                    "duration": "15min"
+                  }
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Prognozės ir mokymasis",
+              "icon": "mdi:weather-partly-cloudy",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "custom:button-card",
+              "template": "se_panel",
+              "update_timer": "15s",
+              "variables": {
+                "plant": {
+                  "site_label": "Eimo",
+                  "pv": "sensor.eimo_pv_power",
+                  "load": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "grid": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
+                  "battery": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+                  "soc": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "plan": "sensor.eimo_plan",
+                  "telemetry": "sensor.eimo_telemetry_health",
+                  "executor": "sensor.eimo_executor_health",
+                  "storm": "input_boolean.storm_mode_eimo",
+                  "manual": null,
+                  "manual_soc": null,
+                  "consumption_profile": "sensor.consumption_profile_eimo",
+                  "cons_tomorrow": "sensor.consumption_forecast_tomorrow_eimo",
+                  "horizon": "sensor.eimo_energy_horizon",
+                  "power": "switch.solis_inverter_1033300254190112_inverter_on_off",
+                  "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+                  "heartbeat_max_age": 900,
+                  "grid_sign": -1,
+                  "battery_sign": -1,
+                  "url": "eimo-energija",
+                  "locale": "lt-LT",
+                  "timezone": "Europe/Vilnius",
+                  "finance": {
+                    "title": "Bendras elektrinių portfelis",
+                    "start": "2026-02-01",
+                    "end": "2030-02-01",
+                    "monthly_weights": [
+                      0.02,
+                      0.04,
+                      0.08,
+                      0.12,
+                      0.14,
+                      0.14,
+                      0.14,
+                      0.12,
+                      0.09,
+                      0.06,
+                      0.03,
+                      0.02
+                    ],
+                    "members": [
+                      {
+                        "site": "eimo",
+                        "start": "2026-02-01",
+                        "production_share": 0.46,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_inverter_1033300254190112_solis_energy_total",
+                        "label": "Eimo"
+                      },
+                      {
+                        "site": "home",
+                        "start": "2026-05-09",
+                        "production_share": 0.54,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_s6_eh3p_pv_total_energy_generation",
+                        "label": "Namai"
+                      }
+                    ],
+                    "entities": {
+                      "savings": "sensor.pv_sutaupyta_viso",
+                      "net": "sensor.pv_gryna_investicija",
+                      "percent": "sensor.pv_atsipirkes_procentais",
+                      "remaining": "sensor.pv_liko_iki_atsipirkimo",
+                      "date": "sensor.pv_atsipirkimo_prognoze",
+                      "production": "sensor.pv_pagaminta_viso",
+                      "investment": "input_number.pv_investicija",
+                      "grant": "input_number.pv_parama",
+                      "price": "input_number.pv_kwh_verte",
+                      "fee": "input_number.pv_men_mokestis",
+                      "annual": "input_number.pv_metine_gamyba"
+                    },
+                    "defaults": {
+                      "annual": 11000,
+                      "price": 0.25,
+                      "ratio": 0.85,
+                      "fee": 10
+                    }
+                  },
+                  "quality": {
+                    "state": "sensor.eimo_power_quality_state",
+                    "voltage_min": "sensor.eimo_power_quality_voltage_min",
+                    "voltage_max": "sensor.eimo_power_quality_voltage_max",
+                    "spread": "sensor.eimo_power_quality_voltage_spread",
+                    "active": "sensor.eimo_power_quality_active_power",
+                    "reactive": "sensor.eimo_power_quality_reactive_power",
+                    "pf": "sensor.eimo_power_quality_power_factor",
+                    "frequency": "sensor.eimo_power_quality_frequency",
+                    "rise": "sensor.eimo_power_quality_voltage_rise",
+                    "active_imbalance": "sensor.eimo_power_quality_active_imbalance",
+                    "current_imbalance": "sensor.eimo_power_quality_current_imbalance"
+                  }
+                },
+                "kind": "forecast"
+              },
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            },
+            {
+              "type": "markdown",
+              "title": "Prognozės tikslumas (30 d.)",
+              "content": "ℹ️ Eimo 30 d. prognozės tikslumo grafikas bus įjungtas, kai bus sukauptas atskiras vakarykštės Eimo gamybos faktas.",
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ],
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_prognoze",
+              "state": "on"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Nuostoliai ir efektyvumas",
+              "icon": "mdi:chart-donut",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "glance",
+              "title": "Efektyvumas ir nuostoliai (nuo įrengimo)",
+              "entities": [
+                {
+                  "entity": "sensor.battery_roundtrip_efficiency_eimo",
+                  "name": "Baterija"
+                },
+                {
+                  "entity": "sensor.battery_equivalent_cycles_eimo",
+                  "name": "Bat. ciklai"
+                }
+              ],
+              "show_state": true,
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            },
+            {
+              "type": "markdown",
+              "title": "Kabelio nuostoliai",
+              "content": "ℹ️ Eimo kabelio nuostolių modelis neįjungtas: profilyje dar nėra patvirtinto kabelio ilgio, skerspjūvio ir vietinių fazių srovių.",
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ],
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_diagnostika",
+              "state": "on"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Tinklo kokybės detalės",
+              "icon": "mdi:sine-wave",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "glance",
+              "title": "Fazės L1 / L2 / L3",
+              "entities": [
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_meter_item_a_volt",
+                  "name": "Įtampa L1"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_meter_item_b_volt",
+                  "name": "Įtampa L2"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_meter_item_c_volt",
+                  "name": "Įtampa L3"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_grid_phase1_power",
+                  "name": "Tinklas L1",
+                  "icon": "mdi:transmission-tower"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_grid_phase2_power",
+                  "name": "Tinklas L2",
+                  "icon": "mdi:transmission-tower"
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_grid_phase3_power",
+                  "name": "Tinklas L3",
+                  "icon": "mdi:transmission-tower"
+                }
+              ],
+              "show_state": true,
+              "columns": 3,
+              "grid_options": {
+                "columns": 12,
+                "rows": "auto"
+              }
+            },
+            {
+              "type": "glance",
+              "title": "Tinklo ir inverterio kokybė",
+              "entities": [
+                {
+                  "entity": "sensor.eimo_power_quality_state",
+                  "name": "Būsena",
+                  "icon": "mdi:shield-check"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_voltage_min",
+                  "name": "PCC įtampa min",
+                  "icon": "mdi:arrow-collapse-down"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_voltage_max",
+                  "name": "PCC įtampa max",
+                  "icon": "mdi:arrow-collapse-up"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_voltage_spread",
+                  "name": "Fazių dydžių išsiskyrimas"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_active_power",
+                  "name": "PCC P"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_reactive_power",
+                  "name": "PCC Q"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_power_factor",
+                  "name": "Galios faktorius"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_frequency",
+                  "name": "Dažnis"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_voltage_rise",
+                  "name": "Inverterio–PCC skirtumas"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_active_imbalance",
+                  "name": "PCC P disbalansas"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_current_imbalance",
+                  "name": "Inverterio srovių netolygumas"
+                }
+              ],
+              "show_state": true,
+              "columns": 3,
+              "grid_options": {
+                "columns": 12,
+                "rows": "auto"
+              }
+            },
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "PCC aktyvioji ir reaktyvioji galia (7 d.)"
+              },
+              "graph_span": "7d",
+              "update_interval": "5min",
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "stroke": {
+                  "width": 1,
+                  "curve": "straight"
+                },
+                "markers": {
+                  "size": 0
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
+              "yaxis": [
+                {
+                  "id": "p",
+                  "decimals": 0
+                },
+                {
+                  "id": "q",
+                  "opposite": true,
+                  "decimals": 0
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.eimo_power_quality_active_power",
+                  "name": "P (W)",
+                  "yaxis_id": "p",
+                  "color": "#ffb300",
+                  "stroke_width": 1,
+                  "type": "line"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_reactive_power",
+                  "name": "Q (var)",
+                  "yaxis_id": "q",
+                  "color": "#7e57c2",
+                  "stroke_width": 1,
+                  "type": "line"
+                }
+              ],
+              "grid_options": {
+                "columns": 12,
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            },
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "Fazių išsiskyrimas ir įtampos skirtumas (7 d.)"
+              },
+              "graph_span": "7d",
+              "update_interval": "5min",
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "stroke": {
+                  "width": 1,
+                  "curve": "straight"
+                },
+                "markers": {
+                  "size": 0
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
+              "yaxis": [
+                {
+                  "id": "spread",
+                  "min": 0,
+                  "decimals": 1
+                },
+                {
+                  "id": "rise",
+                  "opposite": true,
+                  "min": 0,
+                  "decimals": 1
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.eimo_power_quality_voltage_spread",
+                  "name": "Fazių dydžių išsiskyrimas (%)",
+                  "yaxis_id": "spread",
+                  "color": "#26a69a",
+                  "stroke_width": 1,
+                  "type": "line"
+                },
+                {
+                  "entity": "sensor.eimo_power_quality_voltage_rise",
+                  "name": "Inverterio–PCC skirtumas (V)",
+                  "yaxis_id": "rise",
+                  "color": "#ec407a",
+                  "stroke_width": 1,
+                  "type": "line"
+                }
+              ],
+              "grid_options": {
+                "columns": 12,
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ],
+          "column_span": 2,
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_diagnostika",
+              "state": "on"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Valdymo diagnostika",
+              "icon": "mdi:stethoscope",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "entities",
+              "title": "Plano vykdymas",
+              "show_header_toggle": false,
+              "entities": [
+                {
+                  "entity": "sensor.eimo_planner_health",
+                  "name": "Planuotojas"
+                },
+                {
+                  "entity": "sensor.eimo_executor_health",
+                  "name": "Vykdymas"
+                },
+                {
+                  "entity": "sensor.eimo_telemetry_health",
+                  "name": "Duomenys"
+                },
+                {
+                  "entity": "sensor.eimo_shadow_check",
+                  "name": "Plano ir inverterio atitiktis"
+                },
+                {
+                  "entity": "sensor.eimo_core_state",
+                  "name": "Branduolys"
+                },
+                {
+                  "entity": "sensor.eimo_control_coordinator",
+                  "name": "Koordinatorius"
+                },
+                {
+                  "entity": "sensor.eimo_plan",
+                  "name": "Galiojantis planas"
+                },
+                {
+                  "entity": "sensor.eimo_shadow_plan",
+                  "name": "Kontrolinis planas"
+                },
+                {
+                  "entity": "sensor.eimo_shadow_commands",
+                  "name": "Kontrolinės komandos"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ],
+          "column_span": 2,
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_diagnostika",
+              "state": "on"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Atsipirkimas",
+      "path": "atsipirkimas",
+      "icon": "mdi:cash-clock",
+      "type": "sections",
+      "max_columns": 2,
+      "dense_section_placement": false,
+      "header": {
+        "layout": "start",
+        "badges_position": "bottom",
+        "card": {
+          "type": "markdown",
+          "text_only": true,
+          "content": "# Eimo SE · Atsipirkimas\nBendras elektrinių portfelis: nauda ir prielaidos."
+        }
+      },
+      "badges": [
+        {
+          "type": "entity",
+          "entity": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+          "name": "Baterija",
+          "show_name": true,
+          "color": "teal"
+        },
+        {
+          "type": "entity",
+          "entity": "sensor.eimo_pv_power",
+          "name": "Namai SE",
+          "show_name": true,
+          "show_state": false,
+          "icon": "mdi:swap-horizontal",
+          "tap_action": {
+            "action": "navigate",
+            "navigation_path": "/energijos-valdymas/atsipirkimas"
+          }
+        }
+      ],
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:button-card",
+              "template": "se_panel",
+              "update_timer": "15s",
+              "variables": {
+                "plant": {
+                  "site_label": "Eimo",
+                  "pv": "sensor.eimo_pv_power",
+                  "load": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "grid": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
+                  "battery": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+                  "soc": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "plan": "sensor.eimo_plan",
+                  "telemetry": "sensor.eimo_telemetry_health",
+                  "executor": "sensor.eimo_executor_health",
+                  "storm": "input_boolean.storm_mode_eimo",
+                  "manual": null,
+                  "manual_soc": null,
+                  "consumption_profile": "sensor.consumption_profile_eimo",
+                  "cons_tomorrow": "sensor.consumption_forecast_tomorrow_eimo",
+                  "horizon": "sensor.eimo_energy_horizon",
+                  "power": "switch.solis_inverter_1033300254190112_inverter_on_off",
+                  "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+                  "heartbeat_max_age": 900,
+                  "grid_sign": -1,
+                  "battery_sign": -1,
+                  "url": "eimo-energija",
+                  "locale": "lt-LT",
+                  "timezone": "Europe/Vilnius",
+                  "finance": {
+                    "title": "Bendras elektrinių portfelis",
+                    "start": "2026-02-01",
+                    "end": "2030-02-01",
+                    "monthly_weights": [
+                      0.02,
+                      0.04,
+                      0.08,
+                      0.12,
+                      0.14,
+                      0.14,
+                      0.14,
+                      0.12,
+                      0.09,
+                      0.06,
+                      0.03,
+                      0.02
+                    ],
+                    "members": [
+                      {
+                        "site": "eimo",
+                        "start": "2026-02-01",
+                        "production_share": 0.46,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_inverter_1033300254190112_solis_energy_total",
+                        "label": "Eimo"
+                      },
+                      {
+                        "site": "home",
+                        "start": "2026-05-09",
+                        "production_share": 0.54,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_s6_eh3p_pv_total_energy_generation",
+                        "label": "Namai"
+                      }
+                    ],
+                    "entities": {
+                      "savings": "sensor.pv_sutaupyta_viso",
+                      "net": "sensor.pv_gryna_investicija",
+                      "percent": "sensor.pv_atsipirkes_procentais",
+                      "remaining": "sensor.pv_liko_iki_atsipirkimo",
+                      "date": "sensor.pv_atsipirkimo_prognoze",
+                      "production": "sensor.pv_pagaminta_viso",
+                      "investment": "input_number.pv_investicija",
+                      "grant": "input_number.pv_parama",
+                      "price": "input_number.pv_kwh_verte",
+                      "fee": "input_number.pv_men_mokestis",
+                      "annual": "input_number.pv_metine_gamyba"
+                    },
+                    "defaults": {
+                      "annual": 11000,
+                      "price": 0.25,
+                      "ratio": 0.85,
+                      "fee": 10
+                    }
+                  },
+                  "quality": {
+                    "state": "sensor.eimo_power_quality_state",
+                    "voltage_min": "sensor.eimo_power_quality_voltage_min",
+                    "voltage_max": "sensor.eimo_power_quality_voltage_max",
+                    "spread": "sensor.eimo_power_quality_voltage_spread",
+                    "active": "sensor.eimo_power_quality_active_power",
+                    "reactive": "sensor.eimo_power_quality_reactive_power",
+                    "pf": "sensor.eimo_power_quality_power_factor",
+                    "frequency": "sensor.eimo_power_quality_frequency",
+                    "rise": "sensor.eimo_power_quality_voltage_rise",
+                    "active_imbalance": "sensor.eimo_power_quality_active_imbalance",
+                    "current_imbalance": "sensor.eimo_power_quality_current_imbalance"
+                  }
+                },
+                "kind": "payback"
+              },
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ],
+          "column_span": 2
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "Modeliuojamas atsipirkimas · Bendras elektrinių portfelis"
+              },
+              "graph_span": "4y",
+              "span": {
+                "start": "year"
+              },
+              "update_interval": "1h",
+              "now": {
+                "show": true,
+                "label": "šiandien"
+              },
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "stroke": {
+                  "dashArray": [
+                    0,
+                    8,
+                    0
+                  ]
+                },
+                "legend": {
+                  "show": true,
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
+              "yaxis": [
+                {
+                  "id": "eur",
+                  "min": 0,
+                  "decimals": 0,
+                  "apex_config": {
+                    "title": {
+                      "text": "€"
+                    }
+                  }
+                },
+                {
+                  "id": "kwh",
+                  "opposite": true,
+                  "min": 0,
+                  "decimals": 0,
+                  "apex_config": {
+                    "title": {
+                      "text": "kWh"
+                    }
+                  }
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.pv_sutaupyta_viso",
+                  "name": "Sutaupyta €",
+                  "yaxis_id": "eur",
+                  "color": "#4caf50",
+                  "stroke_width": 3,
+                  "extend_to": false,
+                  "show": {
+                    "extremas": false
+                  },
+                  "data_generator": "const cfg = {\"title\": \"Bendras elektrinių portfelis\", \"start\": \"2026-02-01\", \"end\": \"2030-02-01\", \"monthly_weights\": [0.02, 0.04, 0.08, 0.12, 0.14, 0.14, 0.14, 0.12, 0.09, 0.06, 0.03, 0.02], \"members\": [{\"site\": \"eimo\", \"start\": \"2026-02-01\", \"production_share\": 0.46, \"fee_share\": 0.5, \"entity\": \"sensor.solis_inverter_1033300254190112_solis_energy_total\", \"label\": \"Eimo\"}, {\"site\": \"home\", \"start\": \"2026-05-09\", \"production_share\": 0.54, \"fee_share\": 0.5, \"entity\": \"sensor.solis_s6_eh3p_pv_total_energy_generation\", \"label\": \"Namai\"}], \"entities\": {\"savings\": \"sensor.pv_sutaupyta_viso\", \"net\": \"sensor.pv_gryna_investicija\", \"percent\": \"sensor.pv_atsipirkes_procentais\", \"remaining\": \"sensor.pv_liko_iki_atsipirkimo\", \"date\": \"sensor.pv_atsipirkimo_prognoze\", \"production\": \"sensor.pv_pagaminta_viso\", \"investment\": \"input_number.pv_investicija\", \"grant\": \"input_number.pv_parama\", \"price\": \"input_number.pv_kwh_verte\", \"fee\": \"input_number.pv_men_mokestis\", \"annual\": \"input_number.pv_metine_gamyba\"}, \"defaults\": {\"annual\": 11000, \"price\": 0.25, \"ratio\": 0.85, \"fee\": 10}};\n\nconst day = value => { const [y,m,d]=value.split('-').map(Number); return new Date(y,m-1,d); };\nconst numeric = (value,fallback) => value!==null && value!==undefined && String(value).trim()!=='' && Number.isFinite(Number(value)) ? Number(value) : fallback;\nconst a=entity.attributes, W=cfg.monthly_weights, defaults=cfg.defaults;\nconst annual=numeric(a.metine_gamyba,defaults.annual), price=numeric(a.kwh_verte,defaults.price);\nconst ratio=numeric(a.naudingumo_koef,defaults.ratio), fee=numeric(a.men_mokestis,defaults.fee);\nlet d=day(cfg.start), cum=0; const end=day(cfg.end), pts=[];\nwhile(d<=end) {\n  pts.push([d.getTime(),cum]);\n  const active=cfg.members.filter(m=>d>=day(m.start));\n  const share=active.reduce((sum,m)=>sum+m.production_share,0);\n  const fees=active.reduce((sum,m)=>sum+m.fee_share,0);\n  cum += annual*W[d.getMonth()]*share*price*ratio - fee*fees;\n  d=new Date(d.getFullYear(),d.getMonth()+1,1);\n}\nconst now=Date.now(); let modelNow=null;\nfor(let i=1;i<pts.length;i++) {\n  if(pts[i][0]>=now) { const [t0,v0]=pts[i-1], [t1,v1]=pts[i]; modelNow=v0+(v1-v0)*(now-t0)/(t1-t0); break; }\n}\nconst actual=Number(entity.state), k=modelNow>0 && actual>0 ? actual/modelNow : 1;\nreturn pts.map(([t,v])=>[t,Math.round(v*k)]);\n"
+                },
+                {
+                  "entity": "sensor.pv_gryna_investicija",
+                  "name": "Investicija (be paramos)",
+                  "yaxis_id": "eur",
+                  "color": "#f44336",
+                  "stroke_width": 2,
+                  "extend_to": false,
+                  "show": {
+                    "extremas": false
+                  },
+                  "data_generator": "const v = Number(entity.state) || 0;\nreturn [[new Date(\"2026-02-01\").getTime(), v], [new Date(\"2030-02-01\").getTime(), v]];"
+                },
+                {
+                  "entity": "sensor.pv_pagaminta_viso",
+                  "name": "Pagaminta kWh",
+                  "yaxis_id": "kwh",
+                  "color": "#fbc02d",
+                  "stroke_width": 2,
+                  "opacity": 0.7,
+                  "extend_to": false,
+                  "show": {
+                    "extremas": false
+                  },
+                  "data_generator": "const cfg = {\"title\": \"Bendras elektrinių portfelis\", \"start\": \"2026-02-01\", \"end\": \"2030-02-01\", \"monthly_weights\": [0.02, 0.04, 0.08, 0.12, 0.14, 0.14, 0.14, 0.12, 0.09, 0.06, 0.03, 0.02], \"members\": [{\"site\": \"eimo\", \"start\": \"2026-02-01\", \"production_share\": 0.46, \"fee_share\": 0.5, \"entity\": \"sensor.solis_inverter_1033300254190112_solis_energy_total\", \"label\": \"Eimo\"}, {\"site\": \"home\", \"start\": \"2026-05-09\", \"production_share\": 0.54, \"fee_share\": 0.5, \"entity\": \"sensor.solis_s6_eh3p_pv_total_energy_generation\", \"label\": \"Namai\"}], \"entities\": {\"savings\": \"sensor.pv_sutaupyta_viso\", \"net\": \"sensor.pv_gryna_investicija\", \"percent\": \"sensor.pv_atsipirkes_procentais\", \"remaining\": \"sensor.pv_liko_iki_atsipirkimo\", \"date\": \"sensor.pv_atsipirkimo_prognoze\", \"production\": \"sensor.pv_pagaminta_viso\", \"investment\": \"input_number.pv_investicija\", \"grant\": \"input_number.pv_parama\", \"price\": \"input_number.pv_kwh_verte\", \"fee\": \"input_number.pv_men_mokestis\", \"annual\": \"input_number.pv_metine_gamyba\"}, \"defaults\": {\"annual\": 11000, \"price\": 0.25, \"ratio\": 0.85, \"fee\": 10}};\n\nconst day = value => { const [y,m,d]=value.split('-').map(Number); return new Date(y,m-1,d); };\nconst numeric = (value,fallback) => value!==null && value!==undefined && String(value).trim()!=='' && Number.isFinite(Number(value)) ? Number(value) : fallback;\nconst a=entity.attributes, W=cfg.monthly_weights, defaults=cfg.defaults;\nconst annual=numeric(a.metine_gamyba,defaults.annual), price=numeric(a.kwh_verte,defaults.price);\nconst ratio=numeric(a.naudingumo_koef,defaults.ratio), fee=numeric(a.men_mokestis,defaults.fee);\nlet d=day(cfg.start), cum=0; const end=day(cfg.end), pts=[];\nwhile(d<=end) {\n  pts.push([d.getTime(),cum]);\n  const active=cfg.members.filter(m=>d>=day(m.start));\n  const share=active.reduce((sum,m)=>sum+m.production_share,0);\n  const fees=active.reduce((sum,m)=>sum+m.fee_share,0);\n  cum += annual*W[d.getMonth()]*share*1 - 0;\n  d=new Date(d.getFullYear(),d.getMonth()+1,1);\n}\nconst now=Date.now(); let modelNow=null;\nfor(let i=1;i<pts.length;i++) {\n  if(pts[i][0]>=now) { const [t0,v0]=pts[i-1], [t1,v1]=pts[i]; modelNow=v0+(v1-v0)*(now-t0)/(t1-t0); break; }\n}\nconst actual=Number(entity.state), k=modelNow>0 && actual>0 ? actual/modelNow : 1;\nreturn pts.map(([t,v])=>[t,Math.round(v*k)]);\n"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "numeric_state",
+                  "entity": "sensor.pv_gryna_investicija",
+                  "above": 0
+                }
+              ]
+            }
+          ],
+          "column_span": 2
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Skaičiavimo prielaidos",
+              "icon": "mdi:calculator-variant-outline",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "entities",
+              "show_header_toggle": false,
+              "title": "Įvestis (pildyk ranka)",
+              "entities": [
+                {
+                  "entity": "input_number.pv_investicija",
+                  "name": "Portfelio investicija"
+                },
+                {
+                  "entity": "input_number.pv_parama",
+                  "name": "Parama (APVA)"
+                },
+                {
+                  "entity": "input_number.pv_kwh_verte",
+                  "name": "kWh vertė"
+                },
+                {
+                  "entity": "input_number.pv_men_mokestis",
+                  "name": "Pasaugojimo mokestis /mėn"
+                },
+                {
+                  "entity": "input_number.pv_metine_gamyba",
+                  "name": "Metinė gamyba (prognozė)"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Pagaminta nuo įrengimo",
+              "icon": "mdi:solar-panel",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "custom:button-card",
+              "template": "se_metric",
+              "entity": "sensor.solis_inverter_1033300254190112_solis_energy_total",
+              "name": "Eimo",
+              "icon": "mdi:home-outline",
+              "variables": {
+                "color": "#d99a18",
+                "attribute": null,
+                "unit": null,
+                "decimals": 0
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 2
+              }
+            },
+            {
+              "type": "custom:button-card",
+              "template": "se_metric",
+              "entity": "sensor.solis_s6_eh3p_pv_total_energy_generation",
+              "name": "Namai",
+              "icon": "mdi:home-outline",
+              "variables": {
+                "color": "#d99a18",
+                "attribute": null,
+                "unit": null,
+                "decimals": 0
+              },
+              "grid_options": {
+                "columns": 6,
+                "rows": 2
+              }
+            },
+            {
+              "type": "markdown",
+              "content": "Investicijos ir paramos sumos įrašomos atskirai; grafikas naudoja portfelio prielaidas.",
+              "text_only": true,
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Vartojimas",
+      "path": "vartojimas",
+      "icon": "mdi:home-lightning-bolt-outline",
+      "type": "sections",
+      "max_columns": 2,
+      "dense_section_placement": false,
+      "header": {
+        "layout": "start",
+        "badges_position": "bottom",
+        "card": {
+          "type": "markdown",
+          "text_only": true,
+          "content": "# Eimo SE · Vartojimas\nNamų įpročiai ir oficialūs ESO energijos srautai."
+        }
+      },
+      "badges": [
+        {
+          "type": "entity",
+          "entity": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+          "name": "Baterija",
+          "show_name": true,
+          "color": "teal"
+        },
+        {
+          "type": "entity",
+          "entity": "sensor.eimo_pv_power",
+          "name": "Namai SE",
+          "show_name": true,
+          "show_state": false,
+          "icon": "mdi:swap-horizontal",
+          "tap_action": {
+            "action": "navigate",
+            "navigation_path": "/energijos-valdymas/vartojimas"
+          }
+        }
+      ],
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:button-card",
+              "template": "se_panel",
+              "update_timer": "15s",
+              "variables": {
+                "plant": {
+                  "site_label": "Eimo",
+                  "pv": "sensor.eimo_pv_power",
+                  "load": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "grid": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
+                  "battery": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+                  "soc": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "plan": "sensor.eimo_plan",
+                  "telemetry": "sensor.eimo_telemetry_health",
+                  "executor": "sensor.eimo_executor_health",
+                  "storm": "input_boolean.storm_mode_eimo",
+                  "manual": null,
+                  "manual_soc": null,
+                  "consumption_profile": "sensor.consumption_profile_eimo",
+                  "cons_tomorrow": "sensor.consumption_forecast_tomorrow_eimo",
+                  "horizon": "sensor.eimo_energy_horizon",
+                  "power": "switch.solis_inverter_1033300254190112_inverter_on_off",
+                  "heartbeat": "sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received",
+                  "heartbeat_max_age": 900,
+                  "grid_sign": -1,
+                  "battery_sign": -1,
+                  "url": "eimo-energija",
+                  "locale": "lt-LT",
+                  "timezone": "Europe/Vilnius",
+                  "finance": {
+                    "title": "Bendras elektrinių portfelis",
+                    "start": "2026-02-01",
+                    "end": "2030-02-01",
+                    "monthly_weights": [
+                      0.02,
+                      0.04,
+                      0.08,
+                      0.12,
+                      0.14,
+                      0.14,
+                      0.14,
+                      0.12,
+                      0.09,
+                      0.06,
+                      0.03,
+                      0.02
+                    ],
+                    "members": [
+                      {
+                        "site": "eimo",
+                        "start": "2026-02-01",
+                        "production_share": 0.46,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_inverter_1033300254190112_solis_energy_total",
+                        "label": "Eimo"
+                      },
+                      {
+                        "site": "home",
+                        "start": "2026-05-09",
+                        "production_share": 0.54,
+                        "fee_share": 0.5,
+                        "entity": "sensor.solis_s6_eh3p_pv_total_energy_generation",
+                        "label": "Namai"
+                      }
+                    ],
+                    "entities": {
+                      "savings": "sensor.pv_sutaupyta_viso",
+                      "net": "sensor.pv_gryna_investicija",
+                      "percent": "sensor.pv_atsipirkes_procentais",
+                      "remaining": "sensor.pv_liko_iki_atsipirkimo",
+                      "date": "sensor.pv_atsipirkimo_prognoze",
+                      "production": "sensor.pv_pagaminta_viso",
+                      "investment": "input_number.pv_investicija",
+                      "grant": "input_number.pv_parama",
+                      "price": "input_number.pv_kwh_verte",
+                      "fee": "input_number.pv_men_mokestis",
+                      "annual": "input_number.pv_metine_gamyba"
+                    },
+                    "defaults": {
+                      "annual": 11000,
+                      "price": 0.25,
+                      "ratio": 0.85,
+                      "fee": 10
+                    }
+                  },
+                  "quality": {
+                    "state": "sensor.eimo_power_quality_state",
+                    "voltage_min": "sensor.eimo_power_quality_voltage_min",
+                    "voltage_max": "sensor.eimo_power_quality_voltage_max",
+                    "spread": "sensor.eimo_power_quality_voltage_spread",
+                    "active": "sensor.eimo_power_quality_active_power",
+                    "reactive": "sensor.eimo_power_quality_reactive_power",
+                    "pf": "sensor.eimo_power_quality_power_factor",
+                    "frequency": "sensor.eimo_power_quality_frequency",
+                    "rise": "sensor.eimo_power_quality_voltage_rise",
+                    "active_imbalance": "sensor.eimo_power_quality_active_imbalance",
+                    "current_imbalance": "sensor.eimo_power_quality_current_imbalance"
+                  }
+                },
+                "kind": "profile"
+              },
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Vartojimo modelis",
+              "icon": "mdi:brain",
+              "heading_style": "subtitle",
+              "grid_options": {
+                "columns": "full"
+              }
+            },
+            {
+              "type": "glance",
+              "title": "Vartojimo modelis (AppDaemon)",
+              "entities": [
+                {
+                  "entity": "sensor.consumption_daily_avg_eimo",
+                  "name": "Paros vidurkis",
+                  "icon": "mdi:counter"
+                },
+                {
+                  "entity": "sensor.consumption_remaining_today_eimo",
+                  "name": "Liko šiandien",
+                  "icon": "mdi:timer-sand"
+                },
+                {
+                  "entity": "sensor.consumption_forecast_tomorrow_eimo",
+                  "name": "Rytoj",
+                  "icon": "mdi:calendar-arrow-right"
+                }
+              ],
+              "show_state": true,
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            },
+            {
+              "type": "entities",
+              "title": "ESO banko duomenys",
+              "show_header_toggle": false,
+              "entities": [
+                {
+                  "entity": "sensor.eso_bankas_266493",
+                  "name": "Uždaryto mėnesio likutis"
+                },
+                {
+                  "entity": "sensor.eso_ivado_eksportas_eimo",
+                  "name": "Atiduota banko metais"
+                },
+                {
+                  "entity": "sensor.eso_ivado_importas_eimo",
+                  "name": "Atsiimta banko metais"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "Vidutinis vartojimas pagal valandą (kWh)"
+              },
+              "graph_span": "24h",
+              "span": {
+                "start": "day"
+              },
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "xaxis": {
+                  "labels": {
+                    "format": "HH:00",
+                    "datetimeUTC": false
+                  }
+                },
+                "tooltip": {
+                  "x": {
+                    "format": "HH:00"
+                  }
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                }
+              },
+              "yaxis": [
+                {
+                  "min": 0,
+                  "decimals": 1
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.consumption_profile_eimo",
+                  "name": "kWh",
+                  "type": "column",
+                  "color": "#42a5f5",
+                  "data_generator": "const arr = entity.attributes.hourly_kwh || [];\nconst pts = arr.map((v, i) => {\n  const d = new Date(); d.setHours(i, 0, 0, 0);\n  return [d.getTime(), v];\n});\nif (arr.length) {\n  const d = new Date(); d.setHours(24, 0, 0, 0);\n  pts.push([d.getTime(), arr[0]]);\n}\nreturn pts;"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "update_interval": "5min",
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ],
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_grafikai",
+              "state": "on"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "Vidutinis vartojimas pagal savaitės dieną (kWh)"
+              },
+              "graph_span": "167h",
+              "span": {
+                "start": "isoWeek",
+                "offset": "-7d"
+              },
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "locales": [
+                    {
+                      "name": "en",
+                      "options": {
+                        "days": [
+                          "Sekmadienis",
+                          "Pirmadienis",
+                          "Antradienis",
+                          "Trečiadienis",
+                          "Ketvirtadienis",
+                          "Penktadienis",
+                          "Šeštadienis"
+                        ],
+                        "shortDays": [
+                          "Sk",
+                          "Pr",
+                          "An",
+                          "Tr",
+                          "Kt",
+                          "Pn",
+                          "Št"
+                        ],
+                        "months": [
+                          "Sausis",
+                          "Vasaris",
+                          "Kovas",
+                          "Balandis",
+                          "Gegužė",
+                          "Birželis",
+                          "Liepa",
+                          "Rugpjūtis",
+                          "Rugsėjis",
+                          "Spalis",
+                          "Lapkritis",
+                          "Gruodis"
+                        ],
+                        "shortMonths": [
+                          "Sau",
+                          "Vas",
+                          "Kov",
+                          "Bal",
+                          "Geg",
+                          "Bir",
+                          "Lie",
+                          "Rgp",
+                          "Rgs",
+                          "Spa",
+                          "Lap",
+                          "Gru"
+                        ]
+                      }
+                    }
+                  ],
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "xaxis": {
+                  "type": "datetime",
+                  "tickAmount": 6,
+                  "labels": {
+                    "format": "ddd",
+                    "datetimeUTC": false
+                  }
+                },
+                "tooltip": {
+                  "x": {
+                    "format": "dddd"
+                  }
+                },
+                "stroke": {
+                  "curve": "straight"
+                },
+                "markers": {
+                  "size": 0,
+                  "hover": {
+                    "size": 0
+                  }
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                }
+              },
+              "yaxis": [
+                {
+                  "min": 0,
+                  "decimals": 1
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.consumption_profile_eimo",
+                  "name": "kWh",
+                  "type": "column",
+                  "color": "#66bb6a",
+                  "data_generator": "const now = new Date();\nconst dow = (now.getDay() + 6) % 7;\nconst monday = new Date(now); monday.setDate(now.getDate() - dow - 7); monday.setHours(0, 0, 0, 0);\nreturn (entity.attributes.weekday_kwh || []).map((v, i) => {\n  const d = new Date(monday); d.setDate(monday.getDate() + i); d.setHours(0, 0, 0, 0);\n  return [d.getTime(), v];\n});"
+                },
+                {
+                  "entity": "sensor.consumption_profile_eimo",
+                  "name": "Vidurkis",
+                  "type": "line",
+                  "color": "#78909c",
+                  "stroke_width": 1,
+                  "data_generator": "const arr = entity.attributes.weekday_kwh || [];\nconst avg = entity.attributes.daily_avg ?? null;\nconst now = new Date();\nconst dow = (now.getDay() + 6) % 7;\nconst monday = new Date(now); monday.setDate(now.getDate() - dow - 7); monday.setHours(0, 0, 0, 0);\nreturn arr.map((v, i) => {\n  const d = new Date(monday); d.setDate(monday.getDate() + i); d.setHours(0, 0, 0, 0);\n  return [d.getTime(), avg];\n});"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "update_interval": "5min",
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ],
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_grafikai",
+              "state": "on"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "statistics-graph",
+              "title": "ESO tinklo srautas (valandinis)",
+              "chart_type": "bar",
+              "period": "hour",
+              "days_to_show": 7,
+              "stat_types": [
+                "change"
+              ],
+              "entities": [
+                {
+                  "entity": "eso:energy_consumed_266493",
+                  "name": "Iš tinklo"
+                },
+                {
+                  "entity": "eso:energy_returned_266493",
+                  "name": "Į tinklą"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ],
+          "column_span": 2,
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_grafikai",
+              "state": "on"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "ESO bankas · uždarytų mėnesių faktas"
+              },
+              "graph_span": "1y",
+              "span": {
+                "start": "year",
+                "offset": "+3month"
+              },
+              "update_interval": "1h",
+              "yaxis": [
+                {
+                  "min": 0,
+                  "decimals": 0
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.eso_bankas_266493",
+                  "name": "Likutis · kWh",
+                  "type": "column",
+                  "color": "#159b85",
+                  "extend_to": false,
+                  "data_generator": "const s=entity.attributes.serija || {};\nconst now=new Date(), bankStart=(now.getMonth()>=3?now.getFullYear():now.getFullYear()-1)+'-04';\nconst current=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');\nreturn Object.keys(s).sort().filter(k=>k>=bankStart&&k<current&&Number.isFinite(Number(s[k]))).map(k=>{const [y,m]=k.split('-').map(Number);return [new Date(y,m,1).getTime(),Number(s[k])];});"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "apex_config": {
+                "chart": {
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ],
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_grafikai",
+              "state": "on"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "statistics-graph",
+              "title": "ESO mėnesinis balansas",
+              "chart_type": "bar",
+              "period": "month",
+              "days_to_show": 365,
+              "stat_types": [
+                "change"
+              ],
+              "entities": [
+                {
+                  "entity": "eso:energy_consumed_266493",
+                  "name": "Iš tinklo"
+                },
+                {
+                  "entity": "eso:energy_returned_266493",
+                  "name": "Į tinklą"
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            }
+          ],
+          "visibility": [
+            {
+              "condition": "state",
+              "entity": "input_boolean.eimo_dashboard_grafikai",
+              "state": "on"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

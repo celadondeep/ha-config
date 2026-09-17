@@ -1,0 +1,220 @@
+blueprint:
+  name: Energy plan — solis_cloud adapter
+  description: Executes a leased plant plan. Hardware entities and limits are inputs; planning stays in
+    the shared core.
+  domain: automation
+  source_url: https://github.com/celadondeep/ha-config/blob/main/blueprints/automation/energy/solis_cloud_executor.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    plan_entity:
+      name: Plan entity
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    planner_entity:
+      name: Planner entity
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    storm_entity:
+      name: Storm entity
+      selector:
+        entity:
+          domain:
+          - input_boolean
+          multiple: false
+          reorder: false
+    hard_floor:
+      name: Hard floor
+      selector:
+        number:
+          min: 0.0
+          max: 100
+          step: 1.0
+          mode: box
+    planner_max_age:
+      name: Planner max age
+      selector:
+        number:
+          min: 0.0
+          max: 3600.0
+          step: 1.0
+          mode: box
+    discharge_current:
+      name: Discharge current
+      selector:
+        number:
+          min: 0.0
+          max: 300.0
+          step: 1.0
+          mode: box
+    entry_id:
+      name: Entry id
+      selector:
+        text:
+          multiline: false
+          multiple: false
+    inverter_sn:
+      name: Inverter sn
+      selector:
+        text:
+          multiline: false
+          multiple: false
+    heartbeat_entity:
+      name: Heartbeat entity
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    soc_entity:
+      name: Soc entity
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    voltage_a:
+      name: Voltage a
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    voltage_b:
+      name: Voltage b
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    voltage_c:
+      name: Voltage c
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    frequency_entity:
+      name: Frequency entity
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    telemetry_max_age:
+      name: Telemetry max age
+      selector:
+        number:
+          min: 0.0
+          max: 3600.0
+          step: 1.0
+          mode: box
+    charge_current:
+      name: Charge current
+      selector:
+        number:
+          min: 0.0
+          max: 300.0
+          step: 1.0
+          mode: box
+triggers:
+- trigger: state
+  entity_id:
+  - !input 'plan_entity'
+  - !input 'planner_entity'
+  - !input 'storm_entity'
+- trigger: time_pattern
+  minutes: /1
+- trigger: homeassistant
+  event: start
+conditions: []
+actions:
+- choose:
+  - conditions:
+    - condition: state
+      entity_id: !input 'storm_entity'
+      state: 'on'
+    sequence:
+    - action: solis.set_plan
+      data:
+        entry_id: !input 'entry_id'
+        inverter_sn: !input 'inverter_sn'
+        targets: "{% set fresh = -60 <= as_timestamp(now()) -\n  (states(heartbeat_entity) | float(0))\
+          \ <= telemetry_max_age %}\n{% set grid = 180 < states(voltage_a) | float(0) < 270\n  and 180\
+          \ < states(voltage_b) | float(0) < 270\n  and 180 < states(voltage_c) | float(0) < 270\n  and\
+          \ 45 < states(frequency_entity) | float(0) < 55 %}\n{{ {\n  'inverter_on_off': true,\n  'storage_mode':\
+          \ 'Self-Use',\n  'slot1_discharge': false,\n  'slot1_charge': true,\n  'slot1_charge_time':\
+          \ '00:00-23:59',\n  'slot1_charge_soc': 100,\n  'slot1_charge_current': charge_current,\n  'allow_grid_charging':\
+          \ false,\n  'allow_export': fresh and grid and\n    states(soc_entity) | float(-1) >= 95\n}\
+          \ }}"
+  - conditions:
+    - condition: state
+      entity_id: !input 'storm_entity'
+      state: 'off'
+    - condition: state
+      entity_id: !input 'planner_entity'
+      state: ok
+    - condition: state
+      entity_id: !input 'plan_entity'
+      state:
+      - self_use
+      - feed_in
+      - night_export
+    - condition: state
+      entity_id: !input 'plan_entity'
+      attribute: actionable
+      state: 'on'
+    - condition: template
+      value_template: '{% from ''energy_plan.jinja'' import plan_valid %}{{ plan_valid(plan_entity, planner_entity,
+        hard_floor, planner_max_age) | bool }}'
+    sequence:
+    - action: solis.set_plan
+      data:
+        entry_id: !input 'entry_id'
+        inverter_sn: !input 'inverter_sn'
+        targets: "{% set active = state_attr(plan_entity, 'slot_active') == 'on' %} {% set targets = {\n\
+          \  'inverter_on_off': state_attr(plan_entity, 'inverter_on') == 'on',\n  'storage_mode': 'Feed-In\
+          \ Priority' if states(plan_entity) in ['feed_in', 'night_export'] else 'Self-Use',\n  'slot1_charge':\
+          \ false,\n  'slot1_discharge': active,\n  'allow_export': true\n} %} {% if active %}\n  {% set\
+          \ targets = dict(targets,\n    slot1_discharge_time='00:00-23:59',\n    slot1_discharge_soc=state_attr(plan_entity,\
+          \ 'slot_cutoff_soc') | int,\n    slot1_discharge_current=discharge_current) %}\n{% endif %}\
+          \ {{ targets }}"
+        valid_until: '{{ as_timestamp(state_attr(plan_entity, ''valid_until''), 0) }}'
+  default:
+  - action: solis.set_plan
+    data:
+      entry_id: !input 'entry_id'
+      inverter_sn: !input 'inverter_sn'
+      cancel: true
+mode: restart
+variables:
+  plan_entity: !input 'plan_entity'
+  planner_entity: !input 'planner_entity'
+  storm_entity: !input 'storm_entity'
+  hard_floor: !input 'hard_floor'
+  planner_max_age: !input 'planner_max_age'
+  discharge_current: !input 'discharge_current'
+  entry_id: !input 'entry_id'
+  inverter_sn: !input 'inverter_sn'
+  heartbeat_entity: !input 'heartbeat_entity'
+  soc_entity: !input 'soc_entity'
+  voltage_a: !input 'voltage_a'
+  voltage_b: !input 'voltage_b'
+  voltage_c: !input 'voltage_c'
+  frequency_entity: !input 'frequency_entity'
+  telemetry_max_age: !input 'telemetry_max_age'
+  charge_current: !input 'charge_current'

@@ -1,0 +1,19 @@
+{# Shared validity contract for every transport; no device names or site limits. #}
+{% macro plan_valid(plan, planner, hard_floor, max_age) -%}
+  {%- set t = as_timestamp(now()) -%}
+  {%- set checked = as_timestamp(state_attr(planner, 'last_checked'), 0) -%}
+  {%- set evaluated = as_timestamp(state_attr(plan, 'evaluated_at'), 0) -%}
+  {%- set expiry = as_timestamp(state_attr(plan, 'valid_until'), 0) -%}
+  {%- set power = state_attr(plan, 'inverter_on') -%}
+  {%- set slot = state_attr(plan, 'slot_active') -%}
+  {%- set cutoff = state_attr(plan, 'slot_cutoff_soc') -%}
+  {{- (states(planner) == 'ok'
+       and states(plan) in ['self_use', 'feed_in', 'night_export']
+       and state_attr(plan, 'actionable') == 'on'
+       and -60 <= t - checked < max_age
+       and -60 <= t - evaluated < max_age and expiry > t
+       and power in ['on', 'off']
+       and (slot == 'off' or (slot == 'on' and power == 'on'
+            and cutoff is number and cutoff is not boolean
+            and hard_floor <= cutoff <= 100))) | to_json -}}
+{%- endmacro %}

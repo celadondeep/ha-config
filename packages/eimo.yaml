@@ -1,510 +1,337 @@
-# =============================================================================
-#  2-a elektrinė (Eimo SE) — energijos valdymas per Solis Cloud API
-#  ATSKIRA, NEPRIKLAUSOMA sistema nuo 1-os elektrinės (Šeškinių 2, lokalus Modbus).
-#  Inverteris: 1033300254190112 (vienas cloud kanalas: solis, patvirtinimas po ≥360 s).
-#  Tikslinį SOC skaičiuoja appdaemon/apps/energy_manager_eimo.py
-#  (publikuoja sensor.energy_manager_eimo_target_soc); čia — tik valdymas + helperiai.
-#  NIEKADA neliesti 1-os elektrinės entitės (solis_s6_eh3p_*, energy_manager_*).
-# =============================================================================
-
 input_boolean:
   storm_mode_eimo:
-    name: "Eimo: Audros / ESO režimas"
+    name: 'Eimo: Audros / ESO režimas'
     icon: mdi:weather-lightning
-
 input_select:
   energy_season_eimo:
-    name: "Eimo: Sezonas"
+    name: 'Eimo: Sezonas'
     options:
-      - žiema
-      - pavasaris
-      - vasara
-      - ruduo
+    - žiema
+    - pavasaris
+    - vasara
+    - ruduo
     initial: vasara
     icon: mdi:weather-sunny
-
 input_number:
-  # Solcast „vakar prognozė" Eimo elektrinei (kasdien 23:55 įrašoma forecast_today).
   solcast_forecast_yesterday_eimo:
-    name: "Eimo: Vakar prognozuota gamyba"
+    name: 'Eimo: Vakar prognozuota gamyba'
     min: 0
     max: 200
     step: 0.1
     unit_of_measurement: kWh
     icon: mdi:weather-partly-cloudy
     mode: box
-  # Elektros kainos Eimo elektrinei (atskiros nuo 1-os, kad būtų nepriklausoma).
   electricity_price_buy_eimo:
-    name: "Eimo: Elektros pirkimo kaina"
+    name: 'Eimo: Elektros pirkimo kaina'
     min: 0
     max: 1
     step: 0.001
-    unit_of_measurement: "€/kWh"
+    unit_of_measurement: €/kWh
     icon: mdi:transmission-tower-import
     mode: box
   electricity_price_sell_eimo:
-    name: "Eimo: Elektros pardavimo kaina"
+    name: 'Eimo: Elektros pardavimo kaina'
     min: 0
     max: 1
     step: 0.001
-    unit_of_measurement: "€/kWh"
+    unit_of_measurement: €/kWh
     icon: mdi:transmission-tower-export
     mode: box
-  # Dienos iškrovimo apatinė riba (slot1 cut-off SOC). Baterijos dugnas 5 (HW
-  # over-discharge), eksporto dugnas 6 (slot SOC min) — slot įsijungia ties
-  # riba+1 (7%).
   daytime_export_floor_eimo:
-    name: "Eimo: Dienos eksporto apatinė riba"
+    name: 'Eimo: Dienos eksporto apatinė riba'
     min: 6
     max: 50
     step: 1
     initial: 6
-    unit_of_measurement: "%"
+    unit_of_measurement: '%'
     icon: mdi:battery-arrow-down
     mode: box
-
-# Namų suvartojimo energijos skaitiklis (kWh) iš cloud galios sensoriaus —
-# Modbus pusėje yesterday_energy_consumption duoda pats inverteris, cloud jo
-# neturi. Riemann left (cloud atsinaujina ~5 min laipteliais), utility_meter
-# paros ciklas → last_period po 00:00 = vakardienos suma. Iš jos
-# sensor.eimo_consumption_yesterday, kurį skaito consumption_model_eimo.py
-# (iki 2026-07-17 entity neegzistavo ir modelis mokėsi tik iš 15 min mėginių,
-# dingstančių per AppDaemon restartą).
 sensor:
-  - platform: integration
-    source: sensor.solis_inverter_1033300254190112_solis_total_consumption_power
-    name: eimo_house_energy
-    unique_id: eimo_house_energy
-    unit_prefix: k
-    round: 3
-    method: left
-
+- platform: integration
+  source: sensor.solis_inverter_1033300254190112_solis_total_consumption_power
+  name: eimo_house_energy
+  unique_id: eimo_house_energy
+  unit_prefix: k
+  round: 3
+  method: left
 utility_meter:
   eimo_consumption_today:
-    name: "Eimo: namų suvartojimas šiandien"
+    name: 'Eimo: namų suvartojimas šiandien'
     source: sensor.eimo_house_energy
     cycle: daily
-
 template:
-  - sensor:
-      # Vakardienos paros suvartojimas — utility_meter last_period atributas
-      # (užsipildo po pirmo paros resetinimo 00:00). consumption_model_eimo.py
-      # jį skaito 00:05 kaip patikimą dienos sumą (Modbus analogas —
-      # sensor.solis_s6_eh3p_yesterday_energy_consumption).
-      - name: "eimo_consumption_yesterday"
-        unique_id: eimo_consumption_yesterday
-        unit_of_measurement: kWh
-        icon: mdi:home-lightning-bolt
-        state: >
-          {{ state_attr('sensor.eimo_namu_suvartojimas_siandien', 'last_period') | float(0) | round(2) }}
-        availability: >
-          {{ state_attr('sensor.eimo_namu_suvartojimas_siandien', 'last_period') is not none }}
-      # Intradienos Solcast santykis (Eimo) — faktinė šios dienos gamyba
-      # lyginama su tuo, kiek pagal koreguotą prognozę TURĖJO būti pagaminta
-      # iki šio momento. Naudojamas surplus skaičiavime, kad geresnę nei
-      # prognozuota dieną dienos iškrovimas įsijungtų nuo to momento, kai
-      # likusi gamyba nebetilps baterijoje — nelaukiant paros EMA (23:50).
-      # Kol tikėtina gamyba < 1.5 kWh — santykis 1 (ryto triukšmas / mažas
-      # vardiklis; cloud energy_today dar ir vėluoja ~5 min). Clamp 0.5–1.8.
-      # Modbus analogas: sensor.solcast_intraday_ratio (configuration.yaml).
-      - name: "solcast_intraday_ratio_eimo"
-        unique_id: solcast_intraday_ratio_eimo
-        state_class: measurement
-        icon: mdi:sun-clock
-        state: >
-          {% set corr = states('sensor.solcast_correction_factor_eimo') | float(1) %}
-          {% set total = states('sensor.solcast_pv_forecast_forecast_today') | float(0) %}
-          {% set remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0) %}
-          {% set expected = [total - remaining, 0] | max * corr %}
-          {% set actual = states('sensor.solis_inverter_1033300254190112_solis_energy_today') | float(0) %}
-          {% if expected < 1.5 %}
-            1.0
-          {% else %}
-            {{ [[actual / expected, 0.5] | max, 1.8] | min | round(3) }}
-          {% endif %}
-        availability: >
-          {{ states('sensor.solcast_pv_forecast_forecast_today') not in ['unavailable', 'unknown', '']
-             and states('sensor.solcast_pv_forecast_forecast_remaining_today') not in ['unavailable', 'unknown', '']
-             and states('sensor.solis_inverter_1033300254190112_solis_energy_today') not in ['unavailable', 'unknown', ''] }}
-        attributes:
-          faktas_kwh: >
-            {{ states('sensor.solis_inverter_1033300254190112_solis_energy_today') | float(0) | round(2) }}
-          tiketasi_iki_dabar_kwh: >
-            {% set total = states('sensor.solcast_pv_forecast_forecast_today') | float(0) %}
-            {% set remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0) %}
-            {{ ([total - remaining, 0] | max * states('sensor.solcast_correction_factor_eimo') | float(1)) | round(2) }}
+- sensor:
+  - name: eimo_consumption_yesterday
+    unique_id: eimo_consumption_yesterday
+    unit_of_measurement: kWh
+    icon: mdi:home-lightning-bolt
+    state: '{{ state_attr(''sensor.eimo_namu_suvartojimas_siandien'', ''last_period'') | float(0) | round(2)
+      }}
 
-      # Numatomas šiandienos rezultatas (Eimo): jau pagaminta + Solcast „liko
-      # šiandien" × Eimo korekcija × intradienos santykis. Modbus analogas —
-      # sensor.solar_today_expected (configuration.yaml); ten Solcast likutis
-      # imamas žalias, nes Solcast site sukalibruotas 1-ai elektrinei, o Eimo
-      # tą pačią prognozę skaliuoja solcast_correction_factor_eimo (EMA) ir
-      # solcast_intraday_ratio_eimo (šios dienos faktas vs prognozė).
-      - name: "solar_today_expected_eimo"
-        unique_id: solar_today_expected_eimo
-        unit_of_measurement: kWh
-        state_class: measurement
-        icon: mdi:chart-bell-curve-cumulative
-        state: >
-          {% set a = states('sensor.solis_inverter_1033300254190112_solis_energy_today') | float(0) %}
-          {% set r = states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)
-                     * states('sensor.solcast_correction_factor_eimo') | float(1)
-                     * states('sensor.solcast_intraday_ratio_eimo') | float(1) %}
-          {{ (a + r) | round(1) }}
-        availability: >
-          {{ states('sensor.solis_inverter_1033300254190112_solis_energy_today') not in ['unavailable', 'unknown', '']
-             and states('sensor.solcast_pv_forecast_forecast_remaining_today') not in ['unavailable', 'unknown', ''] }}
-        attributes:
-          pagaminta_kwh: >
-            {{ states('sensor.solis_inverter_1033300254190112_solis_energy_today') | float(0) | round(2) }}
-          liko_koreguota_kwh: >
-            {{ (states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)
-                * states('sensor.solcast_correction_factor_eimo') | float(1)
-                * states('sensor.solcast_intraday_ratio_eimo') | float(1)) | round(2) }}
+      '
+    availability: '{{ state_attr(''sensor.eimo_namu_suvartojimas_siandien'', ''last_period'') is not none
+      }}
 
-      # --- Ekonomika ir baterijos sveikata (Modbus analogai, 2026-07-17) ----
-      # Šaltiniai — cloud paros/lifetime skaitliukai (granuliarumas ~1 kWh,
-      # atsinaujina ~5 min; energy_today retkarčiais rodo artefaktus — žr.
-      # 07-14 auditą, todėl reikšmės orientacinės).
-      # ----------------------------------------------------------------------
+      '
+  - name: solcast_intraday_ratio_eimo
+    unique_id: solcast_intraday_ratio_eimo
+    state_class: measurement
+    icon: mdi:sun-clock
+    state: "{% set corr = states('sensor.solcast_correction_factor_eimo') | float(1) %} {% set total =\
+      \ states('sensor.solcast_pv_forecast_forecast_today') | float(0) %} {% set remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today')\
+      \ | float(0) %} {% set expected = [total - remaining, 0] | max * corr %} {% set actual = states('sensor.solis_inverter_1033300254190112_solis_energy_today')\
+      \ | float(0) %} {% if expected < 1.5 %}\n  1.0\n{% else %}\n  {{ [[actual / expected, 0.5] | max,\
+      \ 1.8] | min | round(3) }}\n{% endif %}\n"
+    availability: "{{ states('sensor.solcast_pv_forecast_forecast_today') not in ['unavailable', 'unknown',\
+      \ '']\n   and states('sensor.solcast_pv_forecast_forecast_remaining_today') not in ['unavailable',\
+      \ 'unknown', '']\n   and states('sensor.solis_inverter_1033300254190112_solis_energy_today') not\
+      \ in ['unavailable', 'unknown', ''] }}\n"
+    attributes:
+      faktas_kwh: '{{ states(''sensor.solis_inverter_1033300254190112_solis_energy_today'') | float(0)
+        | round(2) }}
 
-      # Savarankiškumas šiandien: kiek % namų suvartojimo padengė ne tinklas.
-      # Modbus analogas — sensor.self_sufficiency_today.
-      - name: "self_sufficiency_today_eimo"
-        unique_id: self_sufficiency_today_eimo
-        unit_of_measurement: "%"
-        state_class: measurement
-        icon: mdi:home-percent
-        state: >
-          {% set cons = states('sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used') | float(0) %}
-          {% set imp  = states('sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased') | float(0) %}
-          {{ ([(1 - imp / cons) * 100, 0] | max) | round(0) if cons > 0.1 else 0 }}
-        availability: >
-          {{ states('sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used') not in ['unavailable', 'unknown', ''] }}
+        '
+      tiketasi_iki_dabar_kwh: '{% set total = states(''sensor.solcast_pv_forecast_forecast_today'') |
+        float(0) %} {% set remaining = states(''sensor.solcast_pv_forecast_forecast_remaining_today'')
+        | float(0) %} {{ ([total - remaining, 0] | max * states(''sensor.solcast_correction_factor_eimo'')
+        | float(1)) | round(2) }}
 
-      # Sutaupyta šiandien €: savo reikmėms panaudota saulė (PV − parduota) ×
-      # pirkimo kaina + parduota × pardavimo kaina − pirkta × pirkimo kaina.
-      # Modbus analogas — sensor.energy_savings_today. 0 — TEISĖTA kaina
-      # (ESO pasaugojimo schema: buy=0.0/sell=0.25); fallback tik kai
-      # input_number nepasiekiamas (float default).
-      - name: "energy_savings_today_eimo"
-        unique_id: energy_savings_today_eimo
-        unit_of_measurement: "€"
-        state_class: measurement
-        icon: mdi:piggy-bank
-        state: >
-          {% set pv   = states('sensor.solis_inverter_1033300254190112_solis_energy_today') | float(0) %}
-          {% set sell = states('sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy') | float(0) %}
-          {% set buy  = states('sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased') | float(0) %}
-          {% set p_buy  = states('input_number.electricity_price_buy_eimo') | float(0.18) %}
-          {% set p_sell = states('input_number.electricity_price_sell_eimo') | float(0.08) %}
-          {{ (([pv - sell, 0] | max) * p_buy + sell * p_sell - buy * p_buy) | round(2) }}
-        availability: >
-          {{ states('sensor.solis_inverter_1033300254190112_solis_energy_today') not in ['unavailable', 'unknown', ''] }}
+        '
+  - name: solar_today_expected_eimo
+    unique_id: solar_today_expected_eimo
+    unit_of_measurement: kWh
+    state_class: measurement
+    icon: mdi:chart-bell-curve-cumulative
+    state: "{% set a = states('sensor.solis_inverter_1033300254190112_solis_energy_today') | float(0)\
+      \ %} {% set r = states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)\n     \
+      \      * states('sensor.solcast_correction_factor_eimo') | float(1)\n           * states('sensor.solcast_intraday_ratio_eimo')\
+      \ | float(1) %}\n{{ (a + r) | round(1) }}\n"
+    availability: "{{ states('sensor.solis_inverter_1033300254190112_solis_energy_today') not in ['unavailable',\
+      \ 'unknown', '']\n   and states('sensor.solcast_pv_forecast_forecast_remaining_today') not in ['unavailable',\
+      \ 'unknown', ''] }}\n"
+    attributes:
+      pagaminta_kwh: '{{ states(''sensor.solis_inverter_1033300254190112_solis_energy_today'') | float(0)
+        | round(2) }}
 
-      # Baterijos round-trip efektyvumas (lifetime): iškrauta / įkrauta,
-      # atėmus baterijoje likusią energiją (SOC × 14.336 kWh). Modbus
-      # analogas — sensor.battery_roundtrip_efficiency; inverterio savivartos
-      # korekcijos cloud pusėje nėra (nėra tokio matavimo), todėl reikšmė
-      # šiek tiek pesimistinė.
-      - name: "battery_roundtrip_efficiency_eimo"
-        unique_id: battery_roundtrip_efficiency_eimo
-        unit_of_measurement: "%"
-        state_class: measurement
-        icon: mdi:battery-sync
-        state: >
-          {% set chg = states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) %}
-          {% set dis = states('sensor.solis_inverter_1033300254190112_solis_total_energy_discharged') | float(0) %}
-          {% set stored = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(0) / 100 * 14.336 %}
-          {% set denom = chg - stored %}
-          {{ (dis / denom * 100) | round(1) if denom > 50 else 'unknown' }}
-        availability: >
-          {{ states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') not in ['unavailable', 'unknown', ''] }}
+        '
+      liko_koreguota_kwh: "{{ (states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)\n\
+        \    * states('sensor.solcast_correction_factor_eimo') | float(1)\n    * states('sensor.solcast_intraday_ratio_eimo')\
+        \ | float(1)) | round(2) }}\n"
+  - name: self_sufficiency_today_eimo
+    unique_id: self_sufficiency_today_eimo
+    unit_of_measurement: '%'
+    state_class: measurement
+    icon: mdi:home-percent
+    state: '{% set cons = states(''sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used'')
+      | float(0) %} {% set imp  = states(''sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased'')
+      | float(0) %} {{ ([(1 - imp / cons) * 100, 0] | max) | round(0) if cons > 0.1 else 0 }}
 
-      # Ekvivalentiniai baterijos ciklai = bendra įkrovos energija /
-      # naudingoji talpa (13.619 kWh = 14.336 × 95 %, ruožas 5–100 % —
-      # KWH_PER_SOC iš energy_manager_eimo.py). Modbus analogas —
-      # sensor.battery_equivalent_cycles.
-      - name: "battery_equivalent_cycles_eimo"
-        unique_id: battery_equivalent_cycles_eimo
-        state_class: total_increasing
-        icon: mdi:battery-sync
-        state: >
-          {{ (states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) | round(1) }}
-        availability: >
-          {{ states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') not in ['unavailable', 'unknown', ''] }}
-        # Nusidėvėjimo tempas nuo paleidimo ~2026-02-01 ir projekcija iki
-        # 6000 ciklų (tipinis LFP resursas iki 80 % SOH).
-        attributes:
-          ikrauta_kwh: "{{ states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) | round(0) }}"
-          dienos_nuo_pajungimo: "{{ ((as_timestamp(now()) - as_timestamp('2026-02-01 12:00:00+02:00')) / 86400) | round(0) }}"
-          ciklai_per_diena: >-
-            {% set d = (as_timestamp(now()) - as_timestamp('2026-02-01 12:00:00+02:00')) / 86400 %}
-            {{ ((states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) / d) | round(2) if d > 1 else 'unknown' }}
-          prognoze_ciklu_per_metus: >-
-            {% set d = (as_timestamp(now()) - as_timestamp('2026-02-01 12:00:00+02:00')) / 86400 %}
-            {{ ((states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) / d * 365) | round(0) if d > 1 else 'unknown' }}
-          metai_iki_6000_ciklu: >-
-            {% set d = (as_timestamp(now()) - as_timestamp('2026-02-01 12:00:00+02:00')) / 86400 %}
-            {% set per_metus = (states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) / d * 365 if d > 1 else 0 %}
-            {{ ((6000 - states('sensor.solis_inverter_1033300254190112_solis_total_energy_charged') | float(0) / 13.619) / per_metus) | round(0) if per_metus > 1 else 'unknown' }}
-          bms_soh: "{{ states('sensor.solis_inverter_1033300254190112_solis_battery_state_of_health') }}"
+      '
+    availability: '{{ states(''sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_used'')
+      not in [''unavailable'', ''unknown'', ''''] }}
 
-      # Realus eksportuojamas perteklius (kWh) — kiek likusios dienos saulės
-      # NETURĖS kur dėtis, tik į tinklą (Modbus energy_manager_surplus analogas).
-      #
-      #   perteklius = pv_liko − baterijos_vieta_iki_100%
-      #
-      #   pv_liko   = Solcast „liko šiandien" × solcast_correction_factor_eimo
-      #               × intradienos santykis (solcast_intraday_ratio_eimo) —
-      #               dinamiškai seka realią dieną (2026-07-11)
-      #   vieta     = (100 − SOC) × 0.1434 kWh/%  (KWH_PER_SOC iš
-      #               energy_manager_eimo.py: 13.619 kWh / 95)
-      #
-      # Namų suvartojimas į formulę NEĮTRAUKIAMAS (2026-07-11): didžioji jo
-      # dalis būna vakare/naktį, kai saulės nebėra — toks vartojimas negali
-      # „sugerti" PV, todėl atimant visos paros likutį perteklius būdavo
-      # dirbtinai mažinamas ir pardavimas vėluodavo. Dienos vartojimo poveikį
-      # uždaro grįžtamasis ryšys: SOC kas 15 min perskaičiuoja vietą.
-      # Sloto eksporto sparta praktiškai ~1 kW ≈ 1 kWh/val, todėl pardavimą
-      # svarbu pradėti anksti (ON slenkstis >1 kWh); pardavimo_eta_h atributas
-      # rodo, kiek valandų pardavimo reikia dabartiniam pertekliui.
-      - name: "energy_manager_eimo_surplus"
-        unique_id: energy_manager_eimo_surplus
-        unit_of_measurement: kWh
-        # device_class: energy negalima — svyruojanti prognozė (measurement)
-        state_class: measurement
-        icon: mdi:transmission-tower-export
-        state: >
-          {% set per = 0.1434 %}
-          {% set pv_remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)
-                                * states('sensor.solcast_correction_factor_eimo') | float(1)
-                                * states('sensor.solcast_intraday_ratio_eimo') | float(1) %}
-          {% set soc = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(100) %}
-          {% set battery_headroom = [(100 - soc) * per, 0] | max %}
-          {{ [pv_remaining - battery_headroom, 0] | max | round(1) }}
-        availability: >
-          {{ states('sensor.solcast_pv_forecast_forecast_remaining_today') not in ['unavailable', 'unknown', '']
-             and states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') not in ['unavailable', 'unknown', ''] }}
-        attributes:
-          pv_remaining_kwh: >
-            {{ (states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)
-                * states('sensor.solcast_correction_factor_eimo') | float(1)
-                * states('sensor.solcast_intraday_ratio_eimo') | float(1)) | round(2) }}
-          intraday_ratio: >
-            {{ states('sensor.solcast_intraday_ratio_eimo') | float(1) }}
-          battery_headroom_kwh: >
-            {% set soc = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(100) %}
-            {{ [(100 - soc) * 0.1434, 0] | max | round(2) }}
-          # Kiek valandų dienos pardavimo (~1 kW → ~1 kWh/val) reikia
-          # dabartiniam pertekliui atiduoti į tinklą.
-          pardavimo_eta_h: >
-            {% set per = 0.1434 %}
-            {% set pv_remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)
-                                  * states('sensor.solcast_correction_factor_eimo') | float(1)
-                                  * states('sensor.solcast_intraday_ratio_eimo') | float(1) %}
-            {% set soc = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(100) %}
-            {% set headroom = [(100 - soc) * per, 0] | max %}
-            {{ ([pv_remaining - headroom, 0] | max / 1.0) | round(1) }}
+      '
+  - name: energy_savings_today_eimo
+    unique_id: energy_savings_today_eimo
+    unit_of_measurement: €
+    state_class: measurement
+    icon: mdi:piggy-bank
+    state: '{% set pv   = states(''sensor.solis_inverter_1033300254190112_solis_energy_today'') | float(0)
+      %} {% set sell = states(''sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy'') |
+      float(0) %} {% set buy  = states(''sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased'')
+      | float(0) %} {% set p_buy  = states(''input_number.electricity_price_buy_eimo'') | float(0.18)
+      %} {% set p_sell = states(''input_number.electricity_price_sell_eimo'') | float(0.08) %} {{ (([pv
+      - sell, 0] | max) * p_buy + sell * p_sell - buy * p_buy) | round(2) }}
 
-      # Bendra PV galia (W) = PV1 + PV2. energy_manager_eimo.py naudoja kaip pv_power.
-      # SVARBU: entity_id = sensor.eimo_pv_power (rankiniu būdu pervadintas entitetų
-      # registre pagal unique_id). HA iš pavadinimo "Eimo PV galia" auto-generuotų
-      # sensor.eimo_pv_galia — todėl entity_id NEKEISTI per name; jis pririštas prie
-      # unique_id. Kodas ir dashboard remiasi sensor.eimo_pv_power.
-      - name: "Eimo PV galia"
-        unique_id: eimo_pv_power
-        unit_of_measurement: W
-        device_class: power
-        state_class: measurement
-        icon: mdi:solar-power
-        state: >
-          {{ (states('sensor.solis_inverter_1033300254190112_solis_dc_power_pv1') | float(0)
-              + states('sensor.solis_inverter_1033300254190112_solis_dc_power_pv2') | float(0)) | round(0) }}
-        availability: >
-          {{ states('sensor.solis_inverter_1033300254190112_solis_dc_power_pv1')
-             not in ['unavailable', 'unknown', 'none', ''] }}
+      '
+    availability: '{{ states(''sensor.solis_inverter_1033300254190112_solis_energy_today'') not in [''unavailable'',
+      ''unknown'', ''''] }}
 
+      '
+  - name: battery_roundtrip_efficiency_eimo
+    unique_id: battery_roundtrip_efficiency_eimo
+    unit_of_measurement: '%'
+    state_class: measurement
+    icon: mdi:battery-sync
+    state: '{% set chg = states(''sensor.solis_inverter_1033300254190112_solis_total_energy_charged'')
+      | float(0) %} {% set dis = states(''sensor.solis_inverter_1033300254190112_solis_total_energy_discharged'')
+      | float(0) %} {% set stored = states(''sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity'')
+      | float(0) / 100 * 14.336 %} {% set denom = chg - stored %} {{ (dis / denom * 100) | round(1) if
+      denom > 50 else ''unknown'' }}
+
+      '
+    availability: '{{ states(''sensor.solis_inverter_1033300254190112_solis_total_energy_charged'') not
+      in [''unavailable'', ''unknown'', ''''] }}
+
+      '
+  - name: battery_equivalent_cycles_eimo
+    unique_id: battery_equivalent_cycles_eimo
+    state_class: total_increasing
+    icon: mdi:battery-sync
+    state: '{{ (states(''sensor.solis_inverter_1033300254190112_solis_total_energy_charged'') | float(0)
+      / 13.619) | round(1) }}
+
+      '
+    availability: '{{ states(''sensor.solis_inverter_1033300254190112_solis_total_energy_charged'') not
+      in [''unavailable'', ''unknown'', ''''] }}
+
+      '
+    attributes:
+      ikrauta_kwh: '{{ states(''sensor.solis_inverter_1033300254190112_solis_total_energy_charged'') |
+        float(0) | round(0) }}'
+      dienos_nuo_pajungimo: '{{ ((as_timestamp(now()) - as_timestamp(''2026-02-01 12:00:00+02:00'')) /
+        86400) | round(0) }}'
+      ciklai_per_diena: '{% set d = (as_timestamp(now()) - as_timestamp(''2026-02-01 12:00:00+02:00''))
+        / 86400 %} {{ ((states(''sensor.solis_inverter_1033300254190112_solis_total_energy_charged'')
+        | float(0) / 13.619) / d) | round(2) if d > 1 else ''unknown'' }}'
+      prognoze_ciklu_per_metus: '{% set d = (as_timestamp(now()) - as_timestamp(''2026-02-01 12:00:00+02:00''))
+        / 86400 %} {{ ((states(''sensor.solis_inverter_1033300254190112_solis_total_energy_charged'')
+        | float(0) / 13.619) / d * 365) | round(0) if d > 1 else ''unknown'' }}'
+      metai_iki_6000_ciklu: '{% set d = (as_timestamp(now()) - as_timestamp(''2026-02-01 12:00:00+02:00''))
+        / 86400 %} {% set per_metus = (states(''sensor.solis_inverter_1033300254190112_solis_total_energy_charged'')
+        | float(0) / 13.619) / d * 365 if d > 1 else 0 %} {{ ((6000 - states(''sensor.solis_inverter_1033300254190112_solis_total_energy_charged'')
+        | float(0) / 13.619) / per_metus) | round(0) if per_metus > 1 else ''unknown'' }}'
+      bms_soh: '{{ states(''sensor.solis_inverter_1033300254190112_solis_battery_state_of_health'') }}'
+  - name: energy_manager_eimo_surplus
+    unique_id: energy_manager_eimo_surplus
+    unit_of_measurement: kWh
+    state_class: measurement
+    icon: mdi:transmission-tower-export
+    state: "{% set per = 0.1434 %} {% set pv_remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today')\
+      \ | float(0)\n                      * states('sensor.solcast_correction_factor_eimo') | float(1)\n\
+      \                      * states('sensor.solcast_intraday_ratio_eimo') | float(1) %}\n{% set soc\
+      \ = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(100)\
+      \ %} {% set battery_headroom = [(100 - soc) * per, 0] | max %} {{ [pv_remaining - battery_headroom,\
+      \ 0] | max | round(1) }}\n"
+    availability: "{{ states('sensor.solcast_pv_forecast_forecast_remaining_today') not in ['unavailable',\
+      \ 'unknown', '']\n   and states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity')\
+      \ not in ['unavailable', 'unknown', ''] }}\n"
+    attributes:
+      pv_remaining_kwh: "{{ (states('sensor.solcast_pv_forecast_forecast_remaining_today') | float(0)\n\
+        \    * states('sensor.solcast_correction_factor_eimo') | float(1)\n    * states('sensor.solcast_intraday_ratio_eimo')\
+        \ | float(1)) | round(2) }}\n"
+      intraday_ratio: '{{ states(''sensor.solcast_intraday_ratio_eimo'') | float(1) }}
+
+        '
+      battery_headroom_kwh: '{% set soc = states(''sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity'')
+        | float(100) %} {{ [(100 - soc) * 0.1434, 0] | max | round(2) }}
+
+        '
+      pardavimo_eta_h: "{% set per = 0.1434 %} {% set pv_remaining = states('sensor.solcast_pv_forecast_forecast_remaining_today')\
+        \ | float(0)\n                      * states('sensor.solcast_correction_factor_eimo') | float(1)\n\
+        \                      * states('sensor.solcast_intraday_ratio_eimo') | float(1) %}\n{% set soc\
+        \ = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(100)\
+        \ %} {% set headroom = [(100 - soc) * per, 0] | max %} {{ ([pv_remaining - headroom, 0] | max\
+        \ / 1.0) | round(1) }}\n"
+  - name: Eimo PV galia
+    unique_id: eimo_pv_power
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    icon: mdi:solar-power
+    state: "{{ (states('sensor.solis_inverter_1033300254190112_solis_dc_power_pv1') | float(0)\n    +\
+      \ states('sensor.solis_inverter_1033300254190112_solis_dc_power_pv2') | float(0)) | round(0) }}\n"
+    availability: "{{ states('sensor.solis_inverter_1033300254190112_solis_dc_power_pv1')\n   not in ['unavailable',\
+      \ 'unknown', 'none', ''] }}\n"
 automation:
-  # ───────────────────────────────────────────────────────────────────────
-  # EIMO ENERGIJOS VALDYMAS — 2026-09-02 architektūros pertvarka (veidrodinė
-  # Namų). VISUS sprendimus daro AppDaemon energy_manager_eimo.py
-  # compute_plan(), publikuodama sensor.eimo_plan_mode/target_soc/
-  # slot_active/slot_cutoff_soc/inverter_on. Automatikos žemiau TIK VYKDO —
-  # pakeičia buvusias 5 nepriklausomas sprendimų automatikas
-  # (solis_morning_mode_eimo, solis_evening_discharge_eimo,
-  # solis_tou_recalc_eimo, solis_daytime_discharge_eimo,
-  # solis_daytime_feedin_pv_deficit_eimo), kurios rašė į tą pačią
-  # select.storage_mode entity su savo nepriklausomais slenksčiais. Eimo
-  # neturi rankinio override entity (skirtingai nei Namai), tad vienintelė
-  # išimtis vykdymui — audros režimas.
-  # ───────────────────────────────────────────────────────────────────────
-  # Vienas Eimo vykdytojas. Solis eilė siunčia daugiausia vieną komandą
-  # per 360 s, laukia faktinio patvirtinimo ir pakeičia pasenusį norimą planą.
-  - id: solis_plan_apply_mode_eimo
-    alias: Eimo - Atominio energijos plano vykdymas
-    description: >-
-      Perduoda naujausią norimą būseną vienintelei Solis komandų eilei.
-      Pakartojimas kas minutę atnaujina plano galiojimą; API komandos
-      siunčiamos tik esant skirtumui, po bent 6 min. ir ankstesnio patvirtinimo.
-    triggers:
-      - trigger: state
-        entity_id:
-          - sensor.eimo_plan
-          - sensor.eimo_planner_health
-          - input_boolean.storm_mode_eimo
-      - trigger: time_pattern
-        minutes: "/1"
-      - trigger: homeassistant
-        event: start
-    conditions: []
-    actions:
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.storm_mode_eimo
-                state: "on"
-            sequence:
-              - action: solis.set_plan
-                data:
-                  entry_id: "01KT7EWKQVY3ANB6EDBEZNK39H"
-                  inverter_sn: "1033300254190112"
-                  targets: >-
-                    {% set fresh = -60 <= as_timestamp(now()) -
-                      (states('sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received') | float(0)) <= 900 %}
-                    {% set grid = 180 < states('sensor.solis_inverter_1033300254190112_solis_meter_item_a_volt') | float(0) < 270
-                      and 180 < states('sensor.solis_inverter_1033300254190112_solis_meter_item_b_volt') | float(0) < 270
-                      and 180 < states('sensor.solis_inverter_1033300254190112_solis_meter_item_c_volt') | float(0) < 270
-                      and 45 < states('sensor.solis_inverter_1033300254190112_solis_ac_frequency') | float(0) < 55 %}
-                    {{ {
-                      'inverter_on_off': true,
-                      'storage_mode': 'Self-Use',
-                      'slot1_discharge': false,
-                      'slot1_charge': true,
-                      'slot1_charge_time': '00:00-23:59',
-                      'slot1_charge_soc': 100,
-                      'slot1_charge_current': 150,
-                      'allow_grid_charging': false,
-                      'allow_export': fresh and grid and
-                        states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(-1) >= 95
-                    } }}
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.storm_mode_eimo
-                state: "off"
-              - condition: state
-                entity_id: sensor.eimo_planner_health
-                state: "ok"
-              - condition: state
-                entity_id: sensor.eimo_plan
-                state: [self_use, feed_in, night_export]
-              - condition: state
-                entity_id: sensor.eimo_plan
-                attribute: actionable
-                state: "on"
-              - condition: template
-                value_template: >-
-                  {% set checked = as_datetime(state_attr('sensor.eimo_planner_health', 'last_checked')) %}
-                  {% set cutoff = state_attr('sensor.eimo_plan', 'slot_cutoff_soc') %}
-                  {{ checked is not none and -60 <= (now() - checked).total_seconds() < 180
-                     and state_attr('sensor.eimo_plan', 'inverter_on') in ['on', 'off']
-                     and (state_attr('sensor.eimo_plan', 'slot_active') == 'off'
-                          or (state_attr('sensor.eimo_plan', 'slot_active') == 'on'
-                              and cutoff is number and 6 <= cutoff <= 100)) }}
-            sequence:
-              - action: solis.set_plan
-                data:
-                  entry_id: "01KT7EWKQVY3ANB6EDBEZNK39H"
-                  inverter_sn: "1033300254190112"
-                  targets: >-
-                    {% set active = state_attr('sensor.eimo_plan', 'slot_active') == 'on' %}
-                    {% set targets = {
-                      'inverter_on_off': state_attr('sensor.eimo_plan', 'inverter_on') == 'on',
-                      'storage_mode': 'Feed-In Priority' if states('sensor.eimo_plan') in ['feed_in', 'night_export'] else 'Self-Use',
-                      'slot1_charge': false,
-                      'slot1_discharge': active,
-                      'allow_export': true
-                    } %}
-                    {% if active %}
-                      {% set targets = dict(targets,
-                        slot1_discharge_time='00:00-23:59',
-                        slot1_discharge_soc=state_attr('sensor.eimo_plan', 'slot_cutoff_soc') | int,
-                        slot1_discharge_current=150) %}
-                    {% endif %}
-                    {{ targets }}
-                  valid_until: "{{ as_timestamp(state_attr('sensor.eimo_plan', 'valid_until'), 0) }}"
-        default:
-          - action: solis.set_plan
-            data:
-              entry_id: "01KT7EWKQVY3ANB6EDBEZNK39H"
-              inverter_sn: "1033300254190112"
-              cancel: true
-    mode: restart
-
-
-  - id: solis_snapshot_daily_forecast_eimo
-    alias: "Eimo - Įsiminti dienos prognozę (vakar prognozė)"
-    trigger:
-      - platform: time
-        at: "23:55:00"
-    condition:
-      - condition: template
-        value_template: >
-          {{ states('sensor.solcast_pv_forecast_forecast_today')
-             not in ['unavailable', 'unknown', 'none', ''] }}
-    action:
-      - service: input_number.set_value
-        target:
-          entity_id: input_number.solcast_forecast_yesterday_eimo
+- id: solis_plan_apply_mode_eimo
+  alias: Eimo - Atominio energijos plano vykdymas
+  description: Bendro energijos plano vykdytojas; parametrai iš elektrinės profilio. solis_cloud
+  use_blueprint:
+    path: energy/solis_cloud_executor.yaml
+    input:
+      plan_entity: sensor.eimo_plan
+      planner_entity: sensor.eimo_planner_health
+      storm_entity: input_boolean.storm_mode_eimo
+      hard_floor: 6
+      planner_max_age: 180
+      discharge_current: 150
+      entry_id: 01KT7EWKQVY3ANB6EDBEZNK39H
+      inverter_sn: '1033300254190112'
+      heartbeat_entity: sensor.solis_inverter_1033300254190112_solis_timestamp_measurements_received
+      soc_entity: sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity
+      voltage_a: sensor.solis_inverter_1033300254190112_solis_meter_item_a_volt
+      voltage_b: sensor.solis_inverter_1033300254190112_solis_meter_item_b_volt
+      voltage_c: sensor.solis_inverter_1033300254190112_solis_meter_item_c_volt
+      frequency_entity: sensor.solis_inverter_1033300254190112_solis_ac_frequency
+      telemetry_max_age: 900
+      charge_current: 150
+- id: solis_snapshot_daily_forecast_eimo
+  alias: Eimo - Įsiminti dienos prognozę (vakar prognozė)
+  trigger:
+  - platform: time
+    at: '23:55:00'
+  condition:
+  - condition: template
+    value_template: "{{ states('sensor.solcast_pv_forecast_forecast_today')\n   not in ['unavailable',\
+      \ 'unknown', 'none', ''] }}\n"
+  action:
+  - service: input_number.set_value
+    target:
+      entity_id: input_number.solcast_forecast_yesterday_eimo
+    data:
+      value: '{{ states(''sensor.solcast_pv_forecast_forecast_today'') | float(0) | round(1) }}'
+  mode: single
+- id: eimo_solis_cloud_monitor
+  alias: Eimo - Solis ryšio ir komandų priežiūra
+  description: HA pranešimai apie ilgą ryšio sutrikimą ir nepatvirtintas komandas; inverteriui užklausų
+    nesiunčia.
+  triggers:
+  - trigger: state
+    entity_id: sensor.solis_inverter_1033300254190112_cloud_api_health
+    to: write_rate_alert
+    id: problem
+  - trigger: state
+    entity_id: sensor.solis_inverter_1033300254190112_cloud_api_health
+    to:
+    - backoff
+    - stale_telemetry
+    - worker_stopped
+    - command_stalled
+    - control_degraded
+    - storage_error
+    - unavailable
+    for: 00:15:00
+    id: problem
+  - trigger: state
+    entity_id: sensor.solis_inverter_1033300254190112_cloud_command_status
+    to:
+    - not_confirmed
+    - storage_error
+    - waiting_for_cloud
+    - unsupported_profile
+    - retry_wait
+    - conflicting_targets
+    for: 00:15:00
+    id: problem
+  - trigger: state
+    entity_id: sensor.solis_inverter_1033300254190112_cloud_api_health
+    to: healthy
+    id: recovered
+  - trigger: state
+    entity_id: sensor.solis_inverter_1033300254190112_cloud_command_status
+    to:
+    - idle
+    - ready
+    id: recovered
+  actions:
+  - choose:
+    - conditions: '{{ trigger.id == ''problem'' }}'
+      sequence:
+      - action: persistent_notification.create
         data:
-          value: "{{ states('sensor.solcast_pv_forecast_forecast_today') | float(0) | round(1) }}"
-    mode: single
-
-  - id: eimo_solis_cloud_monitor
-    alias: Eimo - Solis ryšio ir komandų priežiūra
-    description: HA pranešimai apie ilgą ryšio sutrikimą ir nepatvirtintas komandas; inverteriui užklausų nesiunčia.
-    triggers:
-      - trigger: state
-        entity_id: sensor.solis_inverter_1033300254190112_cloud_api_health
-        to: write_rate_alert
-        id: problem
-      - trigger: state
-        entity_id: sensor.solis_inverter_1033300254190112_cloud_api_health
-        to: [backoff, stale_telemetry, worker_stopped, command_stalled, control_degraded, storage_error, unavailable]
-        for: '00:15:00'
-        id: problem
-      - trigger: state
-        entity_id: sensor.solis_inverter_1033300254190112_cloud_command_status
-        to: [not_confirmed, storage_error, waiting_for_cloud, unsupported_profile, retry_wait, conflicting_targets]
-        for: '00:15:00'
-        id: problem
-      - trigger: state
-        entity_id: sensor.solis_inverter_1033300254190112_cloud_api_health
-        to: healthy
-        id: recovered
-      - trigger: state
-        entity_id: sensor.solis_inverter_1033300254190112_cloud_command_status
-        to: [idle, ready]
-        id: recovered
-    actions:
-      - choose:
-          - conditions: "{{ trigger.id == 'problem' }}"
-            sequence:
-              - action: persistent_notification.create
-                data:
-                  notification_id: eimo_solis_cloud_health
-                  title: Eimo - reikia patikrinti Solis ryšį
-                  message: >-
-                    Ryšys: {{ states('sensor.solis_inverter_1033300254190112_cloud_api_health') }}.
-                    Komanda: {{ states('sensor.solis_inverter_1033300254190112_cloud_command_status') }}.
-                    Tikrų įrašų per 5 min.: {{ state_attr('sensor.solis_inverter_1033300254190112_cloud_api_health', 'writes_last_5min') }}.
-                    Kitas ryšio bandymas: {{ state_attr('sensor.solis_inverter_1033300254190112_cloud_api_health', 'next_retry') }}.
-                    Patikrinkite Eimo valdymo skydelio ryšio diagnostiką.
-          - conditions: >-
-              {{ is_state('sensor.solis_inverter_1033300254190112_cloud_api_health', 'healthy')
-                 and states('sensor.solis_inverter_1033300254190112_cloud_command_status') in ['idle', 'ready'] }}
-            sequence:
-              - action: persistent_notification.dismiss
-                data:
-                  notification_id: eimo_solis_cloud_health
-    mode: single
+          notification_id: eimo_solis_cloud_health
+          title: Eimo - reikia patikrinti Solis ryšį
+          message: 'Ryšys: {{ states(''sensor.solis_inverter_1033300254190112_cloud_api_health'') }}.
+            Komanda: {{ states(''sensor.solis_inverter_1033300254190112_cloud_command_status'') }}. Tikrų
+            įrašų per 5 min.: {{ state_attr(''sensor.solis_inverter_1033300254190112_cloud_api_health'',
+            ''writes_last_5min'') }}. Kitas ryšio bandymas: {{ state_attr(''sensor.solis_inverter_1033300254190112_cloud_api_health'',
+            ''next_retry'') }}. Patikrinkite Eimo valdymo skydelio ryšio diagnostiką.'
+    - conditions: "{{ is_state('sensor.solis_inverter_1033300254190112_cloud_api_health', 'healthy')\n\
+        \   and states('sensor.solis_inverter_1033300254190112_cloud_command_status') in ['idle', 'ready']\
+        \ }}"
+      sequence:
+      - action: persistent_notification.dismiss
+        data:
+          notification_id: eimo_solis_cloud_health
+  mode: single

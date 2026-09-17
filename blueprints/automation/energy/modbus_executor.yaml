@@ -1,0 +1,398 @@
+blueprint:
+  name: Energy plan — modbus adapter
+  description: Executes a leased plant plan. Hardware entities and limits are inputs; planning stays in
+    the shared core.
+  domain: automation
+  source_url: https://github.com/celadondeep/ha-config/blob/main/blueprints/automation/energy/modbus_executor.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    plan_entity:
+      name: Plan entity
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    planner_entity:
+      name: Planner entity
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    executor_health:
+      name: Executor health
+      selector:
+        entity:
+          domain:
+          - sensor
+          multiple: false
+          reorder: false
+    storm_entity:
+      name: Storm entity
+      selector:
+        entity:
+          domain:
+          - input_boolean
+          multiple: false
+          reorder: false
+    hard_floor:
+      name: Hard floor
+      selector:
+        number:
+          min: 0.0
+          max: 100
+          step: 1.0
+          mode: box
+    planner_max_age:
+      name: Planner max age
+      selector:
+        number:
+          min: 0.0
+          max: 3600.0
+          step: 1.0
+          mode: box
+    discharge_current:
+      name: Discharge current
+      selector:
+        number:
+          min: 0.0
+          max: 300.0
+          step: 1.0
+          mode: box
+    manual_entity:
+      name: Manual entity
+      selector:
+        entity:
+          domain:
+          - input_boolean
+          multiple: false
+          reorder: false
+    manual_soc_entity:
+      name: Manual soc entity
+      selector:
+        entity:
+          domain:
+          - input_boolean
+          multiple: false
+          reorder: false
+    mode_entity:
+      name: Mode entity
+      selector:
+        entity:
+          domain:
+          - select
+          multiple: false
+          reorder: false
+    slot_entity:
+      name: Slot entity
+      selector:
+        entity:
+          domain:
+          - switch
+          multiple: false
+          reorder: false
+    cutoff_entity:
+      name: Cutoff entity
+      selector:
+        entity:
+          domain:
+          - number
+          multiple: false
+          reorder: false
+    power_entity:
+      name: Power entity
+      selector:
+        entity:
+          domain:
+          - switch
+          multiple: false
+          reorder: false
+    start_entity:
+      name: Start entity
+      selector:
+        entity:
+          domain:
+          - time
+          multiple: false
+          reorder: false
+    end_entity:
+      name: End entity
+      selector:
+        entity:
+          domain:
+          - time
+          multiple: false
+          reorder: false
+    current_entity:
+      name: Current entity
+      selector:
+        entity:
+          domain:
+          - number
+          multiple: false
+          reorder: false
+    self_use_mode:
+      name: Self use mode
+      selector:
+        text:
+          multiline: false
+          multiple: false
+      default: Self-Use
+    feed_in_mode:
+      name: Feed in mode
+      selector:
+        text:
+          multiline: false
+          multiple: false
+      default: Feed-in Priority
+    self_use_aliases:
+      name: Self use aliases
+      default:
+      - Self-Use
+      - Self-Use + TOU
+      selector:
+        object:
+          multiple: false
+    feed_in_aliases:
+      name: Feed in aliases
+      default:
+      - Feed-in Priority
+      - Feed-in Priority + TOU
+      selector:
+        object:
+          multiple: false
+triggers:
+- trigger: state
+  entity_id: !input 'plan_entity'
+  id: plan_commit
+- trigger: homeassistant
+  event: start
+  id: ha_start
+- trigger: time_pattern
+  minutes: /10
+  id: reconcile
+- trigger: state
+  entity_id: !input 'executor_health'
+  to: degraded
+  for: 00:01:00
+  id: feedback_retry
+conditions:
+- condition: state
+  entity_id: !input 'storm_entity'
+  state: 'off'
+- condition: state
+  entity_id: !input 'manual_entity'
+  state: 'off'
+- condition: state
+  entity_id: !input 'planner_entity'
+  state: ok
+- condition: state
+  entity_id: !input 'plan_entity'
+  state:
+  - self_use
+  - feed_in
+  - night_export
+- condition: state
+  entity_id: !input 'plan_entity'
+  attribute: actionable
+  state: 'on'
+- condition: template
+  value_template: '{% from ''energy_plan.jinja'' import plan_valid %}{{ plan_valid(plan_entity, planner_entity,
+    hard_floor, planner_max_age) | bool }}'
+actions:
+- if:
+  - condition: state
+    entity_id: !input 'manual_soc_entity'
+    state: 'off'
+  - condition: state
+    entity_id: !input 'plan_entity'
+    state: 'on'
+    attribute: slot_active
+  - condition: state
+    entity_id: !input 'slot_entity'
+    state: 'on'
+  - condition: template
+    value_template: '{{ states(cutoff_entity) | float(-1) != slot_cutoff_soc | float(-2) }}'
+  then:
+  - action: switch.turn_off
+    target:
+      entity_id: !input 'slot_entity'
+- if:
+  - condition: state
+    entity_id: !input 'manual_soc_entity'
+    state: 'off'
+  - condition: state
+    entity_id: !input 'plan_entity'
+    attribute: slot_active
+    state: 'off'
+  - condition: state
+    entity_id: !input 'slot_entity'
+    state: 'on'
+  then:
+  - action: switch.turn_off
+    target:
+      entity_id: !input 'slot_entity'
+- alias: Keisti tik bazinį režimą, išsaugant teisėtą TOU būseną
+  choose:
+  - conditions:
+    - condition: state
+      entity_id: !input 'plan_entity'
+      state:
+      - feed_in
+      - night_export
+    - condition: not
+      conditions:
+      - condition: state
+        entity_id: !input 'mode_entity'
+        state: !input 'feed_in_aliases'
+    sequence:
+    - action: select.select_option
+      target:
+        entity_id: !input 'mode_entity'
+      data:
+        option: !input 'feed_in_mode'
+  - conditions:
+    - condition: state
+      entity_id: !input 'plan_entity'
+      state: self_use
+    - condition: not
+      conditions:
+      - condition: state
+        entity_id: !input 'mode_entity'
+        state: !input 'self_use_aliases'
+    sequence:
+    - action: select.select_option
+      target:
+        entity_id: !input 'mode_entity'
+      data:
+        option: !input 'self_use_mode'
+- if:
+  - condition: state
+    entity_id: !input 'manual_soc_entity'
+    state: 'off'
+  - condition: state
+    entity_id: !input 'plan_entity'
+    attribute: slot_active
+    state: 'on'
+  - condition: template
+    value_template: '{{ slot_cutoff_soc is number and hard_floor <= slot_cutoff_soc <= 100 }}'
+  then:
+  - if:
+    - condition: template
+      value_template: "{{ states(start_entity)\n   != '00:00:00' }}"
+    then:
+    - action: time.set_value
+      target:
+        entity_id: !input 'start_entity'
+      data:
+        time: 00:00:00
+  - if:
+    - condition: template
+      value_template: "{{ states(end_entity)\n   != '23:59:00' }}"
+    then:
+    - action: time.set_value
+      target:
+        entity_id: !input 'end_entity'
+      data:
+        time: '23:59:00'
+  - if:
+    - condition: template
+      value_template: '{{ states(cutoff_entity) | float(-1) != slot_cutoff_soc | float(-2) }}'
+    then:
+    - action: number.set_value
+      target:
+        entity_id: !input 'cutoff_entity'
+      data:
+        value: '{{ slot_cutoff_soc }}'
+  - if:
+    - condition: template
+      value_template: '{{ states(current_entity) | float(-1) != discharge_current }}'
+    then:
+    - action: number.set_value
+      target:
+        entity_id: !input 'current_entity'
+      data:
+        value: !input 'discharge_current'
+  - wait_template: '{{ states(cutoff_entity) | float(-1) == slot_cutoff_soc | float(-2) }}'
+    timeout: 00:00:45
+    continue_on_timeout: false
+  - condition: state
+    entity_id: !input 'manual_entity'
+    state: 'off'
+  - condition: state
+    entity_id: !input 'manual_soc_entity'
+    state: 'off'
+  - condition: state
+    entity_id: !input 'storm_entity'
+    state: 'off'
+  - condition: state
+    entity_id: !input 'plan_entity'
+    state: 'on'
+    attribute: actionable
+  - condition: template
+    value_template: '{% from ''energy_plan.jinja'' import plan_valid %}{{ plan_valid(plan_entity, planner_entity,
+      hard_floor, planner_max_age) | bool }}'
+  - condition: template
+    value_template: '{{ state_attr(plan_entity, ''slot_active'') == ''on'' and state_attr(plan_entity,
+      ''inverter_on'') == ''on'' and state_attr(plan_entity, ''slot_cutoff_soc'') == slot_cutoff_soc }}'
+  - if:
+    - condition: state
+      entity_id: !input 'slot_entity'
+      state: 'off'
+    then:
+    - action: switch.turn_on
+      target:
+        entity_id: !input 'slot_entity'
+- choose:
+  - conditions:
+    - condition: state
+      entity_id: !input 'plan_entity'
+      attribute: inverter_on
+      state: 'on'
+    - condition: state
+      entity_id: !input 'power_entity'
+      state: 'off'
+    sequence:
+    - action: switch.turn_on
+      target:
+        entity_id: !input 'power_entity'
+  - conditions:
+    - condition: state
+      entity_id: !input 'plan_entity'
+      attribute: inverter_on
+      state: 'off'
+    - condition: state
+      entity_id: !input 'power_entity'
+      state: 'on'
+    sequence:
+    - action: switch.turn_off
+      target:
+        entity_id: !input 'power_entity'
+variables:
+  plan_entity: !input 'plan_entity'
+  planner_entity: !input 'planner_entity'
+  executor_health: !input 'executor_health'
+  storm_entity: !input 'storm_entity'
+  hard_floor: !input 'hard_floor'
+  planner_max_age: !input 'planner_max_age'
+  discharge_current: !input 'discharge_current'
+  manual_entity: !input 'manual_entity'
+  manual_soc_entity: !input 'manual_soc_entity'
+  mode_entity: !input 'mode_entity'
+  slot_entity: !input 'slot_entity'
+  cutoff_entity: !input 'cutoff_entity'
+  power_entity: !input 'power_entity'
+  start_entity: !input 'start_entity'
+  end_entity: !input 'end_entity'
+  current_entity: !input 'current_entity'
+  self_use_mode: !input 'self_use_mode'
+  feed_in_mode: !input 'feed_in_mode'
+  self_use_aliases: !input 'self_use_aliases'
+  feed_in_aliases: !input 'feed_in_aliases'
+  plan_mode: '{{ states(plan_entity) }}'
+  slot_cutoff_soc: '{{ state_attr(plan_entity, ''slot_cutoff_soc'') }}'
+mode: restart
