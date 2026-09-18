@@ -81,3 +81,36 @@ This is not a claim that every unrelated HA automation is now generic, that
 all possible control bugs are eliminated, or that a short deployment check
 proves long-term cloud availability. Old auxiliary home guards remain in
 site-specific HA config. Solis integration transport/queue code is unchanged.
+
+## Completion verification — 2026-09-18 05:46 LT
+
+Both requested tasks are complete and deployed. The overnight verification
+confirmed both planners and executors `ok`, both cores `normal`, both executor
+automations enabled, and Eimo's command queue `idle` with no outstanding write.
+Cloud health was `healthy`; the monitoring snapshot showed three API reads
+and zero writes in the preceding five minutes, with zero writes in the last
+hour. Earlier cloud failures remain in diagnostic history; recovery is not
+represented as uninterrupted connectivity.
+
+Both consumption models refreshed automatically at 00:20 LT. The persisted
+window advanced to **2026-08-19 through 2026-09-17**, excluding September 18.
+
+| Site | Daily mean | Accepted daily samples | Complete hourly days |
+|---|---:|---:|---:|
+| Namai | 17.17 kWh | 29 | 26 |
+| Eimo | 9.24 kWh | 28 | 26 |
+
+The saved JSON contains all 24 hourly and seven weekday values, matching
+window bounds and valid source status. All 25 deployed file hashes still match
+the deployment manifest. AppDaemon's available container log returned no
+ERROR entries.
+
+Both published source revisions passed GitHub CI:
+- [AppDaemon validation](https://github.com/celadondeep/Solis/actions/runs/35248825296)
+  for `a6b2f163f7176eb1bdd87b38d7e3fe5cfc492580`.
+- [HA validation](https://github.com/celadondeep/ha-config/actions/runs/35248826329)
+  for `ee00e149d8b061be5c9c7a396c7889b1a1638df3`.
+
+No additional control command, software reload or inverter query was needed
+for this completion check. The browser-only visual verification limitation
+noted above remains; native dashboard configuration and data were verified.
