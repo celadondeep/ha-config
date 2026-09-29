@@ -148,6 +148,47 @@ template:
       ''unknown'', ''''] }}
 
       '
+  # All lifetime registers below come from the same Solis Cloud inverter.
+  # This is an aggregate energy balance; it cannot separate battery and
+  # inverter conversion losses without an independent self-consumption meter.
+  - name: system_efficiency_eimo
+    unique_id: system_efficiency_eimo
+    unit_of_measurement: '%'
+    state_class: measurement
+    icon: mdi:gauge
+    state: >-
+      {% set pv = states('sensor.solis_inverter_1033300254190112_solis_energy_total') | float(0) %}
+      {% set imp = states('sensor.solis_inverter_1033300254190112_solis_total_energy_purchased') | float(0) %}
+      {% set used = states('sensor.solis_inverter_1033300254190112_solis_total_energy_used') | float(0) %}
+      {% set exp = states('sensor.solis_inverter_1033300254190112_solis_total_on_grid_energy') | float(0) %}
+      {% set soc = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(0) %}
+      {% set input = pv + imp - soc / 100 * 14.336 %}
+      {{ ((used + exp) / input * 100) | round(1) if input > 50 and used + exp <= input * 1.1 else 'unknown' }}
+    availability: >-
+      {{ states('sensor.solis_inverter_1033300254190112_solis_energy_total') not in ['unknown', 'unavailable', 'none', '']
+         and states('sensor.solis_inverter_1033300254190112_solis_total_energy_purchased') not in ['unknown', 'unavailable', 'none', '']
+         and states('sensor.solis_inverter_1033300254190112_solis_total_energy_used') not in ['unknown', 'unavailable', 'none', '']
+         and states('sensor.solis_inverter_1033300254190112_solis_total_on_grid_energy') not in ['unknown', 'unavailable', 'none', '']
+         and states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') not in ['unknown', 'unavailable', 'none', ''] }}
+  - name: system_losses_total_eimo
+    unique_id: system_losses_total_eimo
+    unit_of_measurement: kWh
+    state_class: measurement
+    icon: mdi:chart-donut
+    state: >-
+      {% set pv = states('sensor.solis_inverter_1033300254190112_solis_energy_total') | float(0) %}
+      {% set imp = states('sensor.solis_inverter_1033300254190112_solis_total_energy_purchased') | float(0) %}
+      {% set used = states('sensor.solis_inverter_1033300254190112_solis_total_energy_used') | float(0) %}
+      {% set exp = states('sensor.solis_inverter_1033300254190112_solis_total_on_grid_energy') | float(0) %}
+      {% set soc = states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') | float(0) %}
+      {% set losses = pv + imp - used - exp - soc / 100 * 14.336 %}
+      {{ losses | round(1) if losses >= 0 else 'unknown' }}
+    availability: >-
+      {{ states('sensor.solis_inverter_1033300254190112_solis_energy_total') not in ['unknown', 'unavailable', 'none', '']
+         and states('sensor.solis_inverter_1033300254190112_solis_total_energy_purchased') not in ['unknown', 'unavailable', 'none', '']
+         and states('sensor.solis_inverter_1033300254190112_solis_total_energy_used') not in ['unknown', 'unavailable', 'none', '']
+         and states('sensor.solis_inverter_1033300254190112_solis_total_on_grid_energy') not in ['unknown', 'unavailable', 'none', '']
+         and states('sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity') not in ['unknown', 'unavailable', 'none', ''] }}
   - name: battery_roundtrip_efficiency_eimo
     unique_id: battery_roundtrip_efficiency_eimo
     unit_of_measurement: '%'
