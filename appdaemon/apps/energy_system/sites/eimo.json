@@ -125,6 +125,7 @@
       "morning_on_time": "sensor.inverter_morning_on_time_eimo",
       "cons_until_production": "sensor.energy_manager_eimo_cons_until_production",
       "correction_factor": "sensor.solcast_correction_factor_eimo",
+      "forecast_accuracy": "sensor.solcast_forecast_yesterday_accuracy_eimo",
       "plan_mode": "sensor.eimo_plan_mode",
       "plan_target_soc": "sensor.eimo_plan_target_soc",
       "plan_slot_active": "sensor.eimo_plan_slot_active",
@@ -132,6 +133,7 @@
       "plan_inverter_on": "sensor.eimo_plan_inverter_on",
       "plan": "sensor.eimo_plan",
       "horizon": "sensor.eimo_energy_horizon",
+      "night_state": "input_text.eimo_nakties_atmintis",
       "planner_health": "sensor.eimo_planner_health",
       "executor_health": "sensor.eimo_executor_health",
       "core_state": "sensor.eimo_core_state",
@@ -282,9 +284,13 @@
     "title": "Eimo SE",
     "file": "eimo.yaml",
     "site_label": "Eimo",
+    "sun": {
+      "$ref": "energy.SENSOR.sun"
+    },
     "soc": {
       "$ref": "energy.SENSOR.soc"
     },
+    "badge_soc": "sensor.eimo_baterijos_ikrova_skydelyje",
     "pv": {
       "$ref": "energy.SENSOR.pv_power"
     },
@@ -369,8 +375,8 @@
     "analysis": {
       "today": {
         "savings": "sensor.energy_savings_today_eimo",
-        "consumption": {
-          "$ref": "energy.SENSOR.consumption_today"
+      "consumption": {
+          "$ref": "energy.CONSUMPTION_DAILY_SENSOR"
         },
         "import": "sensor.solis_inverter_1033300254190112_solis_daily_grid_energy_purchased",
         "export": "sensor.solis_inverter_1033300254190112_solis_daily_on_grid_energy"
@@ -428,8 +434,16 @@
       },
       "efficiency": [
         [
+          "sensor.system_efficiency_eimo",
+          "Sistema"
+        ],
+        [
           "sensor.battery_roundtrip_efficiency_eimo",
           "Baterija"
+        ],
+        [
+          "sensor.system_losses_total_eimo",
+          "Bendri nuostoliai"
         ],
         [
           {
@@ -438,6 +452,7 @@
           "Bat. ciklai"
         ]
       ],
+      "efficiency_note": "Bendri nuostoliai apima bateriją, inverterį ir skaitiklių paklaidas. Eimo Cloud neteikia atskiro inverterio savivartos skaitiklio, todėl baterijos ir inverterio nuostolių dalys atskirai nerodomos.",
       "cable": null,
       "cable_note": "Eimo kabelio nuostolių modelis neįjungtas: profilyje dar nėra patvirtinto kabelio ilgio, skerspjūvio ir vietinių fazių srovių.",
       "daily_balance": [
@@ -450,7 +465,7 @@
         ],
         [
           {
-            "$ref": "energy.SENSOR.consumption_today"
+          "$ref": "energy.CONSUMPTION_DAILY_SENSOR"
           },
           "Suvartota",
           "#f44336"
@@ -476,8 +491,8 @@
       "battery_efficiency": {
         "$ref": "dashboard.analysis.efficiency.0.0"
       },
-      "forecast_accuracy": null,
-      "forecast_note": "Eimo 30 d. prognozės tikslumo grafikas bus įjungtas, kai bus sukauptas atskiras vakarykštės Eimo gamybos faktas.",
+      "forecast_accuracy": "sensor.solcast_forecast_yesterday_accuracy_eimo",
+      "forecast_note": "Eimo prognozės tikslumas skaičiuojamas iš 04:40 užfiksuotos prognozės ir faktinės dienos gamybos. Grafikas pildomas kasdien 23:50.",
       "quality": {
         "state": {
           "$ref": "power_quality.outputs.state"
