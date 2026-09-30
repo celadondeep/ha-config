@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "appdaemon" / "apps"))
 from energy_system.horizon_adapter import (
     _observe_night_events, _night_event_view,
-    _encode_night_plan_state, _decode_night_plan_state,
+    _encode_night_plan_state, _decode_night_plan_state, _recorded_counter_delta,
 )
 
 
@@ -24,9 +24,9 @@ class NightEventsTests(unittest.TestCase):
             "pv_start_at": self.dawn.isoformat(), "discharge_committed": False,
         }
 
-    def record(self, state, at, *, settling=False):
+    def record(self, state, at, *, settling=False, target=None):
         return {"state": state, "last_changed": at.isoformat(),
-                "attributes": {"pending_target": False,
+                "attributes": {"pending_target": target,
                                "command_status": "settling" if settling else "verified",
                                "last_read": at.isoformat()}}
 
@@ -86,6 +86,31 @@ class NightEventsTests(unittest.TestCase):
         self.assertIsNotNone(state)
         self.assertAlmostEqual(_night_event_view(_decode_night_plan_state(state),
                                                  second_on, 130, 30)["sleep_saved_actual_kwh"], .35)
+
+    def test_desired_true_is_confirmed_by_fresh_on_readback(self):
+        now = self.dawn-timedelta(hours=12)
+        result = {"pv_start_at": self.dawn.isoformat(), "discharge_phase": "evening"}
+        rejected = _observe_night_events(self.memory, now,
+            self.record("off", now, target=True), self.record("on", now), result, 130, 30)
+        self.assertIsNone(rejected["evening_actual_start_at"])
+        settling = _observe_night_events(self.memory, now,
+            self.record("on", now, target=True, settling=True), self.record("on", now), result, 130, 30)
+        self.assertIsNone(settling["evening_actual_start_at"])
+        confirmed = _observe_night_events(self.memory, now,
+            self.record("on", now, target=True), self.record("on", now), result, 130, 30)
+        self.assertEqual(confirmed["evening_actual_start_at"], now.isoformat())
+
+    def test_recorded_stage_energy_rejects_missing_baseline_and_resets(self):
+        start = self.dawn-timedelta(hours=12)
+        end = start+timedelta(hours=1)
+        def point(at, value):
+            return {"state": str(value), "last_updated": at}
+        records = [point(start, 4), point(start+timedelta(minutes=30), 5.25), point(end, 6)]
+        self.assertEqual(_recorded_counter_delta(records, start, end), 2)
+        self.assertIsNone(_recorded_counter_delta(records[1:], start, end))
+        self.assertIsNone(_recorded_counter_delta(records+[point(end, 0)], start, end))
+        self.assertIsNone(_recorded_counter_delta([], start, end))
+        self.assertEqual(_recorded_counter_delta(records+[point(end+timedelta(minutes=1), 9)], start, end), 2)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,10 @@
     "CORRECTION_FILE": "{apps_dir}/forecast_correction.json",
     "TARGET_SOC_FILE": "{apps_dir}/target_soc.json",
     "TACTICAL_INTERVAL": 10,
+    "NIGHT_EVENT_METERS": {
+      "discharge": {"$ref": "dashboard.analysis.battery_health.discharged_today"},
+      "export": {"$ref": "dashboard.analysis.today.export"}
+    },
     "CORE_VERSION": "4.5-site-profiles",
     "CORE_NAME": "Valdymo koordinatorius",
     "TELEMETRY_MAX_AGE_SECONDS": {
@@ -150,6 +154,7 @@
       "plan_inverter_on": "sensor.solis_plan_inverter_on",
       "plan": "sensor.solis_plan",
       "horizon": "sensor.solis_energy_horizon",
+      "night_state": "input_text.namai_nakties_atmintis",
       "planner_health": "sensor.solis_planner_health",
       "executor_health": "sensor.solis_executor_health",
       "core_state": "sensor.solis_core_state",
@@ -306,6 +311,10 @@
     "title": "Namai SE",
     "file": "energijos_valdymas.yaml",
     "site_label": "Namai",
+    "sun": {
+      "$ref": "energy.SENSOR.sun"
+    },
+    "weather": "weather.forecast_namai",
     "soc": {
       "$ref": "energy.SENSOR.soc"
     },

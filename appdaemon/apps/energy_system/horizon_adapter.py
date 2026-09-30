@@ -1,5 +1,6 @@
 """HA input adapter for the shared forward energy model; no actuator writes."""
 from datetime import datetime, timedelta
+import json
 from time import monotonic
 from zoneinfo import ZoneInfo
 from dataclasses import replace
@@ -10,6 +11,177 @@ from energy_system.consumption_forecast import forecast_reader, intraday_ratio, 
 from energy_system.horizon import (
     VERSION, HorizonPolicy, clamp, finite, forecast_slots, plan_horizon, stamp, ha_attributes,
 )
+
+
+_NIGHT_MEMORY_KEYS = (
+    "night_plan_date", "night_plan_target_soc", "evening_target_soc",
+    "night_split_enabled", "evening_done", "discharge_phase",
+    "discharge_deadline", "discharge_committed", "pv_start_at", "calculated_at",
+    "night_events",
+)
+
+
+def _night_plan_memory(value):
+    """Keep only execution history needed to resume the current night."""
+    if not isinstance(value, dict):
+        return None
+    memory = {key: value[key] for key in _NIGHT_MEMORY_KEYS if key in value}
+    if not memory.get("night_plan_date") or not memory.get("pv_start_at"):
+        return None
+    return memory
+
+
+def _decode_night_plan_state(raw):
+    """Decode compact persistent helper data; tolerate empty/old values."""
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return None
+        keys = {
+            "d": "night_plan_date", "t": "night_plan_target_soc",
+            "e": "evening_target_soc", "s": "night_split_enabled",
+            "v": "evening_done", "p": "discharge_phase",
+            "c": "discharge_committed", "l": "discharge_deadline",
+            "r": "pv_start_at", "a": "calculated_at", "x": "night_events",
+        }
+        expanded = {target: data[source] for source, target in keys.items() if source in data}
+        expanded.setdefault("discharge_deadline", expanded.get("pv_start_at"))
+        return _night_plan_memory(expanded)
+    except (TypeError, ValueError):
+        return None
+
+
+def _encode_night_plan_state(memory, saved_at):
+    """Serialize night memory compactly for HA's 255-character input_text."""
+    if not isinstance(memory, dict):
+        return None
+    data = {
+        "d": memory.get("night_plan_date"), "t": memory.get("night_plan_target_soc"),
+        "e": memory.get("evening_target_soc"), "s": memory.get("night_split_enabled"),
+        "v": memory.get("evening_done"), "p": memory.get("discharge_phase"),
+        "c": memory.get("discharge_committed"),
+        "r": memory.get("pv_start_at"),
+        "a": datetime.fromisoformat(saved_at).replace(microsecond=0).isoformat(),
+    }
+    if memory.get("discharge_deadline") != memory.get("pv_start_at"):
+        data["l"] = memory.get("discharge_deadline")
+    if memory.get("night_events"):
+        data["x"] = memory["night_events"]
+    raw = json.dumps(data, separators=(",", ":"), ensure_ascii=True)
+    return raw if len(raw) <= 255 else None
+
+
+def _observe_night_events(memory, now, slot_record, power_record, result, idle_w, off_w):
+    """Latch observed switch edges, preserving timestamps across each replanning cycle."""
+    events = list(memory.get("night_events") or [0] * 7)
+    if len(events) != 7 or any(not isinstance(v, int) or v < 0 for v in events):
+        events = [0] * 7
+    dawn = stamp(result["pv_start_at"])
+    lower, upper = dawn-timedelta(hours=20), dawn+timedelta(hours=1)
+
+    def observed(record):
+        value = record.get("state")
+        attrs = record.get("attributes") or {}
+        target = attrs.get("pending_target")
+        if value not in ("on", "off"):
+            return None, None
+        # pending_target is the desired boolean value, not a pending flag.
+        # A fresh readback matching that value already confirms this switch.
+        if target is not None and target != (value == "on"):
+            return None, None
+        if attrs.get("command_status") == "settling":
+            return None, None
+        read_at = attrs.get("last_read")
+        if read_at:
+            try:
+                if not -60 <= (stamp(now)-stamp(read_at)).total_seconds() <= 1200:
+                    return None, None
+            except (ValueError, TypeError):
+                return None, None
+        edge = record.get("last_changed") or now
+        try:
+            edge = stamp(edge)
+        except (ValueError, TypeError):
+            return None, None
+        if not lower <= edge <= min(upper, stamp(now)+timedelta(minutes=1)):
+            return None, None
+        return value, int(edge.timestamp() // 60)
+
+    slot, edge = observed(slot_record)
+    phase = result.get("discharge_phase")
+    if slot == "on" and phase == "evening" and not events[0]:
+        events[0] = edge
+    if slot == "off" and events[0] and not events[1] and result.get("evening_done"):
+        events[1] = max(edge, events[0])
+    if slot == "on" and phase == "morning" and result.get("export_now") and not events[2]:
+        events[2] = edge
+    if slot == "off" and events[2] and not events[3] and not result.get("export_now"):
+        events[3] = max(edge, events[2])
+
+    power, edge = observed(power_record)
+    if power == "off" and not events[4]:
+        events[4] = edge
+        if not events[6]:
+            events[6] = edge
+    elif power == "on" and events[4]:
+        events[5] += max(0, edge-events[4])
+        events[4] = 0
+    memory["night_events"] = events
+    attrs = power_record.get("attributes") or {}
+    through_minute = None
+    if (events[4] and power_record.get("state") == "off"
+            and attrs.get("pending_target") in (None, False)
+            and attrs.get("command_status") != "settling"):
+        # Estimate the ongoing off interval only while the last readback is
+        # recent. Freeze after 20 minutes of Cloud silence; close the interval
+        # at the observed ON edge when telemetry returns.
+        through = stamp(now)
+        if attrs.get("last_read"):
+            try:
+                through = min(through, stamp(attrs["last_read"])+timedelta(minutes=20))
+            except (ValueError, TypeError):
+                through = stamp(now)
+        through_minute = int(through.timestamp()//60)
+    return _night_event_view(memory, now, idle_w, off_w, through_minute)
+
+
+def _night_event_view(memory, now, idle_w, off_w, through_minute=None):
+    events = list(memory.get("night_events") or [0] * 7)
+    if len(events) != 7:
+        events = [0] * 7
+    projected_minutes = events[5] + (max(0,through_minute-events[4]) if events[4] and through_minute else 0)
+    return {
+        "evening_actual_start_at": datetime.fromtimestamp(events[0]*60, now.tzinfo).isoformat() if events[0] else None,
+        "evening_actual_end_at": datetime.fromtimestamp(events[1]*60, now.tzinfo).isoformat() if events[1] else None,
+        "morning_actual_start_at": datetime.fromtimestamp(events[2]*60, now.tzinfo).isoformat() if events[2] else None,
+        "morning_actual_end_at": datetime.fromtimestamp(events[3]*60, now.tzinfo).isoformat() if events[3] else None,
+        "sleep_actual_start_at": datetime.fromtimestamp(events[6]*60, now.tzinfo).isoformat() if events[6] else None,
+        "sleep_saved_actual_kwh": round(max(0,idle_w-off_w)*projected_minutes/60000,3),
+    }
+
+
+def _recorded_counter_delta(records, start, end):
+    """Measured register difference over a stage; reject missing baselines/resets."""
+    first, last = None, None
+    points = []
+    for record in records or []:
+        try:
+            at = stamp(record.get("last_updated") or record.get("last_changed"))
+            value = finite(record.get("state"))
+        except (ValueError, TypeError):
+            continue
+        if value is not None and value >= 0 and at <= stamp(end):
+            points.append((at, value))
+    for at, value in sorted(points):
+        if first is None:
+            if at > stamp(start) + timedelta(seconds=1):
+                return None
+            first = last = value
+        else:
+            if value < last:
+                return None
+            last = value
+    return round(last-first, 3) if first is not None else None
 
 
 def build_horizon_mixin(profile):
@@ -25,6 +197,40 @@ def build_horizon_mixin(profile):
     )
 
     class HorizonMixin:
+        def _night_stage_energy(self, result, now):
+            """Recorder-only display data; cache finished stages and sample live ones at 5 min."""
+            meters = profile.get("NIGHT_EVENT_METERS", {})
+            if not meters:
+                return
+            cache = getattr(self, "_night_stage_energy_cache", {})
+            night_date = result.get("night_plan_date")
+            cache = {k: v for k, v in cache.items() if k[0] == night_date}
+            for phase in ("evening", "morning"):
+                start = result.get(f"{phase}_actual_start_at")
+                end = result.get(f"{phase}_actual_end_at")
+                if not start:
+                    continue
+                key = (night_date, phase, start, end)
+                saved = cache.get(key)
+                incomplete = saved is not None and any(v is None for v in saved[1].values())
+                if saved is None or ((not end or incomplete) and monotonic()-saved[0] >= 300):
+                    values = {}
+                    through = stamp(end) if end else stamp(now)
+                    if stamp(start) <= through:
+                        for kind, entity in meters.items():
+                            try:
+                                history = self.get_history(entity_id=entity,
+                                    start_time=stamp(start), end_time=through)
+                                records = history[0] if history and isinstance(history[0], list) else []
+                                values[kind] = _recorded_counter_delta(records, start, through)
+                            except Exception as exc:
+                                values[kind] = None
+                                self.log(f"[{site}] Etapo energijos istorija nepasiekiama: {exc}", level="WARNING")
+                    saved = cache[key] = (monotonic(), values)
+                for kind, value in saved[1].items():
+                    result[f"{phase}_actual_{kind}_kwh"] = value
+            self._night_stage_energy_cache = cache
+
         def _consumed_today(self, now):
             daily_entity = profile.get('CONSUMPTION_DAILY_SENSOR')
             if daily_entity:
@@ -58,6 +264,47 @@ def build_horizon_mixin(profile):
         def horizon_guidance(self, soc, force=False):
             now = datetime.now(ZoneInfo(profile.get("TIMEZONE", "Europe/Vilnius")))
             previous = getattr(self, "_horizon_result", None)
+            night_previous = getattr(self, "_night_plan_state", None)
+            night_state_entity = output.get("night_state")
+            if night_previous is None and night_state_entity:
+                try:
+                    helper = self._read_state_record(night_state_entity)
+                    night_previous = _decode_night_plan_state(helper.get("state"))
+                    if night_previous is not None:
+                        self._night_plan_state = night_previous
+                        self._night_plan_helper_value = helper.get("state")
+                except Exception:
+                    pass
+            if previous is None or night_previous is None:
+                # AppDaemon may restart between the evening and dawn stages.
+                # The night-stage memory is independent of forecast validity,
+                # so a temporary forecast error must not discard that memory.
+                try:
+                    saved = self._read_state_record(output["horizon"])
+                    attrs = saved.get("attributes") or {}
+                    memory = _night_plan_memory(attrs.get("night_plan_memory"))
+                    # Backward compatibility with 4.5 state written before
+                    # the independent memory attribute existed.
+                    if memory is None and attrs.get("night_active") in (True, "on", "true"):
+                        memory = _night_plan_memory(attrs)
+                    if memory is not None:
+                        pv_start = stamp(memory["pv_start_at"])
+                        calculated = stamp(memory.get("calculated_at", attrs.get("calculated_at")))
+                        age = (stamp(now)-calculated).total_seconds()
+                    else:
+                        pv_start, age = None, float("inf")
+                    if (night_previous is None and attrs.get("site") == site and memory is not None
+                            and pv_start > stamp(now) and 0 <= age < 18*3600):
+                        night_previous = memory
+                        self._night_plan_state = memory
+                    if (previous is None and attrs.get("site") == site
+                            and attrs.get("valid") in (True, "on", "true")
+                            and pv_start is not None and pv_start > stamp(now)
+                            and 0 <= age < 18*3600):
+                        previous = attrs
+                        self._horizon_result = previous
+                except Exception:
+                    pass
             power = self._read_state_record(sensors["power_state"]).get("state")
             boundary = previous.get("wake_at") if previous else None
             crossed = bool(boundary and stamp(now) >= stamp(boundary))
@@ -81,6 +328,9 @@ def build_horizon_mixin(profile):
                               required_preexport_kwh=0, required_headroom_kwh=0,
                               standby_saved_kwh=0, dawn=None,
                               reason=f"Prognozė nepatikima; savas vartojimas be priverstinio eksporto ({str(exc)[:100]})")
+                memory = _night_plan_memory(getattr(self, "_night_plan_state", None))
+                if memory is not None:
+                    result["night_plan_memory"] = memory
                 if not previous or previous.get("valid"):
                     self.log(f"[{site}] {result['reason']}", level="WARNING")
             result.update(site=site, calculated_at=now.isoformat(),
@@ -89,7 +339,46 @@ def build_horizon_mixin(profile):
                           forecast_source=profile["FORECAST_SOURCE_LABEL"],
                           reserve_scope="Ryto talpos tikslas ir apsauga nuo priverstinio eksporto; nakties miegas saugo likusį įkrovimą",
                           grid_charging="Naujų įkrovimo iš tinklo komandų nėra; kaupiama PV")
+            old_memory = _night_plan_memory(getattr(self, "_night_plan_state", None))
+            if result.get("valid") and result.get("night_active"):
+                if old_memory and old_memory.get("night_plan_date") == result.get("night_plan_date"):
+                    memory = dict(old_memory)
+                else:
+                    memory = {}
+                memory.update(_night_plan_memory(result) or {})
+                result.update(_observe_night_events(memory, now,
+                    self._read_state_record(profile.get("ACTUATOR", {}).get("slot")),
+                    self._read_state_record(sensors["power_state"]), result,
+                    profile.get("INVERTER_IDLE_W", 0), profile.get("INVERTER_OFF_W", 0)))
+                result["night_events"] = memory["night_events"]
+            elif old_memory:
+                result.update(_night_event_view(old_memory, now,
+                    profile.get("INVERTER_IDLE_W", 0), profile.get("INVERTER_OFF_W", 0)))
+            if result.get("valid") and result.get("night_active"):
+                self._night_stage_energy(result, now)
             self._horizon_result = result
+            if result.get("valid") and result.get("night_active"):
+                memory = _night_plan_memory(result)
+                if memory is not None:
+                    self._night_plan_state = memory
+                    if night_state_entity:
+                        old = getattr(self, "_night_plan_helper_value", None)
+                        old_memory = _decode_night_plan_state(old)
+                        old_semantics = {k: v for k, v in (old_memory or {}).items() if k != "calculated_at"}
+                        new_semantics = {k: v for k, v in memory.items() if k != "calculated_at"}
+                        if old_semantics != new_semantics:
+                            raw = _encode_night_plan_state(memory, now.isoformat())
+                            if raw is not None:
+                                try:
+                                    self.call_service("input_text/set_value", entity_id=night_state_entity, value=raw)
+                                    self._night_plan_helper_value = raw
+                                    self._night_plan_state["calculated_at"] = now.isoformat()
+                                except Exception as exc:
+                                    self.log(f"[{site}] Nepavyko išsaugoti nakties etapo atminties: {exc}", level="WARNING")
+                            else:
+                                self.log(f"[{site}] Nakties atmintis netelpa į HA input_text", level="ERROR")
+            if getattr(self, "_night_plan_state", None) is not None:
+                result["night_plan_memory"] = self._night_plan_state
             self._horizon_at = monotonic()
             self.last_target_soc = 100 if self.is_storm_mode() else int(result.get("target_soc", result["reserve_soc"]))
             self.set_state(output["target_soc"], state=str(self.last_target_soc), attributes={
@@ -196,10 +485,17 @@ def build_horizon_mixin(profile):
             production = (slots[0].pv >= profile["MORNING_PV_THRESHOLD_KW"] or
                 (pv_now is not None and pv_now/1000 >= profile["MORNING_PV_THRESHOLD_KW"]))
             previous = getattr(self, "_horizon_result", {})
-            deadline = previous.get("discharge_deadline")
-            committed = (previous.get("valid") is True and previous.get("night_active") is True
-                         and previous.get("export_now") is True and deadline is not None
-                         and stamp(now) < stamp(deadline))
+            night_previous = getattr(self, "_night_plan_state", None) or previous
+            deadline = night_previous.get("discharge_deadline")
+            committed = (night_previous.get("discharge_committed") in (True, "on", "true")
+                         and deadline is not None and stamp(now) < stamp(deadline))
+            if not committed:
+                committed = (previous.get("valid") in (True, "on", "true")
+                             and previous.get("night_active") in (True, "on", "true")
+                             and previous.get("export_now") in (True, "on", "true")
+                             and previous.get("discharge_phase") == "morning" and deadline is not None
+                             and stamp(now) < stamp(deadline))
+            night_cfg = profile.get("NIGHT_DISCHARGE", {})
             night = plan_dawn(slots,now,soc,active_policy,production_on=production,
                 power_control=profile["INVERTER_CONTROL_AVAILABLE"],
                 power_on=self._read_state_record(sensors["power_state"]).get("state") != "off",
@@ -210,7 +506,11 @@ def build_horizon_mixin(profile):
                 pv_threshold_kw=profile["MORNING_PV_THRESHOLD_KW"],
                 wake_margin_minutes=profile["MORNING_ON_MARGIN_MIN"],
                 execution_margin_minutes=profile.get("HEADROOM_EXECUTION_MINUTES", 5),
-                discharge_committed=committed)
+                discharge_committed=committed, previous_plan=night_previous,
+                evening_fraction=night_cfg.get("EVENING_FRACTION", 0.4),
+                evening_quiet_hour=night_cfg.get("QUIET_HOUR", 23.0),
+                minimum_phase_kwh=night_cfg.get("MINIMUM_PHASE_KWH", 1.0),
+                target_decrease_hysteresis_soc=night_cfg.get("TARGET_DECREASE_HYSTERESIS_SOC", 2.0))
             result.update(night_active=False,inverter_on=True,dawn=night,
                           solar_export_priority=False, soc_buffer_active=False,
                           predictive_buffer_due=False, buffer_required_kwh=0,

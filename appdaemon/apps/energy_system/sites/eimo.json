@@ -26,6 +26,10 @@
     "CORRECTION_FILE": "{apps_dir}/forecast_correction_eimo.json",
     "TARGET_SOC_FILE": "{apps_dir}/target_soc_eimo.json",
     "TACTICAL_INTERVAL": 60,
+    "NIGHT_EVENT_METERS": {
+      "discharge": {"$ref": "dashboard.analysis.battery_health.discharged_today"},
+      "export": {"$ref": "dashboard.analysis.today.export"}
+    },
     "CORE_VERSION": "4.5-site-profiles",
     "CORE_NAME": "Valdymo koordinatorius",
     "TELEMETRY_MAX_AGE_SECONDS": {

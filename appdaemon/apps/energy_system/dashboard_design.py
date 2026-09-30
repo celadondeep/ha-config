@@ -78,6 +78,7 @@ if(variables.kind === 'flow') {
     : level===100?'mdi:battery':level===0?'mdi:battery-outline':'mdi:battery-'+level;
   const charging=b!==null&&b < -20;
   const exporting=g!==null&&g < -20, importing=g!==null&&g > 20;
+  const inactive='var(--disabled-text-color, var(--secondary-text-color))';
   const gridIcon=importing?'mdi:transmission-tower-export':exporting?'mdi:transmission-tower-import':'mdi:transmission-tower';
   const homeIcon=load!==null&&load>20?'mdi:home-lightning-bolt-outline':'mdi:home-outline';
   const solarSun=a(p.sun), elevation=num(solarSun.elevation);
@@ -111,10 +112,10 @@ if(variables.kind === 'flow') {
   const report=hb ?? ts(field.reported_at), age=report===null ? null : Math.max(0,Math.floor((now-report)/1000));
   const ageText=age===null ? 'Laikas nežinomas' : age<60 ? `prieš ${age} s` : `prieš ${Math.floor(age/60)} min`;
   body=title('Momentinė galia','Kur keliauja energija')+`<div class="flow">`+
-    node('Saulė',pv,pv===null?'Nėra šviežių duomenų':solar.sub,solar.icon,'#d99a18')+
-    node('Vartojimas',load,load===null?'Nėra šviežių duomenų':'Dabartinis vartojimas',homeIcon,'#4789e8')+
-    node('Baterija',b,b===null?'Nėra šviežių duomenų':charging?'← Kraunasi':b>20?'→ Iškrauna':'Ramybė',batteryIcon,b!==null&&b>20?'#d98224':'#159b85')+
-    node('Tinklas',g,g===null?'Nėra šviežių duomenų':importing?'← Imama iš tinklo':exporting?'→ Atiduodama į tinklą':'Beveik subalansuota',gridIcon,'#8973cf')+`</div>`+
+    node('Gamyba',pv,pv===null?'Nėra šviežių duomenų':solar.sub,solar.icon,pv!==null&&pv>20?'#d99a18':inactive)+
+    node('Vartojimas',load,load===null?'Nėra šviežių duomenų':'Dabartinis vartojimas',homeIcon,load!==null&&load>20?'#4789e8':inactive)+
+    node('Baterija',b,b===null?'Nėra šviežių duomenų':charging?'← Kraunasi':b>20?'→ Iškrauna':'Ramybė',batteryIcon,charging?'#159b85':b!==null&&b>20?'#d98224':inactive)+
+    node('Tinklas',g,g===null?'Nėra šviežių duomenų':importing?'→ Imama iš tinklo':exporting?'← Atiduodama į tinklą':'Beveik subalansuota',gridIcon,importing?'#d98224':exporting?'#8973cf':inactive)+`</div>`+
     `<div class="battery"><div class="top"><span class="muted">Baterijos įkrova</span><span class="battery-value">${fmt(soc,0)} %</span></div><div class="track"><div class="fill" style="width:${soc===null?0:Math.max(0,Math.min(100,soc))}%"></div></div></div>`+
     `<div class="foot muted">${teleFresh ? 'Matavimai' : 'Duomenys vėluoja'} · ${esc(ageText)}${p.power ? ' · Inverteris '+(s(p.power)==='off'?'išjungtas':s(p.power)==='on'?'įjungtas':'nežinoma') : ' · SolisCloud'}</div>`;
 }
@@ -131,30 +132,38 @@ if(variables.kind === 'plan') {
     const scheduled=[];
     const split=on(h.night_split_enabled), eveningStarted=ts(h.evening_actual_start_at)!==null;
     const morningStarted=ts(h.morning_actual_start_at)!==null;
-    if(split || eveningStarted || ts(h.evening_actual_end_at)!==null) {
-      if(eveningStarted) scheduled.push([h.evening_actual_start_at,'Vakarinis iškrovimas pradėtas',split?`${fmt(h.evening_kwh)} kWh etapo planas · faktinis laikas`:'Faktinis laikas · ankstesnis vakaro etapas']);
-      else if(split && h.discharge_phase==='evening') body+=step('Vyksta','Vakarinis iškrovimas','Tikslus pradžios laikas laukia inverterio patvirtinimo');
-      if(ts(h.evening_actual_end_at)!==null) scheduled.push([h.evening_actual_end_at,'Vakarinis iškrovimas išjungtas','Faktinis laikas']);
-      else if(split && (eveningStarted || on(h.evening_done))) scheduled.push([h.evening_quiet_at,'Vakarinio etapo pabaiga','Planuojamas / nepatvirtintas laikas']);
-      else if(split) scheduled.push([h.evening_quiet_at,'Išjungti vakarinį iškrovimą','Iki ryto saugoma likusi baterijos energija']);
-    }
-    if(ts(h.sleep_actual_start_at)) scheduled.push([h.sleep_actual_start_at,'Inverteris išjungtas','Faktinis nakties poilsio pradžios laikas']);
-    const wakeTime=morningStarted?h.morning_actual_start_at:h.wake_at;
+    const stageSummary=phase=>{
+      const discharged=num(h[phase+'_actual_discharge_kwh']), exported=num(h[phase+'_actual_export_kwh']);
+      const completed=ts(h[phase+'_actual_end_at'])!==null;
+      const details=[];
+      if(discharged!==null) details.push(`${completed?'Iškrauta':'Jau iškrauta'} apie ${fmt(discharged)} kWh`);
+      if(exported!==null) details.push(`į tinklą ${fmt(exported,2)} kWh`);
+      return details.length?details.join(' · '):'Pradžią patvirtino inverteris; laukiama energijos matavimų';
+    };
+    if(eveningStarted) scheduled.push([h.evening_actual_start_at,'Vakarinis iškrovimas pradėtas',stageSummary('evening')]);
+    else if(h.discharge_phase==='evening' && on(h.export_now)) body+=step('Laukiama','Vakarinis iškrovimas','Laukiama inverterio patvirtintos pradžios');
+    if(ts(h.evening_actual_end_at)!==null) scheduled.push([h.evening_actual_end_at,'Vakarinis iškrovimas baigtas','Likusi baterijos energija saugoma rytui']);
+    if(ts(h.sleep_actual_start_at)) scheduled.push([h.sleep_actual_start_at,'Inverteris išjungtas','Mažinama savivarta iki kito įjungimo']);
+    const actualWake=s(p.power)==='on'?states[p.power]?.last_changed:null;
+    const wakeTime=morningStarted?actualWake:h.discharge_phase==='evening'?h.morning_planned_start_at:h.wake_at;
     const morningTime=morningStarted?h.morning_actual_start_at:(h.morning_planned_start_at || (!split?h.discharge_start_at:null));
-    const morningExport=amount!==null && amount>0.02 && morningTime;
+    const morningAmount=h.discharge_phase==='evening'&&split?num(h.morning_kwh):amount;
+    const morningPending=!morningStarted && h.discharge_phase==='morning' && on(h.export_now);
+    const morningExport=morningStarted || (morningAmount!==null && morningAmount>0.02 && ts(morningTime)!==null);
     const sameStart=p.power && morningExport && ts(wakeTime)!==null && Math.floor(ts(wakeTime)/60000)===Math.floor(ts(morningTime)/60000);
-    if(p.power) scheduled.push([wakeTime,sameStart?(morningStarted?'Inverteris įjungtas, rytinis iškrovimas pradėtas':'Įjungti inverterį ir pradėti rytinį iškrovimą'):'Įjungti inverterį',sameStart?`${fmt(amount)} kWh likusios baterijos energijos · ${morningStarted?'faktinis':'planuojamas'} laikas`:morningExport?'Pagal iškrovimo arba gamybos pradžią':'Papildomai atiduoti į tinklą nereikia']);
-    if(morningExport && !sameStart) scheduled.push([morningTime,morningStarted?'Rytinis iškrovimas pradėtas':'Pradėti rytinį iškrovimą',`${fmt(amount)} kWh likusios baterijos energijos · ${morningStarted?'faktinis':'planuojamas'} laikas`]);
-    else if(!split && amount!==null && amount>0.02 && on(h.export_now)) body+=step('Vyksta','Iškrovimas','Laukiama faktinio laiko patvirtinimo');
-    else if(!morningExport && num(h.unmet_headroom_kwh)>0.05) body+=step('—','Iškrovimas nesuplanuotas','Turimi apribojimai neleidžia atlaisvinti visos vietos');
-    if(ts(h.morning_actual_end_at)) scheduled.push([h.morning_actual_end_at,'Rytinis iškrovimas išjungtas','Faktinis laikas']);
+    const morningDetail=morningStarted?stageSummary('morning'):`Numatyta iškrauti apie ${fmt(morningAmount)} kWh, kad tilptų gamyba`;
+    if(p.power && ts(wakeTime)!==null && !morningPending) scheduled.push([wakeTime,sameStart?(morningStarted?'Inverteris įjungtas, rytinis iškrovimas pradėtas':'Įjungti inverterį ir pradėti rytinį iškrovimą'):morningStarted?'Inverteris įjungtas':'Įjungti inverterį',sameStart?morningDetail:morningExport?'Baterija ruošiama prognozuojamai gamybai':'Papildomai atiduoti į tinklą nereikia']);
+    if(morningExport && !sameStart && !morningPending) scheduled.push([morningTime,morningStarted?'Rytinis iškrovimas pradėtas':'Pradėti rytinį iškrovimą',morningDetail]);
+    if(morningPending) body+=step('Laukiama','Rytinis iškrovimas','Laukiama inverterio patvirtintos pradžios');
+    if(!morningExport && num(h.unmet_headroom_kwh)>0.05) body+=step('—','Iškrovimas nesuplanuotas','Turimi apribojimai neleidžia atlaisvinti visos vietos');
+    if(ts(h.morning_actual_end_at)) scheduled.push([h.morning_actual_end_at,'Rytinis iškrovimas baigtas','Pasiekta ryto riba arba baigėsi iškrovimo laikas']);
     scheduled.sort((x,y)=>(ts(x[0])??Infinity)-(ts(y[0])??Infinity)).forEach(x=>{body+=step(clock(x[0]),x[1],x[2]);});
     body+=step(clock(h.pv_start_at),'Prasideda prognozuojama gamyba',`Baterijos viršutinė ryto riba ${fmt(h.target_soc,0)} %`);
     const savedActual=num(h.sleep_saved_actual_kwh), savedFuture=num(h.standby_saved_kwh);
     const savedTotal=savedActual===null?null:savedActual+Math.max(0,savedFuture??0);
     body+='</div><div class="rows">'+row('Reikiama laisva vieta',fmt(h.required_headroom_kwh)+' kWh')+row('Sutaupyta išjungus inverterį',fmt(savedTotal,3)+' kWh')+'</div>';
     if(num(h.unmet_headroom_kwh)>0.05) body+=`<div class="callout">Iki gamybos pradžios gali nepavykti atlaisvinti dar ${fmt(h.unmet_headroom_kwh)} kWh.</div>`;
-    body+=`<div class="foot muted">Sutaupymas iki ryto: ${fmt(savedActual,3)} kWh pagal patvirtintą išjungimo laiką + ${fmt(savedFuture,3)} kWh pagal likusį planą. Abu skaičiai paremti nustatytu inverterio galios skirtumu, ne atskiru kWh skaitikliu. Ryto riba nereiškia įkrovimo iš tinklo.</div>`;
+    body+='<div class="foot muted">Ryto riba nereiškia, kad mažesnę įkrovą reikia papildyti iš tinklo.</div>';
   } else {
     const pvFirst=plan.priority==='horizon_pv_export';
     const override=String(plan.priority||'').includes('manual') || String(plan.priority||'').includes('storm');
@@ -162,7 +171,7 @@ if(variables.kind === 'plan') {
     body+=`<p class="desc">${description}</p>`;
     body+='<div class="rows">'+row('Eksporto riba',fmt(h.model_export_limit_kw)+' kW')+row('Priverstinis iškrovimas',on(plan.slot_active)?'Aktyvus':'Išjungtas')+row('Plano SOC riba',fmt(plan.target_soc,0)+' %')+'</div>';
     body+='<div class="callout">Kitas nakties planas bus parodytas, kai modelis pereis į pasiruošimą rytui. Praėjusios nakties laikai nerodomi.</div>';
-    if(num(h.sleep_saved_actual_kwh)>0) body+='<div class="rows">'+row('Sutaupyta išjungus inverterį',fmt(h.sleep_saved_actual_kwh,3)+' kWh')+'</div><div class="muted">Pagal patvirtintą vakaro ir ryto OFF laiką bei nustatytą galios skirtumą; ne tiesioginis kWh matavimas.</div>';
+    if(num(h.sleep_saved_actual_kwh)>0) body+='<div class="rows">'+row('Sutaupyta išjungus inverterį',fmt(h.sleep_saved_actual_kwh,3)+' kWh')+'</div>';
     body+=`<div class="foot muted">Planas atnaujintas ${esc(clock(plan.committed_at))}. Koreguojamas pagal gamybą ir vartojimą.</div>`;
   }
 }
@@ -354,14 +363,20 @@ def _view(p, title, path, icon, subtitle, sections):
 
 
 def _history(p):
-    return _chart({"type": "custom:apexcharts-card", "header": {"show": True, "title": "Saulė, vartojimas ir baterija · 24 val."},
+    return _chart({"type": "custom:apexcharts-card", "header": {"show": True, "title": "Gamyba, vartojimas, tinklas ir baterija · 24 val."},
         "graph_span": "24h", "update_interval": "2min",
         "yaxis": [{"id": "kw", "min": 0, "decimals": 1}, {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0}],
         "series": [
-            {"entity": p["pv"], "name": "Saulė · kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
+            {"entity": p["pv"], "name": "Gamyba · kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
              "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
             {"entity": p["load"], "name": "Vartojimas · kW", "yaxis_id": "kw", "color": COLORS["load"],
              "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
+            {"entity": p["grid"], "name": "Imama iš tinklo · kW", "yaxis_id": "kw", "color": "#d98224",
+             "transform": f"const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? Math.max(0, v * {p['grid_sign']}) / 1000 : null;",
+             "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
+            {"entity": p["grid"], "name": "Atiduodama į tinklą · kW", "yaxis_id": "kw", "color": COLORS["grid"],
+             "transform": f"const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? Math.max(0, -v * {p['grid_sign']}) / 1000 : null;",
+             "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
             {"entity": p["soc"], "name": "Baterija · %", "yaxis_id": "soc", "color": COLORS["battery"],
              "stroke_width": 2, "group_by": {"func": "last", "duration": "5min"}},
         ]})
