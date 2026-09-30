@@ -115,7 +115,7 @@ if(variables.kind === 'flow') {
     node('Gamyba',pv,pv===null?'Nėra šviežių duomenų':solar.sub,solar.icon,pv!==null&&pv>20?'#d99a18':inactive)+
     node('Vartojimas',load,load===null?'Nėra šviežių duomenų':'Dabartinis vartojimas',homeIcon,load!==null&&load>20?'#4789e8':inactive)+
     node('Baterija',b,b===null?'Nėra šviežių duomenų':charging?'← Kraunasi':b>20?'→ Iškrauna':'Ramybė',batteryIcon,charging?'#159b85':b!==null&&b>20?'#d98224':inactive)+
-    node('Tinklas',g,g===null?'Nėra šviežių duomenų':importing?'→ Imama iš tinklo':exporting?'← Atiduodama į tinklą':'Beveik subalansuota',gridIcon,importing?'#d98224':exporting?'#8973cf':inactive)+`</div>`+
+    node('Tinklas',g,g===null?'Nėra šviežių duomenų':importing?'→ Imama iš tinklo':exporting?'← Atiduodama į tinklą':'Subalansuota',gridIcon,importing?'#d98224':exporting?'#8973cf':inactive)+`</div>`+
     `<div class="battery"><div class="top"><span class="muted">Baterijos įkrova</span><span class="battery-value">${fmt(soc,0)} %</span></div><div class="track"><div class="fill" style="width:${soc===null?0:Math.max(0,Math.min(100,soc))}%"></div></div></div>`+
     `<div class="foot muted">${teleFresh ? 'Matavimai' : 'Duomenys vėluoja'} · ${esc(ageText)}${p.power ? ' · Inverteris '+(s(p.power)==='off'?'išjungtas':s(p.power)==='on'?'įjungtas':'nežinoma') : ' · SolisCloud'}</div>`;
 }
@@ -365,20 +365,17 @@ def _view(p, title, path, icon, subtitle, sections):
 def _history(p):
     return _chart({"type": "custom:apexcharts-card", "header": {"show": True, "title": "Gamyba, vartojimas, tinklas ir baterija · 24 val."},
         "graph_span": "24h", "update_interval": "2min",
-        "yaxis": [{"id": "kw", "min": 0, "decimals": 1}, {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0}],
+        "yaxis": [{"id": "kw", "decimals": 1}, {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0}],
         "series": [
             {"entity": p["pv"], "name": "Gamyba · kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
              "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
             {"entity": p["load"], "name": "Vartojimas · kW", "yaxis_id": "kw", "color": COLORS["load"],
              "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
-            {"entity": p["grid"], "name": "Imama iš tinklo · kW", "yaxis_id": "kw", "color": "#d98224",
-             "transform": f"const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? Math.max(0, v * {p['grid_sign']}) / 1000 : null;",
-             "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
-            {"entity": p["grid"], "name": "Atiduodama į tinklą · kW", "yaxis_id": "kw", "color": COLORS["grid"],
-             "transform": f"const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? Math.max(0, -v * {p['grid_sign']}) / 1000 : null;",
+            {"entity": p["grid"], "name": "Tinklas · importas + / eksportas −", "unit": "kW", "yaxis_id": "kw", "color": COLORS["grid"],
+             "transform": f"const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? (v === 0 ? 0 : v * {p['grid_sign']} / 1000) : null;",
              "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
             {"entity": p["soc"], "name": "Baterija · %", "yaxis_id": "soc", "color": COLORS["battery"],
-             "stroke_width": 2, "group_by": {"func": "last", "duration": "5min"}},
+             "stroke_width": 2, "statistics": {"type": "mean", "period": "5minute", "align": "start"}},
         ]})
 
 
