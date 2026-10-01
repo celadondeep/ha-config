@@ -646,6 +646,9 @@
               },
               "graph_span": "24h",
               "update_interval": "2min",
+              "experimental": {
+                "hidden_by_default": true
+              },
               "card_mod": {
                 "style": "\n.apexcharts-tooltip {\n  padding: 0 24px !important;\n  background: transparent !important;\n  border: 0 !important;\n  box-shadow: none !important;\n  border-radius: 0;\n  overflow: visible;\n  isolation: isolate;\n  color: var(--primary-text-color) !important;\n}\n.apexcharts-tooltip::before {\n  content: '';\n  position: absolute;\n  inset: 0 24px;\n  z-index: -1;\n  border: 1px solid var(--divider-color);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--card-background-color, #fff) 78%, transparent);\n  box-shadow: 0 4px 14px rgba(0, 0, 0, .12);\n  backdrop-filter: blur(3px);\n  -webkit-backdrop-filter: blur(3px);\n}\n.apexcharts-tooltip .apexcharts-tooltip-title {\n  background: transparent !important;\n  border-bottom: 1px solid var(--divider-color) !important;\n  font-size: 11px !important;\n  padding: 6px;\n  margin-bottom: 2px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text {\n  font-size: 11px !important;\n  line-height: 14px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-series-group {\n  padding: 0 6px 3px;\n  align-items: center !important;\n}\n.apexcharts-tooltip .apexcharts-tooltip-y-group {\n  display: flex;\n  align-items: center;\n  padding: 3px 0;\n  line-height: 14px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text-y-value {\n  margin-left: 4px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker {\n  flex: 0 0 12px;\n  width: 12px;\n  height: 12px;\n  line-height: 12px;\n  margin-right: 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker::before {\n  content: '' !important;\n  position: absolute;\n  display: block;\n  width: 8px;\n  height: 8px;\n  left: 50%;\n  top: 50%;\n  transform: translate(-50%, -50%);\n  border-radius: 50%;\n  background: currentColor;\n}\n.apexcharts-xaxistooltip {\n  padding: 1px 3px !important;\n  min-width: 0;\n  line-height: 13px;\n}\n.apexcharts-xaxistooltip-text {\n  font-size: 11px !important;\n  line-height: 13px;\n}\n.apexcharts-xaxistooltip::before {\n  border-width: 4px;\n  margin-left: -4px;\n}\n.apexcharts-xaxistooltip::after {\n  border-width: 3px;\n  margin-left: -3px;\n}\n"
               },
@@ -665,8 +668,8 @@
                     "enabled": false
                   },
                   "events": {
-                    "mounted": "EVAL:function(chartContext) {\n  const w = chartContext?.w, root = w?.globals?.dom?.baseEl;\n  if (!root) return;\n  const axes = w.config.yaxis || [];\n  const isPower = a => a?.id === 'kw';\n  const index = axes.findIndex(isPower);\n  if (index < 0) return;\n  const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),\n                          ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);\n  const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));\n  // A few watts beyond an integer must not add a whole kW of empty space.\n  // Only the axis uses this 10 W tolerance; plotted/tooltip values stay intact.\n  let min = 0, max = 1, hasData = false;\n  (w.config.series || []).forEach((series, i) => {\n    const axisIndex = w.globals.seriesYAxisReverseMap?.[i] ?? i;\n    if (!isPower(axes[axisIndex])) return;\n    (series.data || []).forEach(point => {\n      const x = Array.isArray(point) ? point[0] : point?.x;\n      const value = Array.isArray(point) ? point[1] : point?.y;\n      if (!Number.isFinite(value)) return;\n      if (Number.isFinite(x) && ((Number.isFinite(w.config.xaxis?.min) && x < w.config.xaxis.min) ||\n                                (Number.isFinite(w.config.xaxis?.max) && x > w.config.xaxis.max))) return;\n      min = Math.min(min, value);\n      max = Math.max(max, value);\n      hasData = true;\n    });\n  });\n  const lower = Math.min(0, Math.floor(min + .01 + 1e-9));\n  const upper = Math.max(1, Math.ceil(max - .01 - 1e-9));\n  const nextAxes = axes.map((a, i) => isPower(a) ? {...a, show: i === index && visible,\n    ...(hasData ? {min: lower, max: upper} : {})} : a);\n  if (nextAxes.some((a, i) => a.show !== axes[i].show || a.min !== axes[i].min || a.max !== axes[i].max)) {\n    // Reclaim axis space and recalculate bounds in one local render. The next\n    // updated event sees identical settings, so there is no update loop.\n    chartContext.updateOptions({yaxis: nextAxes}, false, false, false);\n    return;\n  }\n  root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {\n    el.style.visibility = visible ? 'visible' : 'hidden';\n  });\n  const axis = root.querySelector(`.apexcharts-yaxis[rel=\"${index}\"]`);\n  if (!visible || !axis) return;\n  const labels = axis.querySelector('.apexcharts-yaxis-texts-g');\n  if (!labels) return;\n  const bounds = labels.getBBox();\n  if (!(bounds.width > 0)) return;\n  let unit = axis.querySelector('.se-power-axis-unit');\n  if (!unit) {\n    unit = root.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text');\n    unit.setAttribute('class', 'se-power-axis-unit');\n    unit.setAttribute('font-size', '11px');\n    unit.setAttribute('font-weight', '400');\n    unit.setAttribute('fill', 'var(--secondary-text-color)');\n    unit.textContent = 'kW';\n    axis.appendChild(unit);\n  }\n  const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);\n  unit.setAttribute('text-anchor', 'middle');\n  unit.setAttribute('x', x);\n  unit.setAttribute('y', y);\n}",
-                    "updated": "EVAL:function(chartContext) {\n  const w = chartContext?.w, root = w?.globals?.dom?.baseEl;\n  if (!root) return;\n  const axes = w.config.yaxis || [];\n  const isPower = a => a?.id === 'kw';\n  const index = axes.findIndex(isPower);\n  if (index < 0) return;\n  const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),\n                          ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);\n  const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));\n  // A few watts beyond an integer must not add a whole kW of empty space.\n  // Only the axis uses this 10 W tolerance; plotted/tooltip values stay intact.\n  let min = 0, max = 1, hasData = false;\n  (w.config.series || []).forEach((series, i) => {\n    const axisIndex = w.globals.seriesYAxisReverseMap?.[i] ?? i;\n    if (!isPower(axes[axisIndex])) return;\n    (series.data || []).forEach(point => {\n      const x = Array.isArray(point) ? point[0] : point?.x;\n      const value = Array.isArray(point) ? point[1] : point?.y;\n      if (!Number.isFinite(value)) return;\n      if (Number.isFinite(x) && ((Number.isFinite(w.config.xaxis?.min) && x < w.config.xaxis.min) ||\n                                (Number.isFinite(w.config.xaxis?.max) && x > w.config.xaxis.max))) return;\n      min = Math.min(min, value);\n      max = Math.max(max, value);\n      hasData = true;\n    });\n  });\n  const lower = Math.min(0, Math.floor(min + .01 + 1e-9));\n  const upper = Math.max(1, Math.ceil(max - .01 - 1e-9));\n  const nextAxes = axes.map((a, i) => isPower(a) ? {...a, show: i === index && visible,\n    ...(hasData ? {min: lower, max: upper} : {})} : a);\n  if (nextAxes.some((a, i) => a.show !== axes[i].show || a.min !== axes[i].min || a.max !== axes[i].max)) {\n    // Reclaim axis space and recalculate bounds in one local render. The next\n    // updated event sees identical settings, so there is no update loop.\n    chartContext.updateOptions({yaxis: nextAxes}, false, false, false);\n    return;\n  }\n  root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {\n    el.style.visibility = visible ? 'visible' : 'hidden';\n  });\n  const axis = root.querySelector(`.apexcharts-yaxis[rel=\"${index}\"]`);\n  if (!visible || !axis) return;\n  const labels = axis.querySelector('.apexcharts-yaxis-texts-g');\n  if (!labels) return;\n  const bounds = labels.getBBox();\n  if (!(bounds.width > 0)) return;\n  let unit = axis.querySelector('.se-power-axis-unit');\n  if (!unit) {\n    unit = root.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text');\n    unit.setAttribute('class', 'se-power-axis-unit');\n    unit.setAttribute('font-size', '11px');\n    unit.setAttribute('font-weight', '400');\n    unit.setAttribute('fill', 'var(--secondary-text-color)');\n    unit.textContent = 'kW';\n    axis.appendChild(unit);\n  }\n  const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);\n  unit.setAttribute('text-anchor', 'middle');\n  unit.setAttribute('x', x);\n  unit.setAttribute('y', y);\n}"
+                    "mounted": "EVAL:function(chartContext) {\n  const w = chartContext?.w, root = w?.globals?.dom?.baseEl;\n  if (!root) return;\n  const axes = w.config.yaxis || [];\n  const isPower = a => a?.id === 'kw';\n  const index = axes.findIndex(isPower);\n  if (index < 0) return;\n  const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),\n                          ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);\n  const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));\n  // A few watts beyond an integer must not add a whole kW of empty space.\n  // Only the axis uses this 10 W tolerance; plotted/tooltip values stay intact.\n  let min = 0, max = 1, hasData = false;\n  (w.config.series || []).forEach((series, i) => {\n    const axisIndex = w.globals.seriesYAxisReverseMap?.[i] ?? i;\n    if (!isPower(axes[axisIndex]) || hidden.has(i)) return;\n    (series.data || []).forEach(point => {\n      const x = Array.isArray(point) ? point[0] : point?.x;\n      const value = Array.isArray(point) ? point[1] : point?.y;\n      if (!Number.isFinite(value)) return;\n      if (Number.isFinite(x) && ((Number.isFinite(w.config.xaxis?.min) && x < w.config.xaxis.min) ||\n                                (Number.isFinite(w.config.xaxis?.max) && x > w.config.xaxis.max))) return;\n      min = Math.min(min, value);\n      max = Math.max(max, value);\n      hasData = true;\n    });\n  });\n  const lower = Math.min(0, Math.floor(min + .01 + 1e-9));\n  const upper = Math.max(1, Math.ceil(max - .01 - 1e-9));\n  const nextAxes = axes.map((a, i) => isPower(a) ? {...a, show: i === index && visible,\n    ...(hasData ? {min: lower, max: upper} : {})} : a);\n  if (nextAxes.some((a, i) => a.show !== axes[i].show || a.min !== axes[i].min || a.max !== axes[i].max)) {\n    // Reclaim axis space and recalculate bounds in one local render. The next\n    // updated event sees identical settings, so there is no update loop.\n    chartContext.updateOptions({yaxis: nextAxes}, false, false, false);\n    return;\n  }\n  root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {\n    el.style.visibility = visible ? 'visible' : 'hidden';\n    el.style.pointerEvents = 'none';\n    const parent = el.parentNode;\n    if (parent && parent.firstChild !== el) parent.insertBefore(el, parent.firstChild);\n  });\n  const axis = root.querySelector(`.apexcharts-yaxis[rel=\"${index}\"]`);\n  if (!visible || !axis) return;\n  const labels = axis.querySelector('.apexcharts-yaxis-texts-g');\n  if (!labels) return;\n  const bounds = labels.getBBox();\n  if (!(bounds.width > 0)) return;\n  let unit = axis.querySelector('.se-power-axis-unit');\n  if (!unit) {\n    unit = root.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text');\n    unit.setAttribute('class', 'se-power-axis-unit');\n    unit.setAttribute('font-size', '11px');\n    unit.setAttribute('font-weight', '400');\n    unit.setAttribute('fill', 'var(--secondary-text-color)');\n    unit.textContent = 'kW';\n    axis.appendChild(unit);\n  }\n  const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);\n  unit.setAttribute('text-anchor', 'middle');\n  unit.setAttribute('x', x);\n  unit.setAttribute('y', y);\n}",
+                    "updated": "EVAL:function(chartContext) {\n  const w = chartContext?.w, root = w?.globals?.dom?.baseEl;\n  if (!root) return;\n  const axes = w.config.yaxis || [];\n  const isPower = a => a?.id === 'kw';\n  const index = axes.findIndex(isPower);\n  if (index < 0) return;\n  const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),\n                          ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);\n  const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));\n  // A few watts beyond an integer must not add a whole kW of empty space.\n  // Only the axis uses this 10 W tolerance; plotted/tooltip values stay intact.\n  let min = 0, max = 1, hasData = false;\n  (w.config.series || []).forEach((series, i) => {\n    const axisIndex = w.globals.seriesYAxisReverseMap?.[i] ?? i;\n    if (!isPower(axes[axisIndex]) || hidden.has(i)) return;\n    (series.data || []).forEach(point => {\n      const x = Array.isArray(point) ? point[0] : point?.x;\n      const value = Array.isArray(point) ? point[1] : point?.y;\n      if (!Number.isFinite(value)) return;\n      if (Number.isFinite(x) && ((Number.isFinite(w.config.xaxis?.min) && x < w.config.xaxis.min) ||\n                                (Number.isFinite(w.config.xaxis?.max) && x > w.config.xaxis.max))) return;\n      min = Math.min(min, value);\n      max = Math.max(max, value);\n      hasData = true;\n    });\n  });\n  const lower = Math.min(0, Math.floor(min + .01 + 1e-9));\n  const upper = Math.max(1, Math.ceil(max - .01 - 1e-9));\n  const nextAxes = axes.map((a, i) => isPower(a) ? {...a, show: i === index && visible,\n    ...(hasData ? {min: lower, max: upper} : {})} : a);\n  if (nextAxes.some((a, i) => a.show !== axes[i].show || a.min !== axes[i].min || a.max !== axes[i].max)) {\n    // Reclaim axis space and recalculate bounds in one local render. The next\n    // updated event sees identical settings, so there is no update loop.\n    chartContext.updateOptions({yaxis: nextAxes}, false, false, false);\n    return;\n  }\n  root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {\n    el.style.visibility = visible ? 'visible' : 'hidden';\n    el.style.pointerEvents = 'none';\n    const parent = el.parentNode;\n    if (parent && parent.firstChild !== el) parent.insertBefore(el, parent.firstChild);\n  });\n  const axis = root.querySelector(`.apexcharts-yaxis[rel=\"${index}\"]`);\n  if (!visible || !axis) return;\n  const labels = axis.querySelector('.apexcharts-yaxis-texts-g');\n  if (!labels) return;\n  const bounds = labels.getBBox();\n  if (!(bounds.width > 0)) return;\n  let unit = axis.querySelector('.se-power-axis-unit');\n  if (!unit) {\n    unit = root.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text');\n    unit.setAttribute('class', 'se-power-axis-unit');\n    unit.setAttribute('font-size', '11px');\n    unit.setAttribute('font-weight', '400');\n    unit.setAttribute('fill', 'var(--secondary-text-color)');\n    unit.textContent = 'kW';\n    axis.appendChild(unit);\n  }\n  const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);\n  unit.setAttribute('text-anchor', 'middle');\n  unit.setAttribute('x', x);\n  unit.setAttribute('y', y);\n}"
                   },
                   "height": 260,
                   "animations": {
@@ -777,8 +780,20 @@
                   "stroke_width": 2
                 },
                 {
-                  "entity": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_battery_power",
                   "name": "Baterija",
+                  "unit": "kW",
+                  "yaxis_id": "kw",
+                  "color": "#d97732",
+                  "transform": "const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? (v === 0 ? 0 : v * -1 / 1000) : null;",
+                  "stroke_width": 2,
+                  "show": {
+                    "hidden_by_default": true
+                  }
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "name": "SOC",
                   "unit": "%",
                   "yaxis_id": "soc",
                   "color": "#159b85",
@@ -791,6 +806,194 @@
                 "rows": "auto"
               },
               "visibility": [
+                {
+                  "condition": "not",
+                  "conditions": [
+                    {
+                      "condition": "screen",
+                      "media_query": "(max-width: 767px), (max-width: 1023px) and (pointer: coarse)"
+                    }
+                  ]
+                },
+                {
+                  "condition": "state",
+                  "entity": "input_boolean.eimo_dashboard_grafikai",
+                  "state": "on"
+                }
+              ]
+            },
+            {
+              "type": "custom:apexcharts-card",
+              "header": {
+                "show": true,
+                "title": "Gamyba, vartojimas, tinklas ir baterija · 12 val."
+              },
+              "graph_span": "12h",
+              "update_interval": "2min",
+              "experimental": {
+                "hidden_by_default": true
+              },
+              "card_mod": {
+                "style": "\n.apexcharts-tooltip {\n  padding: 0 24px !important;\n  background: transparent !important;\n  border: 0 !important;\n  box-shadow: none !important;\n  border-radius: 0;\n  overflow: visible;\n  isolation: isolate;\n  color: var(--primary-text-color) !important;\n}\n.apexcharts-tooltip::before {\n  content: '';\n  position: absolute;\n  inset: 0 24px;\n  z-index: -1;\n  border: 1px solid var(--divider-color);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--card-background-color, #fff) 78%, transparent);\n  box-shadow: 0 4px 14px rgba(0, 0, 0, .12);\n  backdrop-filter: blur(3px);\n  -webkit-backdrop-filter: blur(3px);\n}\n.apexcharts-tooltip .apexcharts-tooltip-title {\n  background: transparent !important;\n  border-bottom: 1px solid var(--divider-color) !important;\n  font-size: 11px !important;\n  padding: 6px;\n  margin-bottom: 2px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text {\n  font-size: 11px !important;\n  line-height: 14px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-series-group {\n  padding: 0 6px 3px;\n  align-items: center !important;\n}\n.apexcharts-tooltip .apexcharts-tooltip-y-group {\n  display: flex;\n  align-items: center;\n  padding: 3px 0;\n  line-height: 14px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text-y-value {\n  margin-left: 4px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker {\n  flex: 0 0 12px;\n  width: 12px;\n  height: 12px;\n  line-height: 12px;\n  margin-right: 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker::before {\n  content: '' !important;\n  position: absolute;\n  display: block;\n  width: 8px;\n  height: 8px;\n  left: 50%;\n  top: 50%;\n  transform: translate(-50%, -50%);\n  border-radius: 50%;\n  background: currentColor;\n}\n.apexcharts-xaxistooltip {\n  padding: 1px 3px !important;\n  min-width: 0;\n  line-height: 13px;\n}\n.apexcharts-xaxistooltip-text {\n  font-size: 11px !important;\n  line-height: 13px;\n}\n.apexcharts-xaxistooltip::before {\n  border-width: 4px;\n  margin-left: -4px;\n}\n.apexcharts-xaxistooltip::after {\n  border-width: 3px;\n  margin-left: -3px;\n}\n"
+              },
+              "all_series_config": {
+                "show": {
+                  "legend_value": false
+                },
+                "statistics": {
+                  "type": "mean",
+                  "period": "5minute",
+                  "align": "start"
+                }
+              },
+              "apex_config": {
+                "chart": {
+                  "zoom": {
+                    "enabled": false
+                  },
+                  "events": {
+                    "mounted": "EVAL:function(chartContext) {\n  const w = chartContext?.w, root = w?.globals?.dom?.baseEl;\n  if (!root) return;\n  const axes = w.config.yaxis || [];\n  const isPower = a => a?.id === 'kw';\n  const index = axes.findIndex(isPower);\n  if (index < 0) return;\n  const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),\n                          ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);\n  const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));\n  // A few watts beyond an integer must not add a whole kW of empty space.\n  // Only the axis uses this 10 W tolerance; plotted/tooltip values stay intact.\n  let min = 0, max = 1, hasData = false;\n  (w.config.series || []).forEach((series, i) => {\n    const axisIndex = w.globals.seriesYAxisReverseMap?.[i] ?? i;\n    if (!isPower(axes[axisIndex]) || hidden.has(i)) return;\n    (series.data || []).forEach(point => {\n      const x = Array.isArray(point) ? point[0] : point?.x;\n      const value = Array.isArray(point) ? point[1] : point?.y;\n      if (!Number.isFinite(value)) return;\n      if (Number.isFinite(x) && ((Number.isFinite(w.config.xaxis?.min) && x < w.config.xaxis.min) ||\n                                (Number.isFinite(w.config.xaxis?.max) && x > w.config.xaxis.max))) return;\n      min = Math.min(min, value);\n      max = Math.max(max, value);\n      hasData = true;\n    });\n  });\n  const lower = Math.min(0, Math.floor(min + .01 + 1e-9));\n  const upper = Math.max(1, Math.ceil(max - .01 - 1e-9));\n  const nextAxes = axes.map((a, i) => isPower(a) ? {...a, show: i === index && visible,\n    ...(hasData ? {min: lower, max: upper} : {})} : a);\n  if (nextAxes.some((a, i) => a.show !== axes[i].show || a.min !== axes[i].min || a.max !== axes[i].max)) {\n    // Reclaim axis space and recalculate bounds in one local render. The next\n    // updated event sees identical settings, so there is no update loop.\n    chartContext.updateOptions({yaxis: nextAxes}, false, false, false);\n    return;\n  }\n  root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {\n    el.style.visibility = visible ? 'visible' : 'hidden';\n    el.style.pointerEvents = 'none';\n    const parent = el.parentNode;\n    if (parent && parent.firstChild !== el) parent.insertBefore(el, parent.firstChild);\n  });\n  const axis = root.querySelector(`.apexcharts-yaxis[rel=\"${index}\"]`);\n  if (!visible || !axis) return;\n  const labels = axis.querySelector('.apexcharts-yaxis-texts-g');\n  if (!labels) return;\n  const bounds = labels.getBBox();\n  if (!(bounds.width > 0)) return;\n  let unit = axis.querySelector('.se-power-axis-unit');\n  if (!unit) {\n    unit = root.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text');\n    unit.setAttribute('class', 'se-power-axis-unit');\n    unit.setAttribute('font-size', '11px');\n    unit.setAttribute('font-weight', '400');\n    unit.setAttribute('fill', 'var(--secondary-text-color)');\n    unit.textContent = 'kW';\n    axis.appendChild(unit);\n  }\n  const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);\n  unit.setAttribute('text-anchor', 'middle');\n  unit.setAttribute('x', x);\n  unit.setAttribute('y', y);\n}",
+                    "updated": "EVAL:function(chartContext) {\n  const w = chartContext?.w, root = w?.globals?.dom?.baseEl;\n  if (!root) return;\n  const axes = w.config.yaxis || [];\n  const isPower = a => a?.id === 'kw';\n  const index = axes.findIndex(isPower);\n  if (index < 0) return;\n  const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),\n                          ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);\n  const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));\n  // A few watts beyond an integer must not add a whole kW of empty space.\n  // Only the axis uses this 10 W tolerance; plotted/tooltip values stay intact.\n  let min = 0, max = 1, hasData = false;\n  (w.config.series || []).forEach((series, i) => {\n    const axisIndex = w.globals.seriesYAxisReverseMap?.[i] ?? i;\n    if (!isPower(axes[axisIndex]) || hidden.has(i)) return;\n    (series.data || []).forEach(point => {\n      const x = Array.isArray(point) ? point[0] : point?.x;\n      const value = Array.isArray(point) ? point[1] : point?.y;\n      if (!Number.isFinite(value)) return;\n      if (Number.isFinite(x) && ((Number.isFinite(w.config.xaxis?.min) && x < w.config.xaxis.min) ||\n                                (Number.isFinite(w.config.xaxis?.max) && x > w.config.xaxis.max))) return;\n      min = Math.min(min, value);\n      max = Math.max(max, value);\n      hasData = true;\n    });\n  });\n  const lower = Math.min(0, Math.floor(min + .01 + 1e-9));\n  const upper = Math.max(1, Math.ceil(max - .01 - 1e-9));\n  const nextAxes = axes.map((a, i) => isPower(a) ? {...a, show: i === index && visible,\n    ...(hasData ? {min: lower, max: upper} : {})} : a);\n  if (nextAxes.some((a, i) => a.show !== axes[i].show || a.min !== axes[i].min || a.max !== axes[i].max)) {\n    // Reclaim axis space and recalculate bounds in one local render. The next\n    // updated event sees identical settings, so there is no update loop.\n    chartContext.updateOptions({yaxis: nextAxes}, false, false, false);\n    return;\n  }\n  root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {\n    el.style.visibility = visible ? 'visible' : 'hidden';\n    el.style.pointerEvents = 'none';\n    const parent = el.parentNode;\n    if (parent && parent.firstChild !== el) parent.insertBefore(el, parent.firstChild);\n  });\n  const axis = root.querySelector(`.apexcharts-yaxis[rel=\"${index}\"]`);\n  if (!visible || !axis) return;\n  const labels = axis.querySelector('.apexcharts-yaxis-texts-g');\n  if (!labels) return;\n  const bounds = labels.getBBox();\n  if (!(bounds.width > 0)) return;\n  let unit = axis.querySelector('.se-power-axis-unit');\n  if (!unit) {\n    unit = root.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text');\n    unit.setAttribute('class', 'se-power-axis-unit');\n    unit.setAttribute('font-size', '11px');\n    unit.setAttribute('font-weight', '400');\n    unit.setAttribute('fill', 'var(--secondary-text-color)');\n    unit.textContent = 'kW';\n    axis.appendChild(unit);\n  }\n  const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);\n  unit.setAttribute('text-anchor', 'middle');\n  unit.setAttribute('x', x);\n  unit.setAttribute('y', y);\n}"
+                  },
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "grid": {
+                  "padding": {
+                    "top": 4
+                  }
+                },
+                "xaxis": {
+                  "tooltip": {
+                    "formatter": "EVAL:function(value) {\n  const date = new Date(value);\n  if (!Number.isFinite(date.getTime())) return '';\n  const pad = n => String(n).padStart(2, '0');\n  return pad(date.getHours()) + ':' + pad(date.getMinutes());\n}\n",
+                    "style": {
+                      "fontSize": "11px"
+                    }
+                  },
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                },
+                "tooltip": {
+                  "shared": true,
+                  "intersect": false,
+                  "hideEmptySeries": false,
+                  "x": {
+                    "format": "yyyy.MM.dd HH:mm"
+                  }
+                },
+                "annotations": {
+                  "yaxis": [
+                    {
+                      "y": 0,
+                      "yAxisIndex": 0,
+                      "borderColor": "#000000",
+                      "borderWidth": 0.5,
+                      "strokeDashArray": 0
+                    }
+                  ]
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                }
+              },
+              "yaxis": [
+                {
+                  "id": "kw",
+                  "decimals": 0,
+                  "min": "~0",
+                  "max": "~1",
+                  "align_to": 1,
+                  "apex_config": {
+                    "stepSize": 1,
+                    "forceNiceScale": false,
+                    "showAlways": true,
+                    "showForNullSeries": true
+                  }
+                },
+                {
+                  "id": "soc",
+                  "opposite": true,
+                  "min": 0,
+                  "max": 100,
+                  "decimals": 0,
+                  "apex_config": {
+                    "labels": {
+                      "formatter": "EVAL:function(value) { return Number.isFinite(value) ? String(Math.round(value / 5) * 5) : ''; }"
+                    }
+                  }
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.eimo_pv_power",
+                  "name": "Gamyba",
+                  "unit": "kW",
+                  "yaxis_id": "kw",
+                  "color": "#d99a18",
+                  "type": "area",
+                  "opacity": 0.15,
+                  "transform": "return x === null ? null : Number(x) / 1000;",
+                  "stroke_width": 2
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
+                  "name": "Vartojimas",
+                  "unit": "kW",
+                  "yaxis_id": "kw",
+                  "color": "#4789e8",
+                  "transform": "return x === null ? null : Number(x) / 1000;",
+                  "stroke_width": 2
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
+                  "name": "Tinklas",
+                  "unit": "kW",
+                  "yaxis_id": "kw",
+                  "color": "#8973cf",
+                  "transform": "const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? (v === 0 ? 0 : v * -1 / 1000) : null;",
+                  "stroke_width": 2
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_battery_power",
+                  "name": "Baterija",
+                  "unit": "kW",
+                  "yaxis_id": "kw",
+                  "color": "#d97732",
+                  "transform": "const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? (v === 0 ? 0 : v * -1 / 1000) : null;",
+                  "stroke_width": 2,
+                  "show": {
+                    "hidden_by_default": true
+                  }
+                },
+                {
+                  "entity": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
+                  "name": "SOC",
+                  "unit": "%",
+                  "yaxis_id": "soc",
+                  "color": "#159b85",
+                  "stroke_width": 2,
+                  "float_precision": 0
+                }
+              ],
+              "grid_options": {
+                "columns": "full",
+                "rows": "auto"
+              },
+              "visibility": [
+                {
+                  "condition": "screen",
+                  "media_query": "(max-width: 767px), (max-width: 1023px) and (pointer: coarse)"
+                },
                 {
                   "condition": "state",
                   "entity": "input_boolean.eimo_dashboard_grafikai",

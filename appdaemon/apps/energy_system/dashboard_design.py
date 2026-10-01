@@ -6,7 +6,7 @@ Horizon is read as a forecast; the committed plan is the action source of truth.
 from copy import deepcopy
 
 VERSION = "3.0-site-profiles"
-COLORS = {"pv": "#d99a18", "load": "#4789e8", "battery": "#159b85", "grid": "#8973cf"}
+COLORS = {"pv": "#d99a18", "load": "#4789e8", "battery": "#159b85", "battery_power": "#d97732", "grid": "#8973cf"}
 
 # Transparent gutters are included in ApexCharts' tooltip width, so its native
 # left/right positioning leaves the same extra gap on either side of a point.
@@ -112,7 +112,7 @@ HISTORY_AXIS_JS = r"""EVAL:function(chartContext) {
   let min = 0, max = 1, hasData = false;
   (w.config.series || []).forEach((series, i) => {
     const axisIndex = w.globals.seriesYAxisReverseMap?.[i] ?? i;
-    if (!isPower(axes[axisIndex])) return;
+    if (!isPower(axes[axisIndex]) || hidden.has(i)) return;
     (series.data || []).forEach(point => {
       const x = Array.isArray(point) ? point[0] : point?.x;
       const value = Array.isArray(point) ? point[1] : point?.y;
@@ -136,6 +136,9 @@ HISTORY_AXIS_JS = r"""EVAL:function(chartContext) {
   }
   root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {
     el.style.visibility = visible ? 'visible' : 'hidden';
+    el.style.pointerEvents = 'none';
+    const parent = el.parentNode;
+    if (parent && parent.firstChild !== el) parent.insertBefore(el, parent.firstChild);
   });
   const axis = root.querySelector(`.apexcharts-yaxis[rel="${index}"]`);
   if (!visible || !axis) return;
@@ -521,9 +524,10 @@ def _view(p, title, path, icon, subtitle, sections):
             "sections": sections}
 
 
-def _history(p):
-    return _chart({"type": "custom:apexcharts-card", "header": {"show": True, "title": "Gamyba, vartojimas, tinklas ir baterija · 24 val."},
-        "graph_span": "24h", "update_interval": "2min",
+def _history(p, hours=24):
+    return _chart({"type": "custom:apexcharts-card", "header": {"show": True, "title": f"Gamyba, vartojimas, tinklas ir baterija · {hours} val."},
+        "graph_span": f"{hours}h", "update_interval": "2min",
+        "experimental": {"hidden_by_default": True},
         "card_mod": {"style": HISTORY_TOOLTIP_CSS},
         "all_series_config": {"show": {"legend_value": False},
                               "statistics": {"type": "mean", "period": "5minute", "align": "start"}},
@@ -550,9 +554,21 @@ def _history(p):
             {"entity": p["grid"], "name": "Tinklas", "unit": "kW", "yaxis_id": "kw", "color": COLORS["grid"],
              "transform": f"const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? (v === 0 ? 0 : v * {p['grid_sign']} / 1000) : null;",
              "stroke_width": 2},
-            {"entity": p["soc"], "name": "Baterija", "unit": "%", "yaxis_id": "soc", "color": COLORS["battery"],
+            {"entity": p["battery"], "name": "Baterija", "unit": "kW", "yaxis_id": "kw", "color": COLORS["battery_power"],
+             "transform": f"const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? (v === 0 ? 0 : v * {p['battery_sign']} / 1000) : null;",
+             "stroke_width": 2, "show": {"hidden_by_default": True}},
+            {"entity": p["soc"], "name": "SOC", "unit": "%", "yaxis_id": "soc", "color": COLORS["battery"],
              "stroke_width": 2, "float_precision": 0},
         ]})
+
+
+def _history_cards(p):
+    # Native screen visibility also covers phones held in landscape orientation.
+    mobile = {"condition": "screen", "media_query": "(max-width: 767px), (max-width: 1023px) and (pointer: coarse)"}
+    desktop_card, mobile_card = _history(p, 24), _history(p, 12)
+    desktop_card["visibility"] = [{"condition": "not", "conditions": [deepcopy(mobile)]}]
+    mobile_card["visibility"] = [mobile]
+    return [desktop_card, mobile_card]
 
 
 def _bank_graph(p):
@@ -588,7 +604,7 @@ def build_views(p, legacy):
                  _metric(today["consumption"], "Suvartota", "mdi:home-lightning-bolt", COLORS["load"]),
                  _metric(today["export"], "Į tinklą", "mdi:transmission-tower-import", COLORS["grid"]),
                  _metric(today["import"], "Iš tinklo", "mdi:transmission-tower-export", "#7c8799"), span=2),
-        _section(_history(p), span=2, visible=t["graphs"]),
+        _section(*_history_cards(p), span=2, visible=t["graphs"]),
         _section(_panel(p, "forecast"), visible=t["forecast"]),
         _section(_heading("ESO pasaugojimo bankas", "mdi:bank-outline"),
                  _metric(e["bank"], "Dabartinis likutis", "mdi:bank-outline", COLORS["battery"]),
