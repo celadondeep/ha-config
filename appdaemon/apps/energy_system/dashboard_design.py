@@ -160,6 +160,35 @@ HISTORY_AXIS_JS = r"""EVAL:function(chartContext) {
     matrix.f += inverse.b * delta;
     axis.transform.baseVal.initialize(svg.createSVGTransformFromMatrix(matrix));
   });
+  // Keep an 8 px gap between the plot and either visible scale. Use native
+  // grid padding so curves, clipping, zero line and tooltips share one layout.
+  if (cardBounds?.width > 0) {
+    let left = cardBounds.left + 16, right = cardBounds.right - 16;
+    root.querySelectorAll('.apexcharts-yaxis').forEach(axis => {
+      const config = axes[Number(axis.getAttribute('rel'))];
+      const bounds = axis.querySelector('.apexcharts-yaxis-texts-g')?.getBoundingClientRect();
+      if (!config || config.show === false || !(bounds?.width > 0)) return;
+      if (config.opposite) right = Math.min(right, cardBounds.right - 16 - bounds.width - 8);
+      else left = Math.max(left, cardBounds.left + 16 + bounds.width + 8);
+    });
+    const frame = w.globals.dom.elGraphical?.node?.getScreenCTM();
+    if (frame?.a > 0 && w.globals.gridWidth > 0 && right > left) {
+      const plotLeft = frame.e, plotRight = frame.e + frame.a * w.globals.gridWidth;
+      const key = [cardBounds.width.toFixed(1), (left - cardBounds.left).toFixed(1),
+                   (cardBounds.right - right).toFixed(1), w.config.xaxis?.min, w.config.xaxis?.max].join('|');
+      if (chartContext._sePlotSpacing?.key !== key) chartContext._sePlotSpacing = {key, passes: 0};
+      const state = chartContext._sePlotSpacing;
+      // Bound extra local redraws if the native time-axis layout also changes.
+      if (state.passes < 2 && (Math.abs(left - plotLeft) > .5 || Math.abs(right - plotRight) > .5)) {
+        const padding = w.config.grid?.padding || {};
+        const nextLeft = Math.round(((Number(padding.left) || 0) + (left - plotLeft) / frame.a) * 10) / 10;
+        const nextRight = Math.round(((Number(padding.right) || 0) + (plotRight - right) / frame.a) * 10) / 10;
+        state.passes++;
+        chartContext.updateOptions({grid: {padding: {...padding, left: nextLeft, right: nextRight}}}, false, false, false);
+        return;
+      }
+    }
+  }
   const axis = root.querySelector(`.apexcharts-yaxis[rel="${index}"]`);
   if (!visible || !axis) return;
   const labels = axis.querySelector('.apexcharts-yaxis-texts-g');
