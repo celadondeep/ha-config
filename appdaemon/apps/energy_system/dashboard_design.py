@@ -42,34 +42,48 @@ HISTORY_TOOLTIP_CSS = """
 }
 .apexcharts-tooltip .apexcharts-tooltip-text {
   font-size: 11px !important;
+  line-height: 14px;
 }
 .apexcharts-tooltip .apexcharts-tooltip-series-group {
   padding: 0 6px 3px;
+  align-items: center !important;
 }
 .apexcharts-tooltip .apexcharts-tooltip-y-group {
-  padding: 4px 0 3px;
+  display: flex;
+  align-items: center;
+  padding: 3px 0;
+  line-height: 14px;
 }
 .apexcharts-tooltip .apexcharts-tooltip-text-y-value {
   margin-left: 4px;
 }
 .apexcharts-tooltip .apexcharts-tooltip-marker {
+  flex: 0 0 12px;
   width: 12px;
   height: 12px;
   line-height: 12px;
   margin-right: 3px;
 }
 .apexcharts-tooltip .apexcharts-tooltip-marker::before {
-  font-size: 20px;
-  line-height: 12px;
+  content: '' !important;
+  position: absolute;
+  display: block;
+  width: 8px;
+  height: 8px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: currentColor;
 }
 .apexcharts-xaxistooltip {
   padding: 1px 3px !important;
   min-width: 0;
-  line-height: 11px;
+  line-height: 13px;
 }
 .apexcharts-xaxistooltip-text {
-  font-size: 10px !important;
-  line-height: 11px;
+  font-size: 11px !important;
+  line-height: 13px;
 }
 .apexcharts-xaxistooltip::before {
   border-width: 4px;
@@ -516,8 +530,8 @@ def _history(p):
         "apex_config": {
             "chart": {"zoom": {"enabled": False},
                       "events": {"mounted": HISTORY_AXIS_JS, "updated": HISTORY_AXIS_JS}},
-            "grid": {"padding": {"top": 14}},
-            "xaxis": {"tooltip": {"formatter": HISTORY_TIME_JS, "style": {"fontSize": "10px"}}},
+            "grid": {"padding": {"top": 4}},
+            "xaxis": {"tooltip": {"formatter": HISTORY_TIME_JS, "style": {"fontSize": "11px"}}},
             "tooltip": {"shared": True, "intersect": False, "hideEmptySeries": False,
                         "x": {"format": "yyyy.MM.dd HH:mm"}},
             "annotations": {"yaxis": [{"y": 0, "yAxisIndex": 0, "borderColor": "#000000",
