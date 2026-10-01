@@ -1,12 +1,49 @@
 """SE dashboard v2: shared presentation, no services and no control decisions.
 
-The only custom dependencies are already installed button-card and ApexCharts.
+Cards and styling use installed button-card, ApexCharts and card-mod.
 Horizon is read as a forecast; the committed plan is the action source of truth.
 """
 from copy import deepcopy
 
 VERSION = "3.0-site-profiles"
 COLORS = {"pv": "#d99a18", "load": "#4789e8", "battery": "#159b85", "grid": "#8973cf"}
+
+# Transparent gutters are included in ApexCharts' tooltip width, so its native
+# left/right positioning leaves the same extra gap on either side of a point.
+HISTORY_TOOLTIP_CSS = """
+.apexcharts-tooltip {
+  padding: 0 24px !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  overflow: visible;
+  isolation: isolate;
+  color: var(--primary-text-color) !important;
+}
+.apexcharts-tooltip::before {
+  content: '';
+  position: absolute;
+  inset: 0 24px;
+  z-index: -1;
+  border: 1px solid var(--divider-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--card-background-color, #fff) 88%, transparent);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .12);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.apexcharts-tooltip .apexcharts-tooltip-title {
+  background: transparent !important;
+  border-bottom: 1px solid var(--divider-color) !important;
+  padding: 8px 12px;
+  margin-bottom: 2px;
+}
+.apexcharts-tooltip .apexcharts-tooltip-series-group {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+"""
 
 # Scoped inside button-card's shadow root. Uses HA colors in both theme modes.
 PANEL_CSS = """
@@ -365,16 +402,15 @@ def _view(p, title, path, icon, subtitle, sections):
 def _history(p):
     return _chart({"type": "custom:apexcharts-card", "header": {"show": True, "title": "Gamyba, vartojimas, tinklas ir baterija · 24 val."},
         "graph_span": "24h", "update_interval": "2min",
+        "card_mod": {"style": HISTORY_TOOLTIP_CSS},
         "all_series_config": {"show": {"legend_value": False},
                               "statistics": {"type": "mean", "period": "5minute", "align": "start"}},
         "apex_config": {
             "chart": {"zoom": {"enabled": False}},
             "tooltip": {"shared": True, "intersect": False, "hideEmptySeries": False,
                         "x": {"format": "dd.MM HH:mm"}},
-            "annotations": {"yaxis": [{"y": 0, "yAxisIndex": 0, "borderColor": "#8796ab",
-                                        "borderWidth": 2, "strokeDashArray": 0,
-                                        "label": {"text": "0 kW", "borderColor": "#8796ab",
-                                                  "style": {"background": "#8796ab", "color": "#ffffff", "fontSize": "11px"}}}]},
+            "annotations": {"yaxis": [{"y": 0, "yAxisIndex": 0, "borderColor": "#000000",
+                                        "borderWidth": 1, "strokeDashArray": 0}]},
         },
         "yaxis": [{"id": "kw", "decimals": 1}, {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0}],
         "series": [

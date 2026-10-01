@@ -646,6 +646,9 @@
               },
               "graph_span": "24h",
               "update_interval": "2min",
+              "card_mod": {
+                "style": "\n.apexcharts-tooltip {\n  padding: 0 24px !important;\n  background: transparent !important;\n  border: 0 !important;\n  box-shadow: none !important;\n  border-radius: 0;\n  overflow: visible;\n  isolation: isolate;\n  color: var(--primary-text-color) !important;\n}\n.apexcharts-tooltip::before {\n  content: '';\n  position: absolute;\n  inset: 0 24px;\n  z-index: -1;\n  border: 1px solid var(--divider-color);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--card-background-color, #fff) 88%, transparent);\n  box-shadow: 0 4px 14px rgba(0, 0, 0, .12);\n  backdrop-filter: blur(3px);\n  -webkit-backdrop-filter: blur(3px);\n}\n.apexcharts-tooltip .apexcharts-tooltip-title {\n  background: transparent !important;\n  border-bottom: 1px solid var(--divider-color) !important;\n  padding: 8px 12px;\n  margin-bottom: 2px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-series-group {\n  padding-left: 12px;\n  padding-right: 12px;\n}\n"
+              },
               "all_series_config": {
                 "show": {
                   "legend_value": false
@@ -682,18 +685,9 @@
                     {
                       "y": 0,
                       "yAxisIndex": 0,
-                      "borderColor": "#8796ab",
-                      "borderWidth": 2,
-                      "strokeDashArray": 0,
-                      "label": {
-                        "text": "0 kW",
-                        "borderColor": "#8796ab",
-                        "style": {
-                          "background": "#8796ab",
-                          "color": "#ffffff",
-                          "fontSize": "11px"
-                        }
-                      }
+                      "borderColor": "#000000",
+                      "borderWidth": 1,
+                      "strokeDashArray": 0
                     }
                   ]
                 },
