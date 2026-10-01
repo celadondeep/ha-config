@@ -81,38 +81,68 @@ HISTORY_TOOLTIP_CSS = """
 }
 """
 
-# Keep the shared power axis while any power curve is visible. The unit follows
-# the rendered label bounds on mount, legend changes, refresh and resize.
+# Keep the shared power axis while any power curve is visible. Hide it through
+# ApexCharts layout too, and draw its unit above labels without reserving width.
 HISTORY_AXIS_JS = r"""EVAL:function(chartContext) {
   const w = chartContext?.w, root = w?.globals?.dom?.baseEl;
   if (!root) return;
   const axes = w.config.yaxis || [];
-  const isPower = a => a?.id === 'kw' || a?.title?.text === 'kW';
-  const index = axes.findIndex(a => isPower(a) && a.show !== false);
+  const isPower = a => a?.id === 'kw';
+  const index = axes.findIndex(isPower);
   if (index < 0) return;
   const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),
                           ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);
   const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));
-  const axis = root.querySelector(`.apexcharts-yaxis[rel="${index}"]`);
-  if (!axis) return;
-  axis.style.visibility = visible ? 'visible' : 'hidden';
+  // A few watts beyond an integer must not add a whole kW of empty space.
+  // Only the axis uses this 10 W tolerance; plotted/tooltip values stay intact.
+  let min = 0, max = 1, hasData = false;
+  (w.config.series || []).forEach((series, i) => {
+    const axisIndex = w.globals.seriesYAxisReverseMap?.[i] ?? i;
+    if (!isPower(axes[axisIndex])) return;
+    (series.data || []).forEach(point => {
+      const x = Array.isArray(point) ? point[0] : point?.x;
+      const value = Array.isArray(point) ? point[1] : point?.y;
+      if (!Number.isFinite(value)) return;
+      if (Number.isFinite(x) && ((Number.isFinite(w.config.xaxis?.min) && x < w.config.xaxis.min) ||
+                                (Number.isFinite(w.config.xaxis?.max) && x > w.config.xaxis.max))) return;
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+      hasData = true;
+    });
+  });
+  const lower = Math.min(0, Math.floor(min + .01 + 1e-9));
+  const upper = Math.max(1, Math.ceil(max - .01 - 1e-9));
+  const nextAxes = axes.map((a, i) => isPower(a) ? {...a, show: i === index && visible,
+    ...(hasData ? {min: lower, max: upper} : {})} : a);
+  if (nextAxes.some((a, i) => a.show !== axes[i].show || a.min !== axes[i].min || a.max !== axes[i].max)) {
+    // Reclaim axis space and recalculate bounds in one local render. The next
+    // updated event sees identical settings, so there is no update loop.
+    chartContext.updateOptions({yaxis: nextAxes}, false, false, false);
+    return;
+  }
   root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {
     el.style.visibility = visible ? 'visible' : 'hidden';
   });
+  const axis = root.querySelector(`.apexcharts-yaxis[rel="${index}"]`);
+  if (!visible || !axis) return;
   const labels = axis.querySelector('.apexcharts-yaxis-texts-g');
-  const unit = axis.querySelector('.apexcharts-yaxis-title-text');
-  if (!visible || !labels || !unit) return;
+  if (!labels) return;
   const bounds = labels.getBBox();
   if (!(bounds.width > 0)) return;
+  let unit = axis.querySelector('.se-power-axis-unit');
+  if (!unit) {
+    unit = root.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text');
+    unit.setAttribute('class', 'se-power-axis-unit');
+    unit.setAttribute('font-size', '11px');
+    unit.setAttribute('font-weight', '400');
+    unit.setAttribute('fill', 'var(--secondary-text-color)');
+    unit.textContent = 'kW';
+    axis.appendChild(unit);
+  }
   const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);
-  unit.removeAttribute('transform');
   unit.setAttribute('text-anchor', 'middle');
   unit.setAttribute('x', x);
   unit.setAttribute('y', y);
-  unit.querySelectorAll('tspan').forEach(el => {
-    el.setAttribute('x', x);
-    el.setAttribute('y', y);
-  });
 }"""
 
 HISTORY_TIME_JS = """EVAL:function(value) {
@@ -495,9 +525,7 @@ def _history(p):
         },
         "yaxis": [{"id": "kw", "decimals": 0, "min": "~0", "max": "~1", "align_to": 1,
                    "apex_config": {"stepSize": 1, "forceNiceScale": False,
-                                   "showAlways": True, "showForNullSeries": True,
-                                   "title": {"text": "kW", "rotate": 0,
-                                             "style": {"fontSize": "11px", "fontWeight": 400}}}},
+                                   "showAlways": True, "showForNullSeries": True}},
                   {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0}],
         "series": [
             {"entity": p["pv"], "name": "Gamyba", "unit": "kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
