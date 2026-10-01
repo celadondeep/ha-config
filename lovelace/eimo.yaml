@@ -647,7 +647,7 @@
               "graph_span": "24h",
               "update_interval": "2min",
               "card_mod": {
-                "style": "\n.apexcharts-tooltip {\n  padding: 0 24px !important;\n  background: transparent !important;\n  border: 0 !important;\n  box-shadow: none !important;\n  border-radius: 0;\n  overflow: visible;\n  isolation: isolate;\n  color: var(--primary-text-color) !important;\n}\n.apexcharts-tooltip::before {\n  content: '';\n  position: absolute;\n  inset: 0 24px;\n  z-index: -1;\n  border: 1px solid var(--divider-color);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--card-background-color, #fff) 88%, transparent);\n  box-shadow: 0 4px 14px rgba(0, 0, 0, .12);\n  backdrop-filter: blur(3px);\n  -webkit-backdrop-filter: blur(3px);\n}\n.apexcharts-tooltip .apexcharts-tooltip-title {\n  background: transparent !important;\n  border-bottom: 1px solid var(--divider-color) !important;\n  padding: 8px 12px;\n  margin-bottom: 2px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-series-group {\n  padding-left: 12px;\n  padding-right: 12px;\n}\n"
+                "style": "\n.apexcharts-tooltip {\n  padding: 0 24px !important;\n  background: transparent !important;\n  border: 0 !important;\n  box-shadow: none !important;\n  border-radius: 0;\n  overflow: visible;\n  isolation: isolate;\n  color: var(--primary-text-color) !important;\n}\n.apexcharts-tooltip::before {\n  content: '';\n  position: absolute;\n  inset: 0 24px;\n  z-index: -1;\n  border: 1px solid var(--divider-color);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--card-background-color, #fff) 78%, transparent);\n  box-shadow: 0 4px 14px rgba(0, 0, 0, .12);\n  backdrop-filter: blur(3px);\n  -webkit-backdrop-filter: blur(3px);\n}\n.apexcharts-tooltip .apexcharts-tooltip-title {\n  background: transparent !important;\n  border-bottom: 1px solid var(--divider-color) !important;\n  font-size: 11px !important;\n  padding: 6px;\n  margin-bottom: 2px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text {\n  font-size: 11px !important;\n}\n.apexcharts-tooltip .apexcharts-tooltip-series-group {\n  padding: 0 6px 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-y-group {\n  padding: 4px 0 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text-y-value {\n  margin-left: 4px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker {\n  width: 12px;\n  height: 12px;\n  line-height: 12px;\n  margin-right: 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker::before {\n  font-size: 20px;\n  line-height: 12px;\n}\n"
               },
               "all_series_config": {
                 "show": {
@@ -713,7 +713,17 @@
                   "align_to": 1,
                   "apex_config": {
                     "stepSize": 1,
-                    "forceNiceScale": false
+                    "forceNiceScale": false,
+                    "showAlways": true,
+                    "showForNullSeries": true,
+                    "title": {
+                      "text": "kW",
+                      "rotate": 0,
+                      "style": {
+                        "fontSize": "11px",
+                        "fontWeight": 400
+                      }
+                    }
                   }
                 },
                 {

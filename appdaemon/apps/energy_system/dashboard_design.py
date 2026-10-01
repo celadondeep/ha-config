@@ -28,7 +28,7 @@ HISTORY_TOOLTIP_CSS = """
   z-index: -1;
   border: 1px solid var(--divider-color);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--card-background-color, #fff) 88%, transparent);
+  background: color-mix(in srgb, var(--card-background-color, #fff) 78%, transparent);
   box-shadow: 0 4px 14px rgba(0, 0, 0, .12);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
@@ -36,12 +36,31 @@ HISTORY_TOOLTIP_CSS = """
 .apexcharts-tooltip .apexcharts-tooltip-title {
   background: transparent !important;
   border-bottom: 1px solid var(--divider-color) !important;
-  padding: 8px 12px;
+  font-size: 11px !important;
+  padding: 6px;
   margin-bottom: 2px;
 }
+.apexcharts-tooltip .apexcharts-tooltip-text {
+  font-size: 11px !important;
+}
 .apexcharts-tooltip .apexcharts-tooltip-series-group {
-  padding-left: 12px;
-  padding-right: 12px;
+  padding: 0 6px 3px;
+}
+.apexcharts-tooltip .apexcharts-tooltip-y-group {
+  padding: 4px 0 3px;
+}
+.apexcharts-tooltip .apexcharts-tooltip-text-y-value {
+  margin-left: 4px;
+}
+.apexcharts-tooltip .apexcharts-tooltip-marker {
+  width: 12px;
+  height: 12px;
+  line-height: 12px;
+  margin-right: 3px;
+}
+.apexcharts-tooltip .apexcharts-tooltip-marker::before {
+  font-size: 20px;
+  line-height: 12px;
 }
 """
 
@@ -413,7 +432,10 @@ def _history(p):
                                         "borderWidth": .5, "strokeDashArray": 0}]},
         },
         "yaxis": [{"id": "kw", "decimals": 0, "min": "~0", "max": "~1", "align_to": 1,
-                   "apex_config": {"stepSize": 1, "forceNiceScale": False}},
+                   "apex_config": {"stepSize": 1, "forceNiceScale": False,
+                                   "showAlways": True, "showForNullSeries": True,
+                                   "title": {"text": "kW", "rotate": 0,
+                                             "style": {"fontSize": "11px", "fontWeight": 400}}}},
                   {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0}],
         "series": [
             {"entity": p["pv"], "name": "Gamyba", "unit": "kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
