@@ -733,7 +733,10 @@
                     "stepSize": 1,
                     "forceNiceScale": false,
                     "showAlways": true,
-                    "showForNullSeries": true
+                    "showForNullSeries": true,
+                    "labels": {
+                      "offsetX": -4
+                    }
                   }
                 },
                 {
@@ -744,6 +747,7 @@
                   "decimals": 0,
                   "apex_config": {
                     "labels": {
+                      "offsetX": 4,
                       "formatter": "EVAL:function(value) { return Number.isFinite(value) ? String(Math.round(value / 5) * 5) : ''; }"
                     }
                   }
@@ -917,7 +921,10 @@
                     "stepSize": 1,
                     "forceNiceScale": false,
                     "showAlways": true,
-                    "showForNullSeries": true
+                    "showForNullSeries": true,
+                    "labels": {
+                      "offsetX": -4
+                    }
                   }
                 },
                 {
@@ -928,6 +935,7 @@
                   "decimals": 0,
                   "apex_config": {
                     "labels": {
+                      "offsetX": 4,
                       "formatter": "EVAL:function(value) { return Number.isFinite(value) ? String(Math.round(value / 5) * 5) : ''; }"
                     }
                   }

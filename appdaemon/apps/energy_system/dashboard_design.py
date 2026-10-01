@@ -543,9 +543,10 @@ def _history(p, hours=24):
         },
         "yaxis": [{"id": "kw", "decimals": 0, "min": "~0", "max": "~1", "align_to": 1,
                    "apex_config": {"stepSize": 1, "forceNiceScale": False,
-                                   "showAlways": True, "showForNullSeries": True}},
+                                   "showAlways": True, "showForNullSeries": True,
+                                   "labels": {"offsetX": -4}}},
                   {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0,
-                   "apex_config": {"labels": {"formatter": "EVAL:function(value) { return Number.isFinite(value) ? String(Math.round(value / 5) * 5) : ''; }"}}}],
+                   "apex_config": {"labels": {"offsetX": 4, "formatter": "EVAL:function(value) { return Number.isFinite(value) ? String(Math.round(value / 5) * 5) : ''; }"}}}],
         "series": [
             {"entity": p["pv"], "name": "Gamyba", "unit": "kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
              "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2},
