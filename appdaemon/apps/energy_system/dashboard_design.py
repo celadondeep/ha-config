@@ -410,9 +410,11 @@ def _history(p):
             "tooltip": {"shared": True, "intersect": False, "hideEmptySeries": False,
                         "x": {"format": "dd.MM HH:mm"}},
             "annotations": {"yaxis": [{"y": 0, "yAxisIndex": 0, "borderColor": "#000000",
-                                        "borderWidth": 1, "strokeDashArray": 0}]},
+                                        "borderWidth": .5, "strokeDashArray": 0}]},
         },
-        "yaxis": [{"id": "kw", "decimals": 1}, {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0}],
+        "yaxis": [{"id": "kw", "decimals": 0, "min": "~0", "max": "~1", "align_to": 1,
+                   "apex_config": {"stepSize": 1, "forceNiceScale": False}},
+                  {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0}],
         "series": [
             {"entity": p["pv"], "name": "Gamyba", "unit": "kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
              "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2},

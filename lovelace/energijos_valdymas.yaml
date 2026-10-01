@@ -686,7 +686,7 @@
                       "y": 0,
                       "yAxisIndex": 0,
                       "borderColor": "#000000",
-                      "borderWidth": 1,
+                      "borderWidth": 0.5,
                       "strokeDashArray": 0
                     }
                   ]
@@ -707,7 +707,14 @@
               "yaxis": [
                 {
                   "id": "kw",
-                  "decimals": 1
+                  "decimals": 0,
+                  "min": "~0",
+                  "max": "~1",
+                  "align_to": 1,
+                  "apex_config": {
+                    "stepSize": 1,
+                    "forceNiceScale": false
+                  }
                 },
                 {
                   "id": "soc",
