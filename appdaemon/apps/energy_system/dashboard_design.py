@@ -140,6 +140,26 @@ HISTORY_AXIS_JS = r"""EVAL:function(chartContext) {
     const parent = el.parentNode;
     if (parent && parent.firstChild !== el) parent.insertBefore(el, parent.firstChild);
   });
+  // Native left/right axes reserve different space. Align their visible labels
+  // to the same card inset after layout, including after resizing or toggling.
+  const cardBounds = root.closest('ha-card')?.getBoundingClientRect();
+  if (cardBounds?.width > 0) root.querySelectorAll('.apexcharts-yaxis').forEach(axis => {
+    const config = axes[Number(axis.getAttribute('rel'))];
+    const labels = axis.querySelector('.apexcharts-yaxis-texts-g');
+    if (!config || config.show === false || !labels) return;
+    const bounds = labels.getBoundingClientRect();
+    if (!(bounds.width > 0)) return;
+    const delta = config.opposite ? cardBounds.right - 16 - bounds.right
+                                  : cardBounds.left + 16 - bounds.left;
+    if (Math.abs(delta) < .5) return;
+    const parentMatrix = axis.parentNode.getScreenCTM(), svg = axis.ownerSVGElement;
+    if (!parentMatrix || !svg || Math.abs(parentMatrix.a * parentMatrix.d - parentMatrix.b * parentMatrix.c) < 1e-9) return;
+    const inverse = parentMatrix.inverse();
+    const matrix = axis.transform.baseVal.consolidate()?.matrix || svg.createSVGMatrix();
+    matrix.e += inverse.a * delta;
+    matrix.f += inverse.b * delta;
+    axis.transform.baseVal.initialize(svg.createSVGTransformFromMatrix(matrix));
+  });
   const axis = root.querySelector(`.apexcharts-yaxis[rel="${index}"]`);
   if (!visible || !axis) return;
   const labels = axis.querySelector('.apexcharts-yaxis-texts-g');
@@ -543,10 +563,9 @@ def _history(p, hours=24):
         },
         "yaxis": [{"id": "kw", "decimals": 0, "min": "~0", "max": "~1", "align_to": 1,
                    "apex_config": {"stepSize": 1, "forceNiceScale": False,
-                                   "showAlways": True, "showForNullSeries": True,
-                                   "labels": {"offsetX": -4}}},
+                                   "showAlways": True, "showForNullSeries": True}},
                   {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0,
-                   "apex_config": {"labels": {"offsetX": 4, "formatter": "EVAL:function(value) { return Number.isFinite(value) ? String(Math.round(value / 5) * 5) : ''; }"}}}],
+                   "apex_config": {"labels": {"formatter": "EVAL:function(value) { return Number.isFinite(value) ? String(Math.round(value / 5) * 5) : ''; }"}}}],
         "series": [
             {"entity": p["pv"], "name": "Gamyba", "unit": "kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
              "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2},
