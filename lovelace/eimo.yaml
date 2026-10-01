@@ -646,6 +646,70 @@
               },
               "graph_span": "24h",
               "update_interval": "2min",
+              "all_series_config": {
+                "show": {
+                  "legend_value": false
+                },
+                "statistics": {
+                  "type": "mean",
+                  "period": "5minute",
+                  "align": "start"
+                }
+              },
+              "apex_config": {
+                "chart": {
+                  "zoom": {
+                    "enabled": false
+                  },
+                  "height": 260,
+                  "animations": {
+                    "enabled": false
+                  },
+                  "toolbar": {
+                    "show": false
+                  }
+                },
+                "tooltip": {
+                  "shared": true,
+                  "intersect": false,
+                  "hideEmptySeries": false,
+                  "x": {
+                    "format": "dd.MM HH:mm"
+                  }
+                },
+                "annotations": {
+                  "yaxis": [
+                    {
+                      "y": 0,
+                      "yAxisIndex": 0,
+                      "borderColor": "#8796ab",
+                      "borderWidth": 2,
+                      "strokeDashArray": 0,
+                      "label": {
+                        "text": "0 kW",
+                        "borderColor": "#8796ab",
+                        "style": {
+                          "background": "#8796ab",
+                          "color": "#ffffff",
+                          "fontSize": "11px"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "legend": {
+                  "position": "bottom",
+                  "fontSize": "11px"
+                },
+                "dataLabels": {
+                  "enabled": false
+                },
+                "xaxis": {
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                }
+              },
               "yaxis": [
                 {
                   "id": "kw",
@@ -662,82 +726,45 @@
               "series": [
                 {
                   "entity": "sensor.eimo_pv_power",
-                  "name": "Gamyba · kW",
+                  "name": "Gamyba",
+                  "unit": "kW",
                   "yaxis_id": "kw",
                   "color": "#d99a18",
                   "type": "area",
                   "opacity": 0.15,
                   "transform": "return x === null ? null : Number(x) / 1000;",
-                  "stroke_width": 2,
-                  "group_by": {
-                    "func": "avg",
-                    "duration": "5min"
-                  }
+                  "stroke_width": 2
                 },
                 {
                   "entity": "sensor.solis_inverter_1033300254190112_solis_total_consumption_power",
-                  "name": "Vartojimas · kW",
+                  "name": "Vartojimas",
+                  "unit": "kW",
                   "yaxis_id": "kw",
                   "color": "#4789e8",
                   "transform": "return x === null ? null : Number(x) / 1000;",
-                  "stroke_width": 2,
-                  "group_by": {
-                    "func": "avg",
-                    "duration": "5min"
-                  }
+                  "stroke_width": 2
                 },
                 {
                   "entity": "sensor.solis_inverter_1033300254190112_solis_power_grid_total_power",
-                  "name": "Tinklas · importas + / eksportas −",
+                  "name": "Tinklas",
                   "unit": "kW",
                   "yaxis_id": "kw",
                   "color": "#8973cf",
                   "transform": "const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? (v === 0 ? 0 : v * -1 / 1000) : null;",
-                  "stroke_width": 2,
-                  "group_by": {
-                    "func": "avg",
-                    "duration": "5min"
-                  }
+                  "stroke_width": 2
                 },
                 {
                   "entity": "sensor.solis_inverter_1033300254190112_solis_remaining_battery_capacity",
-                  "name": "Baterija · %",
+                  "name": "Baterija",
+                  "unit": "%",
                   "yaxis_id": "soc",
                   "color": "#159b85",
-                  "stroke_width": 2,
-                  "statistics": {
-                    "type": "mean",
-                    "period": "5minute",
-                    "align": "start"
-                  }
+                  "stroke_width": 2
                 }
               ],
               "grid_options": {
                 "columns": "full",
                 "rows": "auto"
-              },
-              "apex_config": {
-                "chart": {
-                  "height": 260,
-                  "animations": {
-                    "enabled": false
-                  },
-                  "toolbar": {
-                    "show": false
-                  }
-                },
-                "legend": {
-                  "position": "bottom",
-                  "fontSize": "11px"
-                },
-                "dataLabels": {
-                  "enabled": false
-                },
-                "xaxis": {
-                  "labels": {
-                    "datetimeUTC": false
-                  }
-                }
               },
               "visibility": [
                 {

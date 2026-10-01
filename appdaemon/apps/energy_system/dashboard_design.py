@@ -365,17 +365,28 @@ def _view(p, title, path, icon, subtitle, sections):
 def _history(p):
     return _chart({"type": "custom:apexcharts-card", "header": {"show": True, "title": "Gamyba, vartojimas, tinklas ir baterija · 24 val."},
         "graph_span": "24h", "update_interval": "2min",
+        "all_series_config": {"show": {"legend_value": False},
+                              "statistics": {"type": "mean", "period": "5minute", "align": "start"}},
+        "apex_config": {
+            "chart": {"zoom": {"enabled": False}},
+            "tooltip": {"shared": True, "intersect": False, "hideEmptySeries": False,
+                        "x": {"format": "dd.MM HH:mm"}},
+            "annotations": {"yaxis": [{"y": 0, "yAxisIndex": 0, "borderColor": "#8796ab",
+                                        "borderWidth": 2, "strokeDashArray": 0,
+                                        "label": {"text": "0 kW", "borderColor": "#8796ab",
+                                                  "style": {"background": "#8796ab", "color": "#ffffff", "fontSize": "11px"}}}]},
+        },
         "yaxis": [{"id": "kw", "decimals": 1}, {"id": "soc", "opposite": True, "min": 0, "max": 100, "decimals": 0}],
         "series": [
-            {"entity": p["pv"], "name": "Gamyba · kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
-             "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
-            {"entity": p["load"], "name": "Vartojimas · kW", "yaxis_id": "kw", "color": COLORS["load"],
-             "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
-            {"entity": p["grid"], "name": "Tinklas · importas + / eksportas −", "unit": "kW", "yaxis_id": "kw", "color": COLORS["grid"],
+            {"entity": p["pv"], "name": "Gamyba", "unit": "kW", "yaxis_id": "kw", "color": COLORS["pv"], "type": "area", "opacity": .15,
+             "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2},
+            {"entity": p["load"], "name": "Vartojimas", "unit": "kW", "yaxis_id": "kw", "color": COLORS["load"],
+             "transform": "return x === null ? null : Number(x) / 1000;", "stroke_width": 2},
+            {"entity": p["grid"], "name": "Tinklas", "unit": "kW", "yaxis_id": "kw", "color": COLORS["grid"],
              "transform": f"const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? (v === 0 ? 0 : v * {p['grid_sign']} / 1000) : null;",
-             "stroke_width": 2, "group_by": {"func": "avg", "duration": "5min"}},
-            {"entity": p["soc"], "name": "Baterija · %", "yaxis_id": "soc", "color": COLORS["battery"],
-             "stroke_width": 2, "statistics": {"type": "mean", "period": "5minute", "align": "start"}},
+             "stroke_width": 2},
+            {"entity": p["soc"], "name": "Baterija", "unit": "%", "yaxis_id": "soc", "color": COLORS["battery"],
+             "stroke_width": 2},
         ]})
 
 
