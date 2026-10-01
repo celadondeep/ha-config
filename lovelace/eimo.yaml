@@ -647,7 +647,7 @@
               "graph_span": "24h",
               "update_interval": "2min",
               "card_mod": {
-                "style": "\n.apexcharts-tooltip {\n  padding: 0 24px !important;\n  background: transparent !important;\n  border: 0 !important;\n  box-shadow: none !important;\n  border-radius: 0;\n  overflow: visible;\n  isolation: isolate;\n  color: var(--primary-text-color) !important;\n}\n.apexcharts-tooltip::before {\n  content: '';\n  position: absolute;\n  inset: 0 24px;\n  z-index: -1;\n  border: 1px solid var(--divider-color);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--card-background-color, #fff) 78%, transparent);\n  box-shadow: 0 4px 14px rgba(0, 0, 0, .12);\n  backdrop-filter: blur(3px);\n  -webkit-backdrop-filter: blur(3px);\n}\n.apexcharts-tooltip .apexcharts-tooltip-title {\n  background: transparent !important;\n  border-bottom: 1px solid var(--divider-color) !important;\n  font-size: 11px !important;\n  padding: 6px;\n  margin-bottom: 2px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text {\n  font-size: 11px !important;\n}\n.apexcharts-tooltip .apexcharts-tooltip-series-group {\n  padding: 0 6px 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-y-group {\n  padding: 4px 0 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text-y-value {\n  margin-left: 4px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker {\n  width: 12px;\n  height: 12px;\n  line-height: 12px;\n  margin-right: 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker::before {\n  font-size: 20px;\n  line-height: 12px;\n}\n"
+                "style": "\n.apexcharts-tooltip {\n  padding: 0 24px !important;\n  background: transparent !important;\n  border: 0 !important;\n  box-shadow: none !important;\n  border-radius: 0;\n  overflow: visible;\n  isolation: isolate;\n  color: var(--primary-text-color) !important;\n}\n.apexcharts-tooltip::before {\n  content: '';\n  position: absolute;\n  inset: 0 24px;\n  z-index: -1;\n  border: 1px solid var(--divider-color);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--card-background-color, #fff) 78%, transparent);\n  box-shadow: 0 4px 14px rgba(0, 0, 0, .12);\n  backdrop-filter: blur(3px);\n  -webkit-backdrop-filter: blur(3px);\n}\n.apexcharts-tooltip .apexcharts-tooltip-title {\n  background: transparent !important;\n  border-bottom: 1px solid var(--divider-color) !important;\n  font-size: 11px !important;\n  padding: 6px;\n  margin-bottom: 2px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text {\n  font-size: 11px !important;\n}\n.apexcharts-tooltip .apexcharts-tooltip-series-group {\n  padding: 0 6px 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-y-group {\n  padding: 4px 0 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-text-y-value {\n  margin-left: 4px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker {\n  width: 12px;\n  height: 12px;\n  line-height: 12px;\n  margin-right: 3px;\n}\n.apexcharts-tooltip .apexcharts-tooltip-marker::before {\n  font-size: 20px;\n  line-height: 12px;\n}\n.apexcharts-xaxistooltip {\n  padding: 1px 3px !important;\n  min-width: 0;\n  line-height: 11px;\n}\n.apexcharts-xaxistooltip-text {\n  font-size: 10px !important;\n  line-height: 11px;\n}\n.apexcharts-xaxistooltip::before {\n  border-width: 4px;\n  margin-left: -4px;\n}\n.apexcharts-xaxistooltip::after {\n  border-width: 3px;\n  margin-left: -3px;\n}\n"
               },
               "all_series_config": {
                 "show": {
@@ -664,6 +664,10 @@
                   "zoom": {
                     "enabled": false
                   },
+                  "events": {
+                    "mounted": "EVAL:function(chartContext) {\n  const w = chartContext?.w, root = w?.globals?.dom?.baseEl;\n  if (!root) return;\n  const axes = w.config.yaxis || [];\n  const isPower = a => a?.id === 'kw' || a?.title?.text === 'kW';\n  const index = axes.findIndex(a => isPower(a) && a.show !== false);\n  if (index < 0) return;\n  const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),\n                          ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);\n  const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));\n  const axis = root.querySelector(`.apexcharts-yaxis[rel=\"${index}\"]`);\n  if (!axis) return;\n  axis.style.visibility = visible ? 'visible' : 'hidden';\n  root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {\n    el.style.visibility = visible ? 'visible' : 'hidden';\n  });\n  const labels = axis.querySelector('.apexcharts-yaxis-texts-g');\n  const unit = axis.querySelector('.apexcharts-yaxis-title-text');\n  if (!visible || !labels || !unit) return;\n  const bounds = labels.getBBox();\n  if (!(bounds.width > 0)) return;\n  const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);\n  unit.removeAttribute('transform');\n  unit.setAttribute('text-anchor', 'middle');\n  unit.setAttribute('x', x);\n  unit.setAttribute('y', y);\n  unit.querySelectorAll('tspan').forEach(el => {\n    el.setAttribute('x', x);\n    el.setAttribute('y', y);\n  });\n}",
+                    "updated": "EVAL:function(chartContext) {\n  const w = chartContext?.w, root = w?.globals?.dom?.baseEl;\n  if (!root) return;\n  const axes = w.config.yaxis || [];\n  const isPower = a => a?.id === 'kw' || a?.title?.text === 'kW';\n  const index = axes.findIndex(a => isPower(a) && a.show !== false);\n  if (index < 0) return;\n  const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),\n                          ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);\n  const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));\n  const axis = root.querySelector(`.apexcharts-yaxis[rel=\"${index}\"]`);\n  if (!axis) return;\n  axis.style.visibility = visible ? 'visible' : 'hidden';\n  root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {\n    el.style.visibility = visible ? 'visible' : 'hidden';\n  });\n  const labels = axis.querySelector('.apexcharts-yaxis-texts-g');\n  const unit = axis.querySelector('.apexcharts-yaxis-title-text');\n  if (!visible || !labels || !unit) return;\n  const bounds = labels.getBBox();\n  if (!(bounds.width > 0)) return;\n  const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);\n  unit.removeAttribute('transform');\n  unit.setAttribute('text-anchor', 'middle');\n  unit.setAttribute('x', x);\n  unit.setAttribute('y', y);\n  unit.querySelectorAll('tspan').forEach(el => {\n    el.setAttribute('x', x);\n    el.setAttribute('y', y);\n  });\n}"
+                  },
                   "height": 260,
                   "animations": {
                     "enabled": false
@@ -672,12 +676,28 @@
                     "show": false
                   }
                 },
+                "grid": {
+                  "padding": {
+                    "top": 14
+                  }
+                },
+                "xaxis": {
+                  "tooltip": {
+                    "formatter": "EVAL:function(value) {\n  const date = new Date(value);\n  if (!Number.isFinite(date.getTime())) return '';\n  const pad = n => String(n).padStart(2, '0');\n  return pad(date.getHours()) + ':' + pad(date.getMinutes());\n}\n",
+                    "style": {
+                      "fontSize": "10px"
+                    }
+                  },
+                  "labels": {
+                    "datetimeUTC": false
+                  }
+                },
                 "tooltip": {
                   "shared": true,
                   "intersect": false,
                   "hideEmptySeries": false,
                   "x": {
-                    "format": "dd.MM HH:mm"
+                    "format": "yyyy.MM.dd HH:mm"
                   }
                 },
                 "annotations": {
@@ -697,11 +717,6 @@
                 },
                 "dataLabels": {
                   "enabled": false
-                },
-                "xaxis": {
-                  "labels": {
-                    "datetimeUTC": false
-                  }
                 }
               },
               "yaxis": [
@@ -770,7 +785,8 @@
                   "unit": "%",
                   "yaxis_id": "soc",
                   "color": "#159b85",
-                  "stroke_width": 2
+                  "stroke_width": 2,
+                  "float_precision": 0
                 }
               ],
               "grid_options": {

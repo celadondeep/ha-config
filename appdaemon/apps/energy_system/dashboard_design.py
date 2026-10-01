@@ -62,6 +62,65 @@ HISTORY_TOOLTIP_CSS = """
   font-size: 20px;
   line-height: 12px;
 }
+.apexcharts-xaxistooltip {
+  padding: 1px 3px !important;
+  min-width: 0;
+  line-height: 11px;
+}
+.apexcharts-xaxistooltip-text {
+  font-size: 10px !important;
+  line-height: 11px;
+}
+.apexcharts-xaxistooltip::before {
+  border-width: 4px;
+  margin-left: -4px;
+}
+.apexcharts-xaxistooltip::after {
+  border-width: 3px;
+  margin-left: -3px;
+}
+"""
+
+# Keep the shared power axis while any power curve is visible. The unit follows
+# the rendered label bounds on mount, legend changes, refresh and resize.
+HISTORY_AXIS_JS = r"""EVAL:function(chartContext) {
+  const w = chartContext?.w, root = w?.globals?.dom?.baseEl;
+  if (!root) return;
+  const axes = w.config.yaxis || [];
+  const isPower = a => a?.id === 'kw' || a?.title?.text === 'kW';
+  const index = axes.findIndex(a => isPower(a) && a.show !== false);
+  if (index < 0) return;
+  const hidden = new Set([...(w.globals.collapsedSeriesIndices || []),
+                          ...(w.globals.ancillaryCollapsedSeriesIndices || [])]);
+  const visible = (w.globals.seriesYAxisReverseMap || []).some((a, i) => isPower(axes[a]) && !hidden.has(i));
+  const axis = root.querySelector(`.apexcharts-yaxis[rel="${index}"]`);
+  if (!axis) return;
+  axis.style.visibility = visible ? 'visible' : 'hidden';
+  root.querySelectorAll('.apexcharts-yaxis-annotations').forEach(el => {
+    el.style.visibility = visible ? 'visible' : 'hidden';
+  });
+  const labels = axis.querySelector('.apexcharts-yaxis-texts-g');
+  const unit = axis.querySelector('.apexcharts-yaxis-title-text');
+  if (!visible || !labels || !unit) return;
+  const bounds = labels.getBBox();
+  if (!(bounds.width > 0)) return;
+  const x = String(bounds.x + bounds.width / 2), y = String(bounds.y - 6);
+  unit.removeAttribute('transform');
+  unit.setAttribute('text-anchor', 'middle');
+  unit.setAttribute('x', x);
+  unit.setAttribute('y', y);
+  unit.querySelectorAll('tspan').forEach(el => {
+    el.setAttribute('x', x);
+    el.setAttribute('y', y);
+  });
+}"""
+
+HISTORY_TIME_JS = """EVAL:function(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
 """
 
 # Scoped inside button-card's shadow root. Uses HA colors in both theme modes.
@@ -425,9 +484,12 @@ def _history(p):
         "all_series_config": {"show": {"legend_value": False},
                               "statistics": {"type": "mean", "period": "5minute", "align": "start"}},
         "apex_config": {
-            "chart": {"zoom": {"enabled": False}},
+            "chart": {"zoom": {"enabled": False},
+                      "events": {"mounted": HISTORY_AXIS_JS, "updated": HISTORY_AXIS_JS}},
+            "grid": {"padding": {"top": 14}},
+            "xaxis": {"tooltip": {"formatter": HISTORY_TIME_JS, "style": {"fontSize": "10px"}}},
             "tooltip": {"shared": True, "intersect": False, "hideEmptySeries": False,
-                        "x": {"format": "dd.MM HH:mm"}},
+                        "x": {"format": "yyyy.MM.dd HH:mm"}},
             "annotations": {"yaxis": [{"y": 0, "yAxisIndex": 0, "borderColor": "#000000",
                                         "borderWidth": .5, "strokeDashArray": 0}]},
         },
@@ -446,7 +508,7 @@ def _history(p):
              "transform": f"const v = x === null ? NaN : Number(x); return Number.isFinite(v) ? (v === 0 ? 0 : v * {p['grid_sign']} / 1000) : null;",
              "stroke_width": 2},
             {"entity": p["soc"], "name": "Baterija", "unit": "%", "yaxis_id": "soc", "color": COLORS["battery"],
-             "stroke_width": 2},
+             "stroke_width": 2, "float_precision": 0},
         ]})
 
 
