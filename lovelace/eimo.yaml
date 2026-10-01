@@ -738,7 +738,12 @@
                   "opposite": true,
                   "min": 0,
                   "max": 100,
-                  "decimals": 0
+                  "decimals": 0,
+                  "apex_config": {
+                    "labels": {
+                      "formatter": "EVAL:function(value) { return Number.isFinite(value) ? String(Math.round(value / 5) * 5) : ''; }"
+                    }
+                  }
                 }
               ],
               "series": [
